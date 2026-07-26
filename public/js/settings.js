@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 import { getSettings, updateSettings } from './settings-state.js';
 import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
+import { isOnlineFallbackActive } from './basemap.js';
 
 async function authedFetch(container, url, options) {
   const response = await authorizedFetch(url, options);
@@ -92,8 +93,15 @@ function renderSettingsForm(container) {
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="map" style="display:none">
       <fieldset class="mlpr-settings-group">
-        <legend>${t('layers')}</legend>
-        <label><input type="checkbox" id="mlpr-layer-basemap" ${settings.layers.basemap ? 'checked' : ''}> ${t('basemap')}</label>
+        <legend>${t('basemap')}</legend>
+        <label><input type="radio" name="mlpr-basemap-mode" value="online" ${settings.basemapMode === 'online' ? 'checked' : ''}> ${t('basemapOnline')}</label>
+        <label><input type="radio" name="mlpr-basemap-mode" value="offline" ${settings.basemapMode === 'offline' ? 'checked' : ''}> ${t('basemapOffline')}</label>
+        ${
+          settings.basemapMode === 'online' && isOnlineFallbackActive()
+            ? `<p class="mlpr-home-status">${t('basemapFallbackNotice')}</p>`
+            : ''
+        }
+        <label><input type="checkbox" id="mlpr-layer-basemap" ${settings.layers.basemap ? 'checked' : ''}> ${t('showBasemap')}</label>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
@@ -208,6 +216,10 @@ function wireDisplaySettings(container) {
   container.querySelector('#mlpr-layer-basemap').addEventListener('change', (event) => {
     updateSettings({ layers: { ...getSettings().layers, basemap: event.target.checked } });
   });
+
+  for (const input of container.querySelectorAll('input[name="mlpr-basemap-mode"]')) {
+    input.addEventListener('change', (event) => updateSettings({ basemapMode: event.target.value }));
+  }
 
   const trailsEnabledEl = container.querySelector('#mlpr-trails-enabled');
   const trailModeGroup = container.querySelector('#mlpr-trail-mode-group');

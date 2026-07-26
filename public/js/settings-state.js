@@ -5,6 +5,7 @@ const defaults = {
   altitudeFilterMin: null,
   altitudeFilterMax: null,
   layers: { basemap: true },
+  basemapMode: 'online', // 'online' (OpenFreeMap) | 'offline' (Natural Earth)
   trailsEnabled: true,
   trailMode: 'click', // 'click' | 'all'
 };
