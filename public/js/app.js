@@ -47,9 +47,10 @@ const pendingMessages = [];
 // The effective mode actually rendered (may differ from getSettings().basemapMode
 // while a same-session fallback to offline is active — see basemap.js).
 let effectiveBasemapMode = null;
-// The basemapMode setting value switchBasemap() was last called with, so the
-// settings-change listener only reacts when that specific setting changes.
+// The basemapMode/mapTheme setting values switchBasemap() was last called
+// with, so the settings-change listener only reacts when either changes.
 let lastRequestedBasemapMode = null;
+let lastRequestedMapTheme = null;
 
 function ensureTrailLayer() {
   if (map.getSource(TRAIL_SOURCE_ID)) return;
@@ -83,11 +84,13 @@ function onBasemapEffectiveModeReady(effective) {
   updateAttributionVisibility(effective);
 }
 
-async function switchBasemap(mode) {
+async function switchBasemap(mode, theme) {
   lastRequestedBasemapMode = mode;
+  lastRequestedMapTheme = theme;
   await applyBasemapMode(
     map,
     mode,
+    theme,
     {
       onStyleLoaded: onBasemapEffectiveModeReady,
       onFallback: onBasemapEffectiveModeReady,
@@ -97,7 +100,8 @@ async function switchBasemap(mode) {
 }
 
 map.on('load', async () => {
-  await switchBasemap(getSettings().basemapMode);
+  const initialSettings = getSettings();
+  await switchBasemap(initialSettings.basemapMode, initialSettings.mapTheme);
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
@@ -124,9 +128,9 @@ function passesAltitudeFilter(aircraft) {
 }
 
 onSettingsChange(() => {
-  const { basemapMode } = getSettings();
-  if (basemapMode !== lastRequestedBasemapMode) {
-    switchBasemap(basemapMode);
+  const { basemapMode, mapTheme } = getSettings();
+  if (basemapMode !== lastRequestedBasemapMode || mapTheme !== lastRequestedMapTheme) {
+    switchBasemap(basemapMode, mapTheme);
   }
   applyLayerVisibility();
   for (const state of aircraftState.values()) {
