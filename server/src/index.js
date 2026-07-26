@@ -90,6 +90,20 @@ async function main() {
 
   setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
 
+  async function shutdown(signal) {
+    app.log.info(`received ${signal}, shutting down`);
+    try {
+      flushDailyStats();
+    } catch (err) {
+      app.log.error(err, 'daily stats flush on shutdown failed');
+    }
+    await app.close();
+    process.exit(0);
+  }
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
+
   await app.listen({ port: PORT, host: HOST });
 }
 

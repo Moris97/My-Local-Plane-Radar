@@ -1,0 +1,18 @@
+[Unit]
+Description=My Local Plane Radar
+After=network.target readsb.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/%i/My-Local-Plane-Radar
+ExecStart=/usr/bin/node server/src/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_OPTIONS=--max-old-space-size=192
+MemoryMax=300M
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

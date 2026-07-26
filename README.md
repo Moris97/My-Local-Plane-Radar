@@ -6,15 +6,18 @@ MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wied
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy) — without touching readsb itself.
 
-**Status: Stage 5 of the build plan.** Live map with delta updates, signal-loss
+**Status: Stage 6 of the build plan.** Live map with delta updates, signal-loss
 fading, altitude-colored trails, a basemap, a bottom-bar UI (List/Stats/
 Settings), receiver stats with a 24h history chart, SQLite-backed daily
-aggregates, and a first cut of the notification engine (squawk 7500/7600/7700,
-first-time-seen aircraft, new range record — delivered via ntfy) are in place.
-See [CLAUDE.md](./CLAUDE.md) for the architecture and the staged build plan,
-and [TODO.md](./TODO.md) for what's explicitly deferred.
+aggregates, a notification engine (squawk 7500/7600/7700, first-time-seen
+aircraft, new range record — delivered via ntfy), and a systemd service for
+production are in place. See [CLAUDE.md](./CLAUDE.md) for the architecture
+and the staged build plan, and [TODO.md](./TODO.md) for what's explicitly
+deferred.
 
 ## Running it
+
+### Development (any machine)
 
 ```
 npm install
@@ -23,6 +26,31 @@ npm start                    # MLPR_PORT (default 1090), MLPR_SOURCE=file|http|r
 ```
 
 Then open `http://<host>:1090/`.
+
+### Production (Raspberry Pi, as a systemd service)
+
+Requires Node.js >= 22.13 already installed from
+[NodeSource](https://github.com/nodesource/distributions) — **not**
+`apt install nodejs` (Debian Trixie's own package is too old). `install.sh`
+detects this and aborts with instructions if it's missing or too old.
+
+```
+git clone https://github.com/Moris97/My-Local-Plane-Radar.git
+cd My-Local-Plane-Radar
+./scripts/install.sh
+```
+
+This installs production dependencies only (skips Playwright), fetches the
+basemap if missing, and installs+enables a `mlpr@<your-user>.service` systemd
+unit (`systemd/mlpr@.service`) that starts on boot, restarts on crash, and is
+capped at `MemoryMax=300M` / `--max-old-space-size=192` so a leak can't starve
+readsb via the OOM killer.
+
+```
+sudo systemctl status mlpr@$(whoami).service   # check it's running
+journalctl -u mlpr@$(whoami).service -f        # follow logs
+git pull && sudo systemctl restart mlpr@$(whoami).service   # update
+```
 
 ## Why
 

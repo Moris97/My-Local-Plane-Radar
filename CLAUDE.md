@@ -255,6 +255,25 @@ aircraft currently in range will fire a "first seen" notification. Not fixed
 — mention it if the user is surprised by a notification burst right after
 first setup.
 
+## Production deployment (Stage 6)
+
+`scripts/install.sh` + `systemd/mlpr@.service` — a templated unit (`User=%i`,
+`WorkingDirectory=/home/%i/My-Local-Plane-Radar`), instantiated as
+`mlpr@<username>.service`. The install script detects too-old/missing Node
+and **aborts with NodeSource instructions rather than auto-installing** (that
+needs the user's own sudo password, which nothing here can supply), runs
+`npm ci --omit=dev` (skips the Playwright devDependency — it's ~300+MB and
+dev-only, never needed on the Pi), fetches the basemap if missing, then
+installs/enables the unit (needs sudo — expected, this is a script the user
+runs themselves, not a web endpoint).
+
+`index.js` handles `SIGTERM`/`SIGINT` (what `systemctl stop`/`restart` send):
+flushes the in-memory daily-stats accumulator to SQLite before exiting, so a
+routine restart doesn't lose up to 45s of that day's aggregate. This is the
+one piece of "current state" worth saving on shutdown — live aircraft state
+staying RAM-only and getting dropped on restart (hard rule 6) is still fine
+and unchanged.
+
 ## How we work
 
 - Small, vertical slices — always something working end-to-end, never "all
