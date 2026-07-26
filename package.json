@@ -1,0 +1,20 @@
+{
+  "name": "my-local-plane-radar",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Self-hosted web interface for a readsb/ADS-B receiver on Raspberry Pi: live map, receiver stats, and a notification engine.",
+  "license": "MIT",
+  "author": "Maurycy Kaczmarek",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Moris97/My-Local-Plane-Radar.git"
+  },
+  "homepage": "https://github.com/Moris97/My-Local-Plane-Radar",
+  "bugs": {
+    "url": "https://github.com/Moris97/My-Local-Plane-Radar/issues"
+  }
+}

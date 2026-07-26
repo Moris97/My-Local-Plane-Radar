@@ -1,0 +1,9 @@
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+*.pmtiles
+data/
+fixtures/*.json
+.env
+*.log
