@@ -44,6 +44,32 @@ html, body {
   cursor: pointer;
 }
 
+#mlpr-attribution {
+  position: fixed;
+  right: 6px;
+  bottom: calc(var(--bottom-bar-height) + 4px);
+  z-index: 25;
+  font: 10px/1.4 system-ui, sans-serif;
+  background: rgba(5, 7, 10, 0.6);
+  padding: 1px 6px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+#mlpr-attribution a {
+  color: #6f93ab;
+  text-decoration: none;
+  pointer-events: auto;
+}
+
+#mlpr-attribution a:hover {
+  color: #bcd7e8;
+}
+
+#mlpr-osm-attribution.hidden {
+  display: none;
+}
+
 #bottom-bar {
   position: fixed;
   left: 0;
