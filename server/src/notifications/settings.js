@@ -3,7 +3,8 @@ import { getConfig, setConfig, getConfigJSON, setConfigJSON } from '../db.js';
 
 const SETTINGS_KEY = 'notificationSettings';
 const NTFY_TOPIC_KEY = 'ntfyTopic';
-const TOPIC_CHARSET = 'abcdefghijklmnopqrstuvwxyz0123456789';
+// No 0/o or 1/l/i — those are the pairs people mistype when copying a code by hand.
+const TOPIC_CHARSET = '23456789abcdefghjkmnpqrstuvwxyz';
 const TOPIC_LENGTH = 8;
 
 const DEFAULT_SETTINGS = {

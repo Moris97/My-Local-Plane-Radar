@@ -238,10 +238,12 @@ body) — not the header-based API, which breaks on non-ASCII content.
 `priority` must be a **number 1–5**, not the string values ("default" etc.)
 the header API accepts.
 
-**ntfy topic**: an 8-character random alphanumeric string, auto-generated on
-first use and persisted in `config`, shown in Settings with "install ntfy,
-enter this as the topic." Regenerable. Never hardcode or log a real topic
-value anywhere persistent — whoever knows it can read the notifications.
+**ntfy topic**: an 8-character random string, auto-generated on first use and
+persisted in `config`, shown in Settings with "install ntfy, enter this as
+the topic." Regenerable. The charset deliberately excludes `0/o` and `1/l/i`
+(found via a real user mistyping a code that had one) — don't add them back.
+Never hardcode or log a real topic value anywhere persistent — whoever knows
+it can read the notifications.
 
 Deferred to later (see `TODO.md`): watched hex/registration list, radius-from-
 home / altitude-threshold rule. Web Push is deferred for good (needs a secure
