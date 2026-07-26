@@ -105,6 +105,12 @@ function renderSettingsForm(container) {
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
+        <legend>${t('mapAppearance')}</legend>
+        <label><input type="radio" name="mlpr-map-theme" value="dark" ${settings.mapTheme === 'dark' ? 'checked' : ''}> ${t('mapThemeDark')}</label>
+        <label><input type="radio" name="mlpr-map-theme" value="light" ${settings.mapTheme === 'light' ? 'checked' : ''}> ${t('mapThemeLight')}</label>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
         <legend>${t('trails')}</legend>
         <label><input type="checkbox" id="mlpr-trails-enabled" ${settings.trailsEnabled ? 'checked' : ''}> ${t('showTrails')}</label>
         <div id="mlpr-trail-mode-group" style="${settings.trailsEnabled ? '' : 'display:none'}">
@@ -219,6 +225,10 @@ function wireDisplaySettings(container) {
 
   for (const input of container.querySelectorAll('input[name="mlpr-basemap-mode"]')) {
     input.addEventListener('change', (event) => updateSettings({ basemapMode: event.target.value }));
+  }
+
+  for (const input of container.querySelectorAll('input[name="mlpr-map-theme"]')) {
+    input.addEventListener('change', (event) => updateSettings({ mapTheme: event.target.value }));
   }
 
   const trailsEnabledEl = container.querySelector('#mlpr-trails-enabled');

@@ -6,6 +6,7 @@ const defaults = {
   altitudeFilterMax: null,
   layers: { basemap: true },
   basemapMode: 'online', // 'online' (OpenFreeMap) | 'offline' (Natural Earth)
+  mapTheme: 'dark', // 'dark' | 'light' — map style only, not the app's own UI theme
   trailsEnabled: true,
   trailMode: 'click', // 'click' | 'all'
 };
