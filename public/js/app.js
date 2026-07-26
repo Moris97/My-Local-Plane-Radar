@@ -6,7 +6,7 @@ import {
   noteAircraft,
   removeAircraft,
   clearAircraft,
-  noteMessagesCounter,
+  noteLiveStats,
   setSelectRequestHandler,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
@@ -291,10 +291,12 @@ function handleSnapshot(snapshot) {
     for (const aircraft of snapshot.updated) {
       applyAircraftUpdate(aircraft);
     }
-  }
-
-  if (typeof snapshot.messages === 'number') {
-    noteMessagesCounter(snapshot.messages, Date.now());
+  } else if (snapshot.type === 'stats') {
+    noteLiveStats({
+      aircraftCount: snapshot.aircraftCount,
+      messagesPerSec: snapshot.messagesPerSec,
+      maxRangeKm: snapshot.maxRangeKm,
+    });
   }
 }
 

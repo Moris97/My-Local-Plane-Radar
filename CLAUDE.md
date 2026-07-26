@@ -32,8 +32,11 @@ blur it, even to "borrow just one function."
   machine — same version on both sides).
 - `node:sqlite` works **without** the `--experimental-sqlite` flag at this
   version. Do not add that flag anywhere (code or systemd unit).
-- `node:sqlite` prints an `ExperimentalWarning` on import — this is expected,
-  leave it. Do not globally suppress warnings with `--no-warnings`.
+- Confirmed on Node 24.18: no `ExperimentalWarning` at all, no flag needed.
+  If an older/different patch version does print one, that's expected —
+  don't globally suppress warnings with `--no-warnings` to hide it.
+- `data/mlpr.db` path is overridable via `MLPR_DB_PATH` (used by tests to get
+  an isolated temp database instead of touching the real one).
 - The Pi's systemd unit must invoke Node from **`/usr/bin/node`** (NodeSource
   package), not a version manager (no nvm/fnm on the Pi).
 - **Debian Trixie's `apt` only has Node 20.19**, which is too old. The install
@@ -94,6 +97,31 @@ optional**, many are frequently absent:
 Do not invent fields that aren't listed here. If something is needed that
 isn't confirmed above, ask — verify against docs or a live file rather than
 guessing.
+
+### `receiver.json` and `stats.json` (siblings of `aircraft.json`)
+
+Each `Source` also exposes `fetchReceiverInfo()` and `fetchStats()`, resolved
+as sibling paths/URLs next to the configured `aircraft.json` location.
+`ReplaySource` returns `null` for both (no synthetic receiver/stats data).
+
+- `receiver.json` rarely changes — read **once at startup**. Fields we use:
+  `lat`, `lon` (receiver position — see home-location resolution below),
+  `version`, `refresh`.
+- `stats.json` is rewritten by readsb roughly once a minute — poll it every
+  ~15s and only act when `last1min.end` advances (see `stats-history.js`).
+  Fields we use: top-level `aircraft_with_pos` + `aircraft_without_pos` (live
+  aircraft count), `last1min.messages` (messages/min), `total.max_distance`
+  (all-time max range, **in meters** — convert to km). readsb already computes
+  max range itself; don't reimplement distance math for this.
+
+### Home-location resolution (`server/src/home.js`)
+
+Effective home = manual override (stored in the SQLite `config` table) if
+set, else the `lat`/`lon` auto-detected from `receiver.json` at startup, else
+`null`. Exposed via `GET`/`PUT /api/settings`. **Never hardcode real receiver
+coordinates anywhere in code, tests, commits, or this file** — they're the
+user's real home location. Use placeholder values (e.g. `50.0, 20.0`) in any
+example/test data.
 
 ## License policy
 

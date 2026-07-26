@@ -6,10 +6,12 @@ MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wied
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy) — without touching readsb itself.
 
-**Status: Stage 3 of the build plan.** Live map with delta updates, signal-loss
-fading, altitude-colored trails, a basemap, and a bottom-bar UI (List/Stats/
-Settings) are in place. Notifications and persistence are still ahead — see
-[CLAUDE.md](./CLAUDE.md) for the architecture and the staged build plan.
+**Status: Stage 4 of the build plan.** Live map with delta updates, signal-loss
+fading, altitude-colored trails, a basemap, a bottom-bar UI (List/Stats/
+Settings), receiver stats (from readsb's own `stats.json`, including a
+24h history chart) and SQLite-backed daily aggregates are in place. The
+notification engine is still ahead — see [CLAUDE.md](./CLAUDE.md) for the
+architecture and the staged build plan.
 
 ## Running it
 

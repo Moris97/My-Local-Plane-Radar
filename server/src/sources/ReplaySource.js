@@ -39,4 +39,12 @@ export class ReplaySource {
       return null;
     }
   }
+
+  async fetchReceiverInfo() {
+    return null;
+  }
+
+  async fetchStats() {
+    return null;
+  }
 }

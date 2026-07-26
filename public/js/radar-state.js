@@ -1,5 +1,5 @@
 const liveAircraft = new Map(); // hex -> latest normalized aircraft
-let messagesCounter = null; // { value, atMs }
+let liveStats = { aircraftCount: 0, messagesPerSec: null, maxRangeKm: null };
 let selectRequestHandler = null;
 const listeners = new Set();
 
@@ -22,13 +22,13 @@ export function getLiveAircraft() {
   return Array.from(liveAircraft.values());
 }
 
-export function noteMessagesCounter(value, atMs) {
-  messagesCounter = { value, atMs };
+export function noteLiveStats(stats) {
+  liveStats = stats;
   notify();
 }
 
-export function getMessagesCounter() {
-  return messagesCounter;
+export function getLiveStats() {
+  return liveStats;
 }
 
 export function setSelectRequestHandler(fn) {
