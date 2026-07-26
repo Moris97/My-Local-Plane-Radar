@@ -1,6 +1,6 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor } from './aircraft-icon.js';
 import { addBasemapLayers, BASEMAP_LAYER_IDS } from './basemap.js';
-import { recordPosition, clearHistory, trailFeaturesFor } from './trail.js';
+import { recordPosition, clearHistory, trailFeaturesFor, seedHistory } from './trail.js';
 import { t } from './i18n.js';
 import {
   noteAircraft,
@@ -16,15 +16,14 @@ const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
 
 const FADE_START_MS = 3000;
-const DISAPPEAR_MS = 10000;
+const FADE_END_MS = 10000;
+const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
-const MAX_GAP_SEGMENTS = 200;
 
 const FRESH_COLOR = [61, 220, 132]; // #3ddc84
 const STALE_COLOR = [224, 49, 49]; // #e03131
 
-const GAP_SOURCE_ID = 'mlpr-gap-segments';
 const TRAIL_SOURCE_ID = 'mlpr-trail';
 
 const map = new maplibregl.Map({
@@ -45,8 +44,10 @@ const map = new maplibregl.Map({
   attributionControl: false,
 });
 
+map.dragRotate.disable();
+map.touchZoomRotate.disableRotation();
+
 const aircraftState = new Map();
-let gapFeatures = [];
 let hasCentered = false;
 let mapReady = false;
 let selectedHex = null;
@@ -55,21 +56,6 @@ const pendingMessages = [];
 
 map.on('load', () => {
   addBasemapLayers(map);
-
-  map.addSource(GAP_SOURCE_ID, {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] },
-  });
-  map.addLayer({
-    id: GAP_SOURCE_ID,
-    type: 'line',
-    source: GAP_SOURCE_ID,
-    paint: {
-      'line-color': '#888a8f',
-      'line-width': 2,
-      'line-dasharray': [2, 2],
-    },
-  });
 
   map.addSource(TRAIL_SOURCE_ID, {
     type: 'geojson',
@@ -90,6 +76,7 @@ map.on('load', () => {
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
   }
+  refreshTrailForSettings();
 });
 
 function applyLayerVisibility() {
@@ -97,9 +84,6 @@ function applyLayerVisibility() {
   const basemapVisibility = layers.basemap ? 'visible' : 'none';
   for (const id of BASEMAP_LAYER_IDS) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', basemapVisibility);
-  }
-  if (map.getLayer(TRAIL_SOURCE_ID)) {
-    map.setLayoutProperty(TRAIL_SOURCE_ID, 'visibility', layers.trails ? 'visible' : 'none');
   }
 }
 
@@ -120,6 +104,7 @@ onSettingsChange(() => {
       state.marker.getElement().style.display = passesAltitudeFilter(state.lastAircraft) ? '' : 'none';
     }
   }
+  refreshTrailForSettings();
 });
 
 map.on('click', () => {
@@ -136,10 +121,54 @@ document.addEventListener('click', (event) => {
 function renderTrail() {
   const source = map.getSource(TRAIL_SOURCE_ID);
   if (!source) return;
-  source.setData({
-    type: 'FeatureCollection',
-    features: selectedHex ? trailFeaturesFor(selectedHex) : [],
-  });
+
+  const { trailsEnabled, trailMode } = getSettings();
+  let features = [];
+
+  if (trailsEnabled) {
+    if (trailMode === 'all') {
+      for (const hex of aircraftState.keys()) {
+        features = features.concat(trailFeaturesFor(hex));
+      }
+    } else if (selectedHex) {
+      features = trailFeaturesFor(selectedHex);
+    }
+  }
+
+  source.setData({ type: 'FeatureCollection', features });
+}
+
+async function loadTrailForHex(hex) {
+  try {
+    const response = await fetch(`/api/trails/${hex}`);
+    if (!response.ok) return;
+    seedHistory(hex, await response.json());
+  } catch {
+    // fine — trail just starts empty and builds up live from here
+  }
+}
+
+async function loadAllTrails() {
+  try {
+    const response = await fetch('/api/trails');
+    if (!response.ok) return;
+    const trails = await response.json();
+    for (const [hex, points] of Object.entries(trails)) {
+      seedHistory(hex, points);
+    }
+  } catch {
+    // fine — trails just start empty and build up live from here
+  }
+}
+
+async function refreshTrailForSettings() {
+  const { trailsEnabled, trailMode } = getSettings();
+  if (trailsEnabled && trailMode === 'all') {
+    await loadAllTrails();
+  } else if (trailsEnabled && trailMode === 'click' && selectedHex) {
+    await loadTrailForHex(selectedHex);
+  }
+  renderTrail();
 }
 
 function formatAircraftInfo(aircraft) {
@@ -168,8 +197,12 @@ function showInfoPopup(hex) {
     .addTo(map);
 }
 
-function selectAircraft(hex) {
+async function selectAircraft(hex) {
   selectedHex = hex;
+  const { trailsEnabled, trailMode } = getSettings();
+  if (trailsEnabled && trailMode === 'click') {
+    await loadTrailForHex(hex);
+  }
   renderTrail();
   showInfoPopup(hex);
 }
@@ -199,23 +232,11 @@ function colorForElapsed(elapsedMs) {
   if (elapsedMs <= FADE_START_MS) {
     return `rgb(${FRESH_COLOR.join(',')})`;
   }
-  const t = Math.min(1, (elapsedMs - FADE_START_MS) / (DISAPPEAR_MS - FADE_START_MS));
+  const t = Math.min(1, (elapsedMs - FADE_START_MS) / (FADE_END_MS - FADE_START_MS));
   const r = Math.round(lerp(FRESH_COLOR[0], STALE_COLOR[0], t));
   const g = Math.round(lerp(FRESH_COLOR[1], STALE_COLOR[1], t));
   const b = Math.round(lerp(FRESH_COLOR[2], STALE_COLOR[2], t));
   return `rgb(${r},${g},${b})`;
-}
-
-function addGapSegment(from, to) {
-  gapFeatures.push({
-    type: 'Feature',
-    geometry: { type: 'LineString', coordinates: [from, to] },
-    properties: {},
-  });
-  if (gapFeatures.length > MAX_GAP_SEGMENTS) {
-    gapFeatures = gapFeatures.slice(-MAX_GAP_SEGMENTS);
-  }
-  map.getSource(GAP_SOURCE_ID)?.setData({ type: 'FeatureCollection', features: gapFeatures });
 }
 
 function resetAll() {
@@ -223,8 +244,6 @@ function resetAll() {
     state.marker?.remove();
   }
   aircraftState.clear();
-  gapFeatures = [];
-  map.getSource(GAP_SOURCE_ID)?.setData({ type: 'FeatureCollection', features: [] });
   hasCentered = false;
   deselectAircraft();
   clearAircraft();
@@ -244,9 +263,7 @@ function applyAircraftUpdate(aircraft) {
     aircraftState.set(aircraft.hex, state);
   }
 
-  if (state.goneAt !== null && state.lastLngLat) {
-    addGapSegment(state.lastLngLat, lngLat);
-  }
+  const wasGone = state.goneAt !== null;
 
   if (!state.marker) {
     state.marker = new maplibregl.Marker({ element: createPlaneElement() }).setLngLat(lngLat).addTo(map);
@@ -267,11 +284,18 @@ function applyAircraftUpdate(aircraft) {
   state.lastAircraft = aircraft;
   state.goneAt = null;
 
-  recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now);
+  const { trailsEnabled, trailMode } = getSettings();
+  const shouldTrackTrail = trailsEnabled && (trailMode === 'all' || aircraft.hex === selectedHex);
+  if (shouldTrackTrail) {
+    recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone);
+    if (trailMode === 'all' || aircraft.hex === selectedHex) {
+      renderTrail();
+    }
+  }
+
   noteAircraft(aircraft.hex, aircraft);
 
   if (aircraft.hex === selectedHex) {
-    renderTrail();
     showInfoPopup(aircraft.hex);
   }
 
@@ -316,7 +340,7 @@ setInterval(() => {
 
     const elapsed = now - state.lastUpdateAt;
 
-    if (elapsed >= DISAPPEAR_MS) {
+    if (elapsed >= REMOVE_MS) {
       state.marker?.remove();
       state.marker = null;
       state.goneAt = now;

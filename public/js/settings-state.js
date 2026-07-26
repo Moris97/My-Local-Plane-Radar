@@ -4,7 +4,9 @@ const defaults = {
   units: 'imperial',
   altitudeFilterMin: null,
   altitudeFilterMax: null,
-  layers: { basemap: true, trails: true },
+  layers: { basemap: true },
+  trailsEnabled: true,
+  trailMode: 'click', // 'click' | 'all'
 };
 
 function load() {

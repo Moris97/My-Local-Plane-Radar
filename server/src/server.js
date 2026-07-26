@@ -11,6 +11,7 @@ import { getHistory } from './stats-history.js';
 import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic } from './notifications/settings.js';
 import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
 import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
+import { getTrail, getAllTrails } from './trail-history.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -106,6 +107,10 @@ export async function buildServer() {
   });
 
   app.get('/api/stats/history', async () => getHistory());
+
+  app.get('/api/trails', async () => getAllTrails());
+
+  app.get('/api/trails/:hex', async (request) => getTrail(request.params.hex));
 
   app.get('/api/notifications/settings', { preHandler: requireSettingsAuth }, async () => getNotificationSettings());
 

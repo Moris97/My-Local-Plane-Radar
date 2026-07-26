@@ -1,6 +1,7 @@
 const MAX_HISTORY_POINTS = 300;
+const GAP_COLOR = '#888a8f';
 
-const history = new Map(); // hex -> [{ lngLat, alt, t }]
+const history = new Map(); // hex -> [{ lngLat, alt, t, isGap }]
 
 const ALTITUDE_STOPS = [
   { ft: 0, color: [61, 220, 132] }, // green
@@ -41,13 +42,25 @@ export function colorForAltitude(altitudeFt) {
   return `rgb(${last.color.join(',')})`;
 }
 
-export function recordPosition(hex, lngLat, altitudeFt, timestamp) {
+export function seedHistory(hex, serverPoints) {
+  history.set(
+    hex,
+    serverPoints.map((point) => ({
+      lngLat: [point.lon, point.lat],
+      alt: point.onGround ? 0 : point.altBaro,
+      t: point.t,
+      isGap: false,
+    })),
+  );
+}
+
+export function recordPosition(hex, lngLat, altitudeFt, timestamp, isGap = false) {
   let points = history.get(hex);
   if (!points) {
     points = [];
     history.set(hex, points);
   }
-  points.push({ lngLat, alt: altitudeFt, t: timestamp });
+  points.push({ lngLat, alt: altitudeFt, t: timestamp, isGap });
   if (points.length > MAX_HISTORY_POINTS) {
     points.splice(0, points.length - MAX_HISTORY_POINTS);
   }
@@ -69,7 +82,7 @@ export function trailFeaturesFor(hex) {
     const b = points[i];
     features.push({
       type: 'Feature',
-      properties: { color: colorForAltitude(b.alt) },
+      properties: { color: b.isGap ? GAP_COLOR : colorForAltitude(b.alt) },
       geometry: { type: 'LineString', coordinates: [a.lngLat, b.lngLat] },
     });
   }

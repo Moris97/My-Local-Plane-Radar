@@ -207,14 +207,41 @@ example/test data.
 - **Dark theme is the default** — this is a radar display, must be readable
   at night without glare. Color theme: green, blue, black.
 - Plane icon rotates to heading. Click shows trail + basic info with a "show
-  more details" button.
+  more details" button (still a stub — see `TODO.md`).
 - Trail color follows altitude, smooth gradient: green below 10,000 ft, blue
   in the 10,000–25,000 ft band, red trending to dark red at 40,000 ft.
 - Signal loss handling: no update for 3s → aircraft starts fading toward red;
-  gone entirely at 10s. If it reappears, the trail segment between last
-  contact and reappearance is drawn grey. After 5 minutes with no update, give
-  up on it returning.
+  fully red by 10s, **stays fully red for another 10s** (found via real use —
+  it was disappearing too abruptly), actually removed at 20s
+  (`FADE_START_MS`/`FADE_END_MS`/`REMOVE_MS` in `app.js`). If it reappears,
+  the trail segment between last contact and reappearance is drawn grey.
+  After 5 minutes with no update, give up on it returning.
 - Type + callsign label appears at appropriate zoom levels.
+- **Trails are opt-in per Settings → Map**: `trailsEnabled` (on/off) +
+  `trailMode` (`click` — only the selected aircraft, default; `all` — every
+  aircraft's trail drawn simultaneously, colors included). The grey
+  signal-loss segment and the altitude-colored segments are the *same*
+  per-hex feature list (`public/js/trail.js`, entries carry an `isGap` flag)
+  rendered into one shared `mlpr-trail` GeoJSON source — there is no separate
+  always-on gap layer anymore. (There used to be one that rendered
+  unconditionally regardless of selection — that was the bug reported and
+  fixed here: grey trails appearing without clicking anything and never
+  clearing.)
+- **Trail history is server-side** (`server/src/trail-history.js`), not just
+  accumulated in the browser tab: an in-memory (never SQLite — hard rule 4 is
+  about exactly this, raw position history) capped ring buffer per hex,
+  recorded every poll tick alongside `state.js`, evicted when a hex leaves
+  `state.js`'s tracked set. `GET /api/trails/:hex` and `GET /api/trails`
+  (bulk, for "all" mode) let a freshly-opened tab show a meaningful trail
+  immediately on click/select, not just from the moment that tab connected.
+  The client (`trail.js`) seeds from these endpoints then keeps extending the
+  trail live from ongoing WS deltas.
+- Right-click-drag map rotate/tilt is disabled
+  (`map.dragRotate.disable()` / `map.touchZoomRotate.disableRotation()`) —
+  the radar stays permanently north-up and flat, per explicit request.
+- Settings panel is organized into four tabs: General (units, password
+  protection), Map (basemap layer, trails, home location), Aircraft (altitude
+  filter, watch list), Notifications.
 
 ## Notification engine
 

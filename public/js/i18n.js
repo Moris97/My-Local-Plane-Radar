@@ -60,6 +60,13 @@ const DICTIONARIES = {
     unlock: 'Unlock',
     wrongPassword: 'Incorrect password',
     somethingWentWrong: 'Something went wrong',
+    tabGeneral: 'General',
+    tabMap: 'Map',
+    tabAircraft: 'Aircraft',
+    tabNotifications: 'Notifications',
+    showTrails: 'Show trails',
+    trailModeClick: 'Only on click',
+    trailModeAll: 'All aircraft',
   },
   pl: {
     list: 'Lista',
@@ -122,6 +129,13 @@ const DICTIONARIES = {
     unlock: 'Odblokuj',
     wrongPassword: 'Nieprawidłowe hasło',
     somethingWentWrong: 'Coś poszło nie tak',
+    tabGeneral: 'Ogólne',
+    tabMap: 'Mapa',
+    tabAircraft: 'Samoloty',
+    tabNotifications: 'Powiadomienia',
+    showTrails: 'Pokazuj szlaki',
+    trailModeClick: 'Tylko po kliknięciu',
+    trailModeAll: 'Wszystkie samoloty',
   },
 };
 

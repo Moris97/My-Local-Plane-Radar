@@ -69,83 +69,107 @@ function renderSettingsForm(container) {
   const settings = getSettings();
 
   container.innerHTML = `
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('units')}</legend>
-      <label><input type="radio" name="mlpr-units" value="imperial" ${settings.units === 'imperial' ? 'checked' : ''}> ${t('imperial')}</label>
-      <label><input type="radio" name="mlpr-units" value="metric" ${settings.units === 'metric' ? 'checked' : ''}> ${t('metric')}</label>
-    </fieldset>
+    <div class="mlpr-settings-tabs">
+      <button type="button" class="mlpr-settings-tab-btn active" data-tab="general">${t('tabGeneral')}</button>
+      <button type="button" class="mlpr-settings-tab-btn" data-tab="map">${t('tabMap')}</button>
+      <button type="button" class="mlpr-settings-tab-btn" data-tab="aircraft">${t('tabAircraft')}</button>
+      <button type="button" class="mlpr-settings-tab-btn" data-tab="notifications">${t('tabNotifications')}</button>
+    </div>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('altitudeFilter')}</legend>
-      <label>${t('hideBelow')} <input type="number" id="mlpr-alt-min" value="${settings.altitudeFilterMin ?? ''}" step="500"> ft</label>
-      <label>${t('hideAbove')} <input type="number" id="mlpr-alt-max" value="${settings.altitudeFilterMax ?? ''}" step="500"> ft</label>
-    </fieldset>
+    <div class="mlpr-settings-tab-panel" data-tab-panel="general">
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('units')}</legend>
+        <label><input type="radio" name="mlpr-units" value="imperial" ${settings.units === 'imperial' ? 'checked' : ''}> ${t('imperial')}</label>
+        <label><input type="radio" name="mlpr-units" value="metric" ${settings.units === 'metric' ? 'checked' : ''}> ${t('metric')}</label>
+      </fieldset>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('layers')}</legend>
-      <label><input type="checkbox" id="mlpr-layer-basemap" ${settings.layers.basemap ? 'checked' : ''}> ${t('basemap')}</label>
-      <label><input type="checkbox" id="mlpr-layer-trails" ${settings.layers.trails ? 'checked' : ''}> ${t('trails')}</label>
-    </fieldset>
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('security')}</legend>
+        <p id="mlpr-security-status" class="mlpr-home-status">…</p>
+        <div id="mlpr-security-form"></div>
+      </fieldset>
+    </div>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('homeLocation')}</legend>
-      <p id="mlpr-home-status" class="mlpr-home-status">…</p>
-      <label>Lat <input type="number" id="mlpr-home-lat" step="0.0001"></label>
-      <label>Lon <input type="number" id="mlpr-home-lon" step="0.0001"></label>
-      <div class="mlpr-home-actions">
-        <button type="button" id="mlpr-home-save">${t('save')}</button>
-        <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
-      </div>
-    </fieldset>
+    <div class="mlpr-settings-tab-panel" data-tab-panel="map" style="display:none">
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('layers')}</legend>
+        <label><input type="checkbox" id="mlpr-layer-basemap" ${settings.layers.basemap ? 'checked' : ''}> ${t('basemap')}</label>
+      </fieldset>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('notifications')}</legend>
-      <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
-      <div class="mlpr-notif-squawk-codes">
-        <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
-        <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
-        <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
-      </div>
-      <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
-      <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
-      <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
-      <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
-      <div class="mlpr-home-actions">
-        <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
-      </div>
-    </fieldset>
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('trails')}</legend>
+        <label><input type="checkbox" id="mlpr-trails-enabled" ${settings.trailsEnabled ? 'checked' : ''}> ${t('showTrails')}</label>
+        <div id="mlpr-trail-mode-group" style="${settings.trailsEnabled ? '' : 'display:none'}">
+          <label><input type="radio" name="mlpr-trail-mode" value="click" ${settings.trailMode === 'click' ? 'checked' : ''}> ${t('trailModeClick')}</label>
+          <label><input type="radio" name="mlpr-trail-mode" value="all" ${settings.trailMode === 'all' ? 'checked' : ''}> ${t('trailModeAll')}</label>
+        </div>
+      </fieldset>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('watchlist')}</legend>
-      <div id="mlpr-watchlist-items"></div>
-      <div class="mlpr-watch-form">
-        <select id="mlpr-watch-type">
-          <option value="type">${t('watchType')}</option>
-          <option value="registration">${t('watchRegistration')}</option>
-          <option value="flight">${t('watchFlight')}</option>
-        </select>
-        <input type="text" id="mlpr-watch-value" list="mlpr-aircraft-types" placeholder="${t('watchValuePlaceholder')}">
-        <datalist id="mlpr-aircraft-types">
-          ${COMMON_AIRCRAFT_TYPES.map((code) => `<option value="${code}">`).join('')}
-        </datalist>
-        <select id="mlpr-watch-alt-op">
-          <option value="">${t('noAltitudeCondition')}</option>
-          <option value="below">${t('below')}</option>
-          <option value="above">${t('above')}</option>
-        </select>
-        <input type="number" id="mlpr-watch-alt-value" placeholder="ft" style="display:none">
-        <button type="button" id="mlpr-watch-add">${t('add')}</button>
-      </div>
-      <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
-    </fieldset>
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('homeLocation')}</legend>
+        <p id="mlpr-home-status" class="mlpr-home-status">…</p>
+        <label>Lat <input type="number" id="mlpr-home-lat" step="0.0001"></label>
+        <label>Lon <input type="number" id="mlpr-home-lon" step="0.0001"></label>
+        <div class="mlpr-home-actions">
+          <button type="button" id="mlpr-home-save">${t('save')}</button>
+          <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
+        </div>
+      </fieldset>
+    </div>
 
-    <fieldset class="mlpr-settings-group">
-      <legend>${t('security')}</legend>
-      <p id="mlpr-security-status" class="mlpr-home-status">…</p>
-      <div id="mlpr-security-form"></div>
-    </fieldset>
+    <div class="mlpr-settings-tab-panel" data-tab-panel="aircraft" style="display:none">
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('altitudeFilter')}</legend>
+        <label>${t('hideBelow')} <input type="number" id="mlpr-alt-min" value="${settings.altitudeFilterMin ?? ''}" step="500"> ft</label>
+        <label>${t('hideAbove')} <input type="number" id="mlpr-alt-max" value="${settings.altitudeFilterMax ?? ''}" step="500"> ft</label>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('watchlist')}</legend>
+        <div id="mlpr-watchlist-items"></div>
+        <div class="mlpr-watch-form">
+          <select id="mlpr-watch-type">
+            <option value="type">${t('watchType')}</option>
+            <option value="registration">${t('watchRegistration')}</option>
+            <option value="flight">${t('watchFlight')}</option>
+          </select>
+          <input type="text" id="mlpr-watch-value" list="mlpr-aircraft-types" placeholder="${t('watchValuePlaceholder')}">
+          <datalist id="mlpr-aircraft-types">
+            ${COMMON_AIRCRAFT_TYPES.map((code) => `<option value="${code}">`).join('')}
+          </datalist>
+          <select id="mlpr-watch-alt-op">
+            <option value="">${t('noAltitudeCondition')}</option>
+            <option value="below">${t('below')}</option>
+            <option value="above">${t('above')}</option>
+          </select>
+          <input type="number" id="mlpr-watch-alt-value" placeholder="ft" style="display:none">
+          <button type="button" id="mlpr-watch-add">${t('add')}</button>
+        </div>
+        <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
+      </fieldset>
+    </div>
+
+    <div class="mlpr-settings-tab-panel" data-tab-panel="notifications" style="display:none">
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('notifications')}</legend>
+        <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
+        <div class="mlpr-notif-squawk-codes">
+          <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
+          <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
+          <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
+        </div>
+        <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
+        <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
+        <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
+        <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
+        <div class="mlpr-home-actions">
+          <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
+        </div>
+      </fieldset>
+    </div>
   `;
 
+  wireTabs(container);
   wireDisplaySettings(container);
   wireHomeLocation(container);
   wireNotificationSettings(container);
@@ -153,6 +177,20 @@ function renderSettingsForm(container) {
   renderSecuritySection(container);
 
   return undefined;
+}
+
+function wireTabs(container) {
+  const buttons = container.querySelectorAll('.mlpr-settings-tab-btn');
+  const panels = container.querySelectorAll('.mlpr-settings-tab-panel');
+
+  for (const btn of buttons) {
+    btn.addEventListener('click', () => {
+      for (const b of buttons) b.classList.toggle('active', b === btn);
+      for (const panel of panels) {
+        panel.style.display = panel.dataset.tabPanel === btn.dataset.tab ? '' : 'none';
+      }
+    });
+  }
 }
 
 function wireDisplaySettings(container) {
@@ -170,9 +208,16 @@ function wireDisplaySettings(container) {
   container.querySelector('#mlpr-layer-basemap').addEventListener('change', (event) => {
     updateSettings({ layers: { ...getSettings().layers, basemap: event.target.checked } });
   });
-  container.querySelector('#mlpr-layer-trails').addEventListener('change', (event) => {
-    updateSettings({ layers: { ...getSettings().layers, trails: event.target.checked } });
+
+  const trailsEnabledEl = container.querySelector('#mlpr-trails-enabled');
+  const trailModeGroup = container.querySelector('#mlpr-trail-mode-group');
+  trailsEnabledEl.addEventListener('change', (event) => {
+    updateSettings({ trailsEnabled: event.target.checked });
+    trailModeGroup.style.display = event.target.checked ? '' : 'none';
   });
+  for (const input of container.querySelectorAll('input[name="mlpr-trail-mode"]')) {
+    input.addEventListener('change', (event) => updateSettings({ trailMode: event.target.value }));
+  }
 }
 
 function wireHomeLocation(container) {

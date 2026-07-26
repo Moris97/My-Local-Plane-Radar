@@ -213,6 +213,30 @@ html, body {
   border-radius: 6px;
 }
 
+.mlpr-settings-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  border-bottom: 1px solid #14212b;
+  overflow-x: auto;
+}
+
+.mlpr-settings-tab-btn {
+  background: none;
+  border: none;
+  color: #7fa3b3;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+}
+
+.mlpr-settings-tab-btn.active {
+  color: #3ddc84;
+  border-bottom-color: #3ddc84;
+}
+
 .mlpr-settings-group {
   border: 1px solid #14212b;
   border-radius: 8px;

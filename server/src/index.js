@@ -8,6 +8,7 @@ import { upsertDailyStats } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { pruneTokens } from './settings-auth.js';
+import { recordPosition, evictStaleTrails } from './trail-history.js';
 
 const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -16,6 +17,7 @@ const STATS_POLL_INTERVAL_MS = 15000;
 const STATS_BROADCAST_INTERVAL_MS = 5000;
 const DAILY_STATS_FLUSH_INTERVAL_MS = 45000;
 const COOLDOWN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+const TRAIL_EVICTION_INTERVAL_MS = 60 * 1000;
 
 const source = createSource();
 
@@ -27,6 +29,15 @@ async function pollOnce(broadcast) {
 
   for (const aircraft of updated) {
     evaluateAircraftRules(aircraft);
+    if (typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+      recordPosition(aircraft.hex, {
+        lat: aircraft.lat,
+        lon: aircraft.lon,
+        altBaro: aircraft.altBaro,
+        onGround: aircraft.onGround,
+        t: Date.now(),
+      });
+    }
   }
 
   broadcast({
@@ -91,6 +102,9 @@ async function main() {
 
   setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => pruneTokens(), COOLDOWN_PRUNE_INTERVAL_MS);
+  setInterval(() => {
+    evictStaleTrails(new Set(getTrackedAircraft().map((aircraft) => aircraft.hex)));
+  }, TRAIL_EVICTION_INTERVAL_MS);
 
   async function shutdown(signal) {
     app.log.info(`received ${signal}, shutting down`);
