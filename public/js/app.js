@@ -1,5 +1,5 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor } from './aircraft-icon.js';
-import { addBasemapLayers, BASEMAP_LAYER_IDS } from './basemap.js';
+import { applyBasemapMode, getBasemapLayerIds, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory } from './trail.js';
 import { t } from './i18n.js';
 import {
@@ -28,17 +28,7 @@ const TRAIL_SOURCE_ID = 'mlpr-trail';
 
 const map = new maplibregl.Map({
   container: 'map',
-  style: {
-    version: 8,
-    sources: {},
-    layers: [
-      {
-        id: 'background',
-        type: 'background',
-        paint: { 'background-color': '#05070a' },
-      },
-    ],
-  },
+  style: BLANK_STYLE,
   center: DEFAULT_CENTER,
   zoom: DEFAULT_ZOOM,
   attributionControl: false,
@@ -54,9 +44,15 @@ let selectedHex = null;
 let activePopup = null;
 const pendingMessages = [];
 
-map.on('load', () => {
-  addBasemapLayers(map);
+// The effective mode actually rendered (may differ from getSettings().basemapMode
+// while a same-session fallback to offline is active — see basemap.js).
+let effectiveBasemapMode = null;
+// The basemapMode setting value switchBasemap() was last called with, so the
+// settings-change listener only reacts when that specific setting changes.
+let lastRequestedBasemapMode = null;
 
+function ensureTrailLayer() {
+  if (map.getSource(TRAIL_SOURCE_ID)) return;
   map.addSource(TRAIL_SOURCE_ID, {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
@@ -70,8 +66,38 @@ map.on('load', () => {
       'line-width': 2.5,
     },
   });
+}
 
+function updateAttributionVisibility(mode) {
+  // The MapLibre credit stays visible in both modes; only the OSM data
+  // credit is online-only (offline mode uses public-domain Natural Earth
+  // data, which needs no attribution).
+  document.getElementById('mlpr-osm-attribution')?.classList.toggle('hidden', mode !== 'online');
+}
+
+function onBasemapEffectiveModeReady(effective) {
+  effectiveBasemapMode = effective;
+  ensureTrailLayer();
   applyLayerVisibility();
+  renderTrail();
+  updateAttributionVisibility(effective);
+}
+
+async function switchBasemap(mode) {
+  lastRequestedBasemapMode = mode;
+  await applyBasemapMode(
+    map,
+    mode,
+    {
+      onStyleLoaded: onBasemapEffectiveModeReady,
+      onFallback: onBasemapEffectiveModeReady,
+    },
+    { resetFallback: true },
+  );
+}
+
+map.on('load', async () => {
+  await switchBasemap(getSettings().basemapMode);
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
@@ -82,7 +108,7 @@ map.on('load', () => {
 function applyLayerVisibility() {
   const { layers } = getSettings();
   const basemapVisibility = layers.basemap ? 'visible' : 'none';
-  for (const id of BASEMAP_LAYER_IDS) {
+  for (const id of getBasemapLayerIds(effectiveBasemapMode)) {
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', basemapVisibility);
   }
 }
@@ -98,6 +124,10 @@ function passesAltitudeFilter(aircraft) {
 }
 
 onSettingsChange(() => {
+  const { basemapMode } = getSettings();
+  if (basemapMode !== lastRequestedBasemapMode) {
+    switchBasemap(basemapMode);
+  }
   applyLayerVisibility();
   for (const state of aircraftState.values()) {
     if (state.marker && state.lastAircraft) {
