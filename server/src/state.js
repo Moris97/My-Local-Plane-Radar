@@ -9,6 +9,7 @@ const CHANGE_FIELDS = [
 ];
 
 const tracked = new Map(); // hex -> { aircraft, lastPolledAt }
+let messagesCounter;
 
 function hasChanged(previous, next) {
   if (!previous) return true;
@@ -37,6 +38,10 @@ export function applyRawSnapshot(rawSnapshot) {
     }
   }
 
+  if (typeof rawSnapshot?.messages === 'number') {
+    messagesCounter = rawSnapshot.messages;
+  }
+
   return updated;
 }
 
@@ -44,6 +49,11 @@ export function getTrackedAircraft() {
   return Array.from(tracked.values(), (entry) => entry.aircraft);
 }
 
+export function getMessagesCounter() {
+  return messagesCounter;
+}
+
 export function resetTrackedState() {
   tracked.clear();
+  messagesCounter = undefined;
 }

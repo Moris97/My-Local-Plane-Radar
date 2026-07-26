@@ -1,4 +1,16 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor } from './aircraft-icon.js';
+import { addBasemapLayers, BASEMAP_LAYER_IDS } from './basemap.js';
+import { recordPosition, clearHistory, trailFeaturesFor } from './trail.js';
+import { t } from './i18n.js';
+import {
+  noteAircraft,
+  removeAircraft,
+  clearAircraft,
+  noteMessagesCounter,
+  setSelectRequestHandler,
+} from './radar-state.js';
+import { getSettings, onSettingsChange } from './settings-state.js';
+import './panels.js';
 
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
@@ -13,6 +25,7 @@ const FRESH_COLOR = [61, 220, 132]; // #3ddc84
 const STALE_COLOR = [224, 49, 49]; // #e03131
 
 const GAP_SOURCE_ID = 'mlpr-gap-segments';
+const TRAIL_SOURCE_ID = 'mlpr-trail';
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -36,9 +49,13 @@ const aircraftState = new Map();
 let gapFeatures = [];
 let hasCentered = false;
 let mapReady = false;
+let selectedHex = null;
+let activePopup = null;
 const pendingMessages = [];
 
 map.on('load', () => {
+  addBasemapLayers(map);
+
   map.addSource(GAP_SOURCE_ID, {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
@@ -54,11 +71,125 @@ map.on('load', () => {
     },
   });
 
+  map.addSource(TRAIL_SOURCE_ID, {
+    type: 'geojson',
+    data: { type: 'FeatureCollection', features: [] },
+  });
+  map.addLayer({
+    id: TRAIL_SOURCE_ID,
+    type: 'line',
+    source: TRAIL_SOURCE_ID,
+    paint: {
+      'line-color': ['get', 'color'],
+      'line-width': 2.5,
+    },
+  });
+
+  applyLayerVisibility();
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
   }
 });
+
+function applyLayerVisibility() {
+  const { layers } = getSettings();
+  const basemapVisibility = layers.basemap ? 'visible' : 'none';
+  for (const id of BASEMAP_LAYER_IDS) {
+    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', basemapVisibility);
+  }
+  if (map.getLayer(TRAIL_SOURCE_ID)) {
+    map.setLayoutProperty(TRAIL_SOURCE_ID, 'visibility', layers.trails ? 'visible' : 'none');
+  }
+}
+
+function passesAltitudeFilter(aircraft) {
+  if (aircraft.onGround) return true;
+  const alt = aircraft.altBaro;
+  if (typeof alt !== 'number') return true;
+  const { altitudeFilterMin, altitudeFilterMax } = getSettings();
+  if (altitudeFilterMin !== null && alt < altitudeFilterMin) return false;
+  if (altitudeFilterMax !== null && alt > altitudeFilterMax) return false;
+  return true;
+}
+
+onSettingsChange(() => {
+  applyLayerVisibility();
+  for (const state of aircraftState.values()) {
+    if (state.marker && state.lastAircraft) {
+      state.marker.getElement().style.display = passesAltitudeFilter(state.lastAircraft) ? '' : 'none';
+    }
+  }
+});
+
+map.on('click', () => {
+  deselectAircraft();
+});
+
+document.addEventListener('click', (event) => {
+  if (event.target?.id === 'mlpr-more-details') {
+    activePopup?.remove();
+    activePopup = null;
+  }
+});
+
+function renderTrail() {
+  const source = map.getSource(TRAIL_SOURCE_ID);
+  if (!source) return;
+  source.setData({
+    type: 'FeatureCollection',
+    features: selectedHex ? trailFeaturesFor(selectedHex) : [],
+  });
+}
+
+function formatAircraftInfo(aircraft) {
+  const lines = [aircraft.flight || aircraft.hex];
+  if (aircraft.typeCode) lines.push(`${t('type')}: ${aircraft.typeCode}`);
+  if (aircraft.onGround) {
+    lines.push(t('onGround'));
+  } else if (typeof aircraft.altBaro === 'number') {
+    lines.push(`${t('altitude')}: ${aircraft.altBaro} ft`);
+  }
+  if (typeof aircraft.gs === 'number') lines.push(`${t('speed')}: ${Math.round(aircraft.gs)} kt`);
+  return lines.join('<br>');
+}
+
+function showInfoPopup(hex) {
+  const state = aircraftState.get(hex);
+  if (!state || !state.lastLngLat || !state.lastAircraft) return;
+
+  activePopup?.remove();
+  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false })
+    .setLngLat(state.lastLngLat)
+    .setHTML(
+      `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
+        `<br><button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`,
+    )
+    .addTo(map);
+}
+
+function selectAircraft(hex) {
+  selectedHex = hex;
+  renderTrail();
+  showInfoPopup(hex);
+}
+
+function selectAndCenter(hex) {
+  const state = aircraftState.get(hex);
+  if (state?.lastLngLat) {
+    map.flyTo({ center: state.lastLngLat });
+  }
+  selectAircraft(hex);
+}
+
+setSelectRequestHandler(selectAndCenter);
+
+function deselectAircraft() {
+  selectedHex = null;
+  renderTrail();
+  activePopup?.remove();
+  activePopup = null;
+}
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
@@ -95,6 +226,8 @@ function resetAll() {
   gapFeatures = [];
   map.getSource(GAP_SOURCE_ID)?.setData({ type: 'FeatureCollection', features: [] });
   hasCentered = false;
+  deselectAircraft();
+  clearAircraft();
 }
 
 function applyAircraftUpdate(aircraft) {
@@ -117,16 +250,30 @@ function applyAircraftUpdate(aircraft) {
 
   if (!state.marker) {
     state.marker = new maplibregl.Marker({ element: createPlaneElement() }).setLngLat(lngLat).addTo(map);
+    state.marker.getElement().addEventListener('click', (event) => {
+      event.stopPropagation();
+      selectAircraft(aircraft.hex);
+    });
   } else {
     state.marker.setLngLat(lngLat);
   }
 
   setPlaneHeading(state.marker.getElement(), aircraft.track);
   setPlaneColor(state.marker.getElement(), colorForElapsed(0));
+  state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
 
   state.lastUpdateAt = now;
   state.lastLngLat = lngLat;
+  state.lastAircraft = aircraft;
   state.goneAt = null;
+
+  recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now);
+  noteAircraft(aircraft.hex, aircraft);
+
+  if (aircraft.hex === selectedHex) {
+    renderTrail();
+    showInfoPopup(aircraft.hex);
+  }
 
   if (!hasCentered) {
     map.jumpTo({ center: lngLat, zoom: 9 });
@@ -145,6 +292,10 @@ function handleSnapshot(snapshot) {
       applyAircraftUpdate(aircraft);
     }
   }
+
+  if (typeof snapshot.messages === 'number') {
+    noteMessagesCounter(snapshot.messages, Date.now());
+  }
 }
 
 setInterval(() => {
@@ -154,6 +305,9 @@ setInterval(() => {
     if (state.goneAt !== null) {
       if (now - state.goneAt > FORGET_MS) {
         aircraftState.delete(hex);
+        clearHistory(hex);
+        removeAircraft(hex);
+        if (hex === selectedHex) deselectAircraft();
       }
       continue;
     }

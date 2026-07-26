@@ -19,4 +19,4 @@ Transitive dependencies were scanned for GPL/AGPL license strings on 2026-07-26
 
 | Dataset | License | Notes |
 |---|---|---|
-| Natural Earth 1:10m | Public domain | Fetched by `scripts/fetch-mapdata.sh`, never committed to the repo. |
+| Natural Earth 1:10m (coastline, borders, rivers, major cities) | Public domain | Fetched by `scripts/fetch-mapdata.sh` from the [martynafford/natural-earth-geojson](https://github.com/martynafford/natural-earth-geojson) mirror (repo itself CC0-1.0), which pre-converts Natural Earth's shapefiles to GeoJSON. The script strips unused attributes, rounds coordinates to 4 decimal places, and filters rivers/cities by `scalerank` before writing to `data/naturalearth/` (~12 MB total, never committed). |

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
-import { getTrackedAircraft } from './state.js';
+import { getTrackedAircraft, getMessagesCounter } from './state.js';
 import { toWireAircraftList } from './wire.js';
 
 const require = createRequire(import.meta.url);
@@ -12,6 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const publicDir = join(__dirname, '..', '..', 'public');
 const maplibreDistDir = dirname(require.resolve('maplibre-gl/dist/maplibre-gl.js'));
+const mapDataDir = join(__dirname, '..', '..', 'data', 'naturalearth');
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -23,6 +24,12 @@ export async function buildServer() {
   await app.register(fastifyStatic, {
     root: maplibreDistDir,
     prefix: '/vendor/maplibre-gl/',
+    decorateReply: false,
+  });
+
+  await app.register(fastifyStatic, {
+    root: mapDataDir,
+    prefix: '/mapdata/',
     decorateReply: false,
   });
 
@@ -43,6 +50,7 @@ export async function buildServer() {
       ws.send(JSON.stringify({
         type: 'full',
         now: Date.now() / 1000,
+        messages: getMessagesCounter(),
         aircraft: toWireAircraftList(getTrackedAircraft()),
       }));
     });

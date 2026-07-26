@@ -14,11 +14,11 @@ async function pollOnce(broadcast) {
   if (raw === null) return;
 
   const updated = applyRawSnapshot(raw);
-  if (updated.length === 0) return;
 
   broadcast({
     type: 'delta',
     now: Date.now() / 1000,
+    messages: typeof raw.messages === 'number' ? raw.messages : undefined,
     updated: toWireAircraftList(updated),
   });
 }

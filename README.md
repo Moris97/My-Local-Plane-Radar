@@ -6,8 +6,20 @@ MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wied
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy) — without touching readsb itself.
 
-**Status: early scaffolding.** No application logic yet — see [CLAUDE.md](./CLAUDE.md)
-for the architecture and the staged build plan.
+**Status: Stage 3 of the build plan.** Live map with delta updates, signal-loss
+fading, altitude-colored trails, a basemap, and a bottom-bar UI (List/Stats/
+Settings) are in place. Notifications and persistence are still ahead — see
+[CLAUDE.md](./CLAUDE.md) for the architecture and the staged build plan.
+
+## Running it
+
+```
+npm install
+./scripts/fetch-mapdata.sh   # one-time: downloads the basemap (~12 MB) into data/naturalearth/
+npm start                    # MLPR_PORT (default 1090), MLPR_SOURCE=file|http|replay
+```
+
+Then open `http://<host>:1090/`.
 
 ## Why
 
