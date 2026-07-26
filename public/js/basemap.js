@@ -22,8 +22,13 @@ const LAYERS = [
     id: 'ne-cities',
     url: '/mapdata/cities.geojson',
     type: 'circle',
-    paint: { 'circle-color': '#5b7a94', 'circle-radius': 2 },
-    minzoom: 3,
+    paint: {
+      'circle-color': '#bcd7e8',
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 3, 2, 8, 4],
+      'circle-stroke-color': '#05070a',
+      'circle-stroke-width': 0.5,
+    },
+    minzoom: 2,
   },
 ];
 
