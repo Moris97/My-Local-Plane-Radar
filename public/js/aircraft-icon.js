@@ -1,7 +1,10 @@
 const PLANE_SVG = `
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <path d="M12 2 L14 9 L22 13 L14 14.5 L13 21 L12 19 L11 21 L10 14.5 L2 13 L10 9 Z"
-        fill="#3ddc84" stroke="#05070a" stroke-width="0.6"/>
+  <g fill="#3ddc84" stroke="#05070a" stroke-width="0.5">
+    <polygon points="12,1 13,9 13,22 11,22 11,9"/>
+    <polygon points="1,14 12,10 23,14 12,13"/>
+    <polygon points="8,21 12,18 16,21 12,20"/>
+  </g>
 </svg>
 `;
 

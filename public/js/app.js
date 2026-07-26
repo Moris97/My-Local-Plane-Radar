@@ -18,6 +18,7 @@ const map = new maplibregl.Map({
   },
   center: DEFAULT_CENTER,
   zoom: DEFAULT_ZOOM,
+  attributionControl: false,
 });
 
 const markers = new Map();
