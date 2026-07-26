@@ -26,5 +26,8 @@
   "homepage": "https://github.com/Moris97/My-Local-Plane-Radar",
   "bugs": {
     "url": "https://github.com/Moris97/My-Local-Plane-Radar/issues"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
   }
 }

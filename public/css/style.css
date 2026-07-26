@@ -1,3 +1,7 @@
+:root {
+  --bottom-bar-height: 64px;
+}
+
 html, body {
   margin: 0;
   height: 100%;
@@ -45,12 +49,14 @@ html, body {
   left: 0;
   right: 0;
   bottom: 0;
+  height: var(--bottom-bar-height);
+  box-sizing: border-box;
   display: flex;
   justify-content: space-around;
   background: rgba(5, 7, 10, 0.92);
   border-top: 1px solid #12202b;
   padding: 8px max(8px, env(safe-area-inset-bottom));
-  z-index: 10;
+  z-index: 30;
 }
 
 .mlpr-bar-btn {
@@ -77,7 +83,10 @@ html, body {
 
 #panel-overlay {
   position: fixed;
-  inset: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: var(--bottom-bar-height);
   background: rgba(0, 0, 0, 0.4);
   z-index: 15;
 }
@@ -90,8 +99,8 @@ html, body {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 0;
-  max-height: 70vh;
+  bottom: var(--bottom-bar-height);
+  max-height: calc(70vh - var(--bottom-bar-height));
   background: #0a0f14;
   border-top: 1px solid #1c2e3a;
   border-radius: 16px 16px 0 0;
@@ -228,6 +237,7 @@ html, body {
   #panel {
     left: auto;
     top: 0;
+    bottom: var(--bottom-bar-height);
     width: 360px;
     max-height: none;
     border-radius: 0;

@@ -15,6 +15,12 @@ Transitive dependencies were scanned for GPL/AGPL license strings on 2026-07-26
 | ws | ^8.18.0 | MIT | Raw WebSocket server for pushing aircraft snapshots to the browser. |
 | maplibre-gl | ^5.0.0 | BSD-3-Clause | Map rendering in the browser. Served from `node_modules` (never committed) — no CDN, works offline. |
 
+### Dev-only (never shipped to the Pi)
+
+| Package | Version | License | Purpose |
+|---|---|---|---|
+| playwright | ^1.62.0 | Apache-2.0 | Headless-browser smoke testing during development (screenshots, DOM/interaction checks). Not used at runtime, not deployed. |
+
 ## Data
 
 | Dataset | License | Notes |
