@@ -192,6 +192,20 @@ example/test data.
   - **Offline**: Natural Earth 1:10m GeoJSON (coastlines, borders, rivers,
     major cities), ~20 MB, public domain. Fetched by
     `scripts/fetch-mapdata.sh` at install time — **never committed**.
+  - **Map theme** (`mapTheme`, also in `settings-state.js`, default `dark`):
+    independent of `basemapMode` — dark/light applies to *both* online and
+    offline modes, four combinations total. This is a **map-only** theme, not
+    the app's own UI theme (bottom bar/panels/settings stay dark always —
+    deliberately, per explicit request, since this is meant to be a
+    night-readable radar display regardless of the map underneath). Online
+    light mode is `public/mapstyles/online-light.json`, structurally
+    identical to `online-dark.json` (same layer ids/filters/zoom levels, only
+    `paint` colors differ) — keep the two in sync by hand for anything beyond
+    color. Offline light mode reuses the same Natural Earth GeoJSON layers
+    with different paint values from `OFFLINE_PALETTES` in `basemap.js`
+    (coastline/border/river colors read fine on both a near-black and a
+    near-white background already; only the city dots and the background
+    itself actually flip between themes).
   - Switching modes calls `map.setStyle(...)` on the existing MapLibre
     instance (`public/js/basemap.js`'s `applyBasemapMode`) — no page reload,
     aircraft markers survive (DOM markers aren't part of the style). Because
@@ -206,6 +220,13 @@ example/test data.
     the persisted `basemapMode` setting itself is untouched, so a reload (or
     the user manually reselecting "Online" in Settings) tries online again.
     Settings shows a small notice when this fallback is currently active.
+    The network-error watcher (`armOnlineErrorWatch`) is armed only once per
+    map instance and left attached forever — it reads the module-level
+    `currentTheme`/`currentCallbacks` at fire time rather than closing over
+    them at arm time, so a later fallback triggered by a runtime error uses
+    whatever theme is *currently* selected, not whatever was active the first
+    time the watcher got armed. Caught by a mock-`map` unit test during
+    development; don't reintroduce a closure over theme here.
   - **Attribution**: OSM data is ODbL-licensed, which requires attribution —
     not optional. We disabled MapLibre's default `AttributionControl`
     (Stage 1), so instead there's our own small custom-styled attribution
