@@ -6,12 +6,10 @@ Added to as they come up; picked up in a later stage when relevant.
 - **Visual/cosmetic polish** — icon shapes, colors, spacing, general look-and-feel
   pass. Deferred until the app is functionally complete ("na sam koniec",
   said after Stage 1).
-- **Notification engine: watched list** (specific hex/registration list to
-  track) — deferred when scoping Stage 5's MVP to squawk alerts + first-seen +
-  new range record.
-- **Notification engine: radius-from-home / altitude-threshold rule** — same
-  Stage 5 scoping decision; needs a distance-from-home radius and an altitude
-  threshold to configure.
-- **Settings access control** — `/api/settings` (and other settings endpoints)
-  are currently open, no auth. Said to be restricted later once the app isn't
-  purely LAN-only-by-assumption.
+- **Notification engine: radius-from-home geofence** — notify when *any*
+  aircraft (not just a watched one) enters a distance-from-home radius. The
+  watch-list's per-entry altitude condition (below/above threshold) shipped;
+  this general geofence rule, independent of the watch list, did not.
+- **"Show more details" popup button** — still a stub that just closes the
+  popup (from Stage 3). Asked the user once whether to build it now or defer;
+  never got a firm answer, so tracking it here instead of assuming.

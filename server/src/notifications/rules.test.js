@@ -10,6 +10,7 @@ process.env.MLPR_DB_PATH = join(tmpDir, 'test.db');
 const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
+const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -30,6 +31,9 @@ beforeEach(() => {
     firstSeenEnabled: true,
     rangeRecordEnabled: true,
   });
+  for (const entry of getWatchList()) {
+    removeWatchEntry(entry.id);
+  }
 });
 
 function aircraftFixture(overrides = {}) {
@@ -105,4 +109,70 @@ test('rangeRecordEnabled=false still updates the record but sends nothing', () =
   updateNotificationSettings({ rangeRecordEnabled: true });
   rules.evaluateRangeRecordRule(150);
   assert.equal(sent.filter((n) => n.payload.title === 'New range record').length, 0);
+});
+
+function watchedNotifications() {
+  return sent.filter((n) => n.payload.title === 'Watched aircraft');
+}
+
+test('watch-list matches by type, case-insensitively', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'b738' });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('watch-list matches by registration', () => {
+  addWatchEntry({ matchType: 'registration', matchValue: 'SP-TEST' });
+  rules.evaluateAircraftRules(aircraftFixture({ registration: 'sp-test' }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('watch-list matches by flight number', () => {
+  addWatchEntry({ matchType: 'flight', matchValue: 'WZZ66' });
+  rules.evaluateAircraftRules(aircraftFixture({ flight: 'WZZ66' }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('watch-list does not match an unrelated aircraft', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'A320' }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('altitude condition "below" only matches when actually below', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738', altitudeOperator: 'below', altitudeValue: 5000 });
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'cruise', typeCode: 'B738', altBaro: 35000 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'descending', typeCode: 'B738', altBaro: 2000 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('altitude condition "above" only matches when actually above', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738', altitudeOperator: 'above', altitudeValue: 10000 });
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'low', typeCode: 'B738', altBaro: 2000 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'high', typeCode: 'B738', altBaro: 35000 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('an on-ground aircraft counts as altitude 0 for the "below" condition', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738', altitudeOperator: 'below', altitudeValue: 5000 });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', onGround: true }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('altitude condition does not match when altitude data is unavailable', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738', altitudeOperator: 'below', altitudeValue: 5000 });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('watch-list respects the per-hex cooldown', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  const aircraft = aircraftFixture({ typeCode: 'B738' });
+  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft);
+  assert.equal(watchedNotifications().length, 1);
 });

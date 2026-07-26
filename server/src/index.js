@@ -7,6 +7,7 @@ import { ingestStats, getDailyAccumulator, getLatestStatsValues } from './stats-
 import { upsertDailyStats } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
+import { pruneTokens } from './settings-auth.js';
 
 const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -89,6 +90,7 @@ async function main() {
   }, DAILY_STATS_FLUSH_INTERVAL_MS);
 
   setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
+  setInterval(() => pruneTokens(), COOLDOWN_PRUNE_INTERVAL_MS);
 
   async function shutdown(signal) {
     app.log.info(`received ${signal}, shutting down`);

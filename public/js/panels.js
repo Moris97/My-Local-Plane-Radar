@@ -19,17 +19,21 @@ const closeBtn = document.getElementById('panel-close');
 let currentPanel = null;
 let historyPushed = false;
 let disposeCurrent = null;
+let renderToken = 0;
 
-function openPanel(name) {
+async function openPanel(name) {
   const entry = PANELS[name];
   if (!entry) return;
 
+  renderToken += 1;
+  const myToken = renderToken;
+
   disposeCurrent?.();
+  disposeCurrent = null;
 
   currentPanel = name;
   titleEl.textContent = entry.title();
   contentEl.innerHTML = '';
-  disposeCurrent = entry.render(contentEl) ?? null;
 
   panelEl.classList.remove('hidden');
   panelEl.setAttribute('aria-hidden', 'false');
@@ -43,9 +47,17 @@ function openPanel(name) {
     history.pushState({ mlprPanel: true }, '');
     historyPushed = true;
   }
+
+  const result = await entry.render(contentEl);
+  if (myToken === renderToken) {
+    disposeCurrent = result ?? null;
+  } else if (typeof result === 'function') {
+    result();
+  }
 }
 
 function closePanel({ fromPopstate = false } = {}) {
+  renderToken += 1;
   disposeCurrent?.();
   disposeCurrent = null;
   currentPanel = null;

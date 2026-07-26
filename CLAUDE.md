@@ -228,9 +228,16 @@ against the `seen_aircraft` table — grows for the life of the install, bounded
 by distinct aircraft ever seen, not a "position history" table so it's fine
 under hard rule 4), new all-time range record (compared against a
 `allTimeMaxRangeKm` config value, fed by `stats.json`'s own `max_distance` —
-no per-aircraft distance math needed). Each rule respects its own
-enabled/disabled toggle from Settings; **squawk has a per-hex cooldown**
-(first-seen and range-record are naturally one-shot per hex/record already).
+no per-aircraft distance math needed), and a **watch list**
+(`watchlist.js`): entries `{id, matchType: type|registration|flight,
+matchValue, altitudeOperator: below|above|null, altitudeValue}`, stored as
+JSON in `config` (same pattern as notification settings). Matching is
+case-insensitive on `aircraft[typeCode|registration|flight]`; the altitude
+condition treats `onGround` as altitude 0, and simply doesn't match if the
+needed altitude data isn't available (never a false positive from missing
+data). Each rule respects its own enabled/disabled toggle from Settings;
+**squawk and watch-list both have a per-hex cooldown** (first-seen and
+range-record are naturally one-shot per hex/record already).
 
 **Delivery**: ntfy.sh (public instance), using its **JSON publish API** (POST
 to `https://ntfy.sh/` with `{topic, title, message, priority, tags}` as the
@@ -245,15 +252,41 @@ the topic." Regenerable. The charset deliberately excludes `0/o` and `1/l/i`
 Never hardcode or log a real topic value anywhere persistent — whoever knows
 it can read the notifications.
 
-Deferred to later (see `TODO.md`): watched hex/registration list, radius-from-
-home / altitude-threshold rule. Web Push is deferred for good (needs a secure
-context, awkward over plain HTTP on a LAN) — ntfy is the only delivery channel
-for now.
+Deferred to later (see `TODO.md`): a general radius-from-home geofence
+(independent of the watch list — "notify for *any* aircraft entering this
+radius", not just watched ones). Web Push is deferred for good (needs a
+secure context, awkward over plain HTTP on a LAN) — ntfy is the only delivery
+channel for now.
 
 **Known rough edge**: on a fresh install (empty `seen_aircraft` table), every
 aircraft currently in range will fire a "first seen" notification. Not fixed
 — mention it if the user is surprised by a notification burst right after
 first setup.
+
+## Settings access control (`server/src/settings-auth.js`)
+
+Off by default (local LAN app, most people don't need this) — a button at the
+bottom of Settings ("secure settings access with a password") opts in.
+`node:crypto`'s `scryptSync` for password hashing (random salt per password,
+no new dependency), `timingSafeEqual` for comparison. Sessions are random
+tokens issued on login, held **in memory only** (`Map<token, expiresAt>`,
+24h TTL, pruned hourly) — lost on restart, which just means logging in again,
+consistent with hard rule 6.
+
+Protected via a `requireSettingsAuth` Fastify `preHandler` applied per-route
+to `/api/settings*` and `/api/notifications/*` — **not** applied to
+`/api/settings-auth/*` itself (login/status/password-management need to work
+*without* being logged in yet) or to `/api/stats/history` (general app data,
+not a setting). The preHandler is a no-op whenever no password is set, so the
+default-open behavior is unchanged until someone opts in. Frontend
+(`public/js/settings-auth.js`) holds the token in `sessionStorage` and
+attaches it via the `X-MLPR-Settings-Token` header; a 401 anywhere clears the
+stored token and re-renders the login gate rather than failing silently.
+
+Setting/changing/removing the password itself is **not** behind the token
+preHandler — changing it requires the *current* password (checked inside the
+handler), which works independently of whether a session token happens to be
+valid. First-time setup (no password yet) needs neither.
 
 ## Production deployment (Stage 6)
 

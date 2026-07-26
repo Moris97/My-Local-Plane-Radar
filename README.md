@@ -6,14 +6,16 @@ MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wied
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy) — without touching readsb itself.
 
-**Status: Stage 6 of the build plan.** Live map with delta updates, signal-loss
-fading, altitude-colored trails, a basemap, a bottom-bar UI (List/Stats/
-Settings), receiver stats with a 24h history chart, SQLite-backed daily
-aggregates, a notification engine (squawk 7500/7600/7700, first-time-seen
-aircraft, new range record — delivered via ntfy), and a systemd service for
-production are in place. See [CLAUDE.md](./CLAUDE.md) for the architecture
-and the staged build plan, and [TODO.md](./TODO.md) for what's explicitly
-deferred.
+**Status: past Stage 6 of the build plan**, plus most of the post-launch
+backlog. Live map with delta updates, signal-loss fading, altitude-colored
+trails, a basemap, a bottom-bar UI (List/Stats/Settings), receiver stats with
+a 24h history chart, SQLite-backed daily aggregates, a notification engine
+(squawk 7500/7600/7700, first-time-seen aircraft, new range record, and a
+configurable watch list matching aircraft type/registration/flight number
+with an optional altitude condition — delivered via ntfy), an opt-in password
+for the Settings panel, and a systemd service for production are all in
+place. See [CLAUDE.md](./CLAUDE.md) for the architecture and the staged build
+plan, and [TODO.md](./TODO.md) for what's explicitly deferred.
 
 ## Running it
 

@@ -1,7 +1,71 @@
 import { t } from './i18n.js';
 import { getSettings, updateSettings } from './settings-state.js';
+import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
+import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 
-export function renderSettingsPanel(container) {
+async function authedFetch(container, url, options) {
+  const response = await authorizedFetch(url, options);
+  if (response.status === 401) {
+    clearStoredToken();
+    renderSettingsPanel(container);
+    return null;
+  }
+  return response;
+}
+
+function renderGate(container, onUnlocked) {
+  container.innerHTML = `
+    <div class="mlpr-gate">
+      <p>${t('settingsLocked')}</p>
+      <label>${t('password')} <input type="password" id="mlpr-gate-password"></label>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-gate-submit">${t('unlock')}</button>
+      </div>
+      <p id="mlpr-gate-error" class="mlpr-gate-error"></p>
+    </div>
+  `;
+
+  const passwordInput = container.querySelector('#mlpr-gate-password');
+  const errorEl = container.querySelector('#mlpr-gate-error');
+
+  async function attempt() {
+    const response = await fetch('/api/settings-auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passwordInput.value }),
+    });
+    if (response.ok) {
+      const { token } = await response.json();
+      storeToken(token);
+      onUnlocked();
+    } else {
+      errorEl.textContent = t('wrongPassword');
+    }
+  }
+
+  container.querySelector('#mlpr-gate-submit').addEventListener('click', attempt);
+  passwordInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') attempt();
+  });
+}
+
+export async function renderSettingsPanel(container) {
+  let status;
+  try {
+    status = await fetch('/api/settings-auth/status').then((res) => res.json());
+  } catch {
+    status = { passwordSet: false };
+  }
+
+  if (status.passwordSet && !getStoredToken()) {
+    renderGate(container, () => renderSettingsPanel(container));
+    return undefined;
+  }
+
+  return renderSettingsForm(container);
+}
+
+function renderSettingsForm(container) {
   const settings = getSettings();
 
   container.innerHTML = `
@@ -50,8 +114,48 @@ export function renderSettingsPanel(container) {
         <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
       </div>
     </fieldset>
+
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('watchlist')}</legend>
+      <div id="mlpr-watchlist-items"></div>
+      <div class="mlpr-watch-form">
+        <select id="mlpr-watch-type">
+          <option value="type">${t('watchType')}</option>
+          <option value="registration">${t('watchRegistration')}</option>
+          <option value="flight">${t('watchFlight')}</option>
+        </select>
+        <input type="text" id="mlpr-watch-value" list="mlpr-aircraft-types" placeholder="${t('watchValuePlaceholder')}">
+        <datalist id="mlpr-aircraft-types">
+          ${COMMON_AIRCRAFT_TYPES.map((code) => `<option value="${code}">`).join('')}
+        </datalist>
+        <select id="mlpr-watch-alt-op">
+          <option value="">${t('noAltitudeCondition')}</option>
+          <option value="below">${t('below')}</option>
+          <option value="above">${t('above')}</option>
+        </select>
+        <input type="number" id="mlpr-watch-alt-value" placeholder="ft" style="display:none">
+        <button type="button" id="mlpr-watch-add">${t('add')}</button>
+      </div>
+      <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
+    </fieldset>
+
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('security')}</legend>
+      <p id="mlpr-security-status" class="mlpr-home-status">…</p>
+      <div id="mlpr-security-form"></div>
+    </fieldset>
   `;
 
+  wireDisplaySettings(container);
+  wireHomeLocation(container);
+  wireNotificationSettings(container);
+  wireWatchlist(container);
+  renderSecuritySection(container);
+
+  return undefined;
+}
+
+function wireDisplaySettings(container) {
   for (const input of container.querySelectorAll('input[name="mlpr-units"]')) {
     input.addEventListener('change', (event) => updateSettings({ units: event.target.value }));
   }
@@ -69,7 +173,9 @@ export function renderSettingsPanel(container) {
   container.querySelector('#mlpr-layer-trails').addEventListener('change', (event) => {
     updateSettings({ layers: { ...getSettings().layers, trails: event.target.checked } });
   });
+}
 
+function wireHomeLocation(container) {
   const homeLatInput = container.querySelector('#mlpr-home-lat');
   const homeLonInput = container.querySelector('#mlpr-home-lon');
   const homeStatusEl = container.querySelector('#mlpr-home-status');
@@ -77,21 +183,18 @@ export function renderSettingsPanel(container) {
   const homeSaveBtn = container.querySelector('#mlpr-home-save');
 
   async function loadHome() {
-    try {
-      const response = await fetch('/api/settings');
-      const data = await response.json();
-      homeLatInput.value = data.homeLat ?? '';
-      homeLonInput.value = data.homeLon ?? '';
-      homeStatusEl.textContent =
-        data.homeSource === 'manual'
-          ? t('homeManual')
-          : data.homeSource === 'receiver.json'
-            ? t('homeAutoDetected')
-            : t('homeNotSet');
-      homeResetBtn.style.display = data.homeSource === 'manual' ? '' : 'none';
-    } catch {
-      homeStatusEl.textContent = t('homeNotSet');
-    }
+    const response = await authedFetch(container, '/api/settings');
+    if (!response) return;
+    const data = await response.json();
+    homeLatInput.value = data.homeLat ?? '';
+    homeLonInput.value = data.homeLon ?? '';
+    homeStatusEl.textContent =
+      data.homeSource === 'manual'
+        ? t('homeManual')
+        : data.homeSource === 'receiver.json'
+          ? t('homeAutoDetected')
+          : t('homeNotSet');
+    homeResetBtn.style.display = data.homeSource === 'manual' ? '' : 'none';
   }
 
   homeSaveBtn.addEventListener('click', async () => {
@@ -99,25 +202,29 @@ export function renderSettingsPanel(container) {
     const homeLon = Number(homeLonInput.value);
     if (!Number.isFinite(homeLat) || !Number.isFinite(homeLon)) return;
 
-    await fetch('/api/settings', {
+    const response = await authedFetch(container, '/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ homeLat, homeLon }),
     });
+    if (!response) return;
     await loadHome();
   });
 
   homeResetBtn.addEventListener('click', async () => {
-    await fetch('/api/settings', {
+    const response = await authedFetch(container, '/api/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ homeLat: null, homeLon: null }),
     });
+    if (!response) return;
     await loadHome();
   });
 
   loadHome();
+}
 
+function wireNotificationSettings(container) {
   const notifSquawkEl = container.querySelector('#mlpr-notif-squawk');
   const notif7500El = container.querySelector('#mlpr-notif-squawk-7500');
   const notif7600El = container.querySelector('#mlpr-notif-squawk-7600');
@@ -128,7 +235,8 @@ export function renderSettingsPanel(container) {
   const ntfyRegenerateBtn = container.querySelector('#mlpr-ntfy-regenerate');
 
   async function loadNotificationSettings() {
-    const response = await fetch('/api/notifications/settings');
+    const response = await authedFetch(container, '/api/notifications/settings');
+    if (!response) return;
     const data = await response.json();
     notifSquawkEl.checked = data.squawkEnabled;
     notif7500El.checked = data.squawkCodes['7500'];
@@ -139,7 +247,7 @@ export function renderSettingsPanel(container) {
   }
 
   async function putNotificationSettings(patch) {
-    await fetch('/api/notifications/settings', {
+    await authedFetch(container, '/api/notifications/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -158,17 +266,176 @@ export function renderSettingsPanel(container) {
   );
 
   async function loadNtfyTopic() {
-    const response = await fetch('/api/notifications/ntfy-topic');
+    const response = await authedFetch(container, '/api/notifications/ntfy-topic');
+    if (!response) return;
     const data = await response.json();
     ntfyTopicEl.textContent = data.topic;
   }
 
   ntfyRegenerateBtn.addEventListener('click', async () => {
-    const response = await fetch('/api/notifications/ntfy-topic/regenerate', { method: 'POST' });
+    const response = await authedFetch(container, '/api/notifications/ntfy-topic/regenerate', { method: 'POST' });
+    if (!response) return;
     const data = await response.json();
     ntfyTopicEl.textContent = data.topic;
   });
 
   loadNotificationSettings();
   loadNtfyTopic();
+}
+
+function watchEntryLabel(entry) {
+  const typeLabel = { type: t('watchType'), registration: t('watchRegistration'), flight: t('watchFlight') }[
+    entry.matchType
+  ];
+  let text = `${typeLabel}: ${entry.matchValue}`;
+  if (entry.altitudeOperator) {
+    text += ` (${entry.altitudeOperator === 'below' ? t('below') : t('above')} ${entry.altitudeValue} ft)`;
+  }
+  return text;
+}
+
+function wireWatchlist(container) {
+  const itemsEl = container.querySelector('#mlpr-watchlist-items');
+  const typeSelect = container.querySelector('#mlpr-watch-type');
+  const valueInput = container.querySelector('#mlpr-watch-value');
+  const altOpSelect = container.querySelector('#mlpr-watch-alt-op');
+  const altValueInput = container.querySelector('#mlpr-watch-alt-value');
+  const addBtn = container.querySelector('#mlpr-watch-add');
+  const errorEl = container.querySelector('#mlpr-watch-error');
+
+  typeSelect.addEventListener('change', () => {
+    if (typeSelect.value === 'type') {
+      valueInput.setAttribute('list', 'mlpr-aircraft-types');
+    } else {
+      valueInput.removeAttribute('list');
+    }
+  });
+
+  altOpSelect.addEventListener('change', () => {
+    altValueInput.style.display = altOpSelect.value ? '' : 'none';
+  });
+
+  async function loadWatchlist() {
+    const response = await authedFetch(container, '/api/notifications/watchlist');
+    if (!response) return;
+    const entries = await response.json();
+
+    itemsEl.innerHTML = '';
+    for (const entry of entries) {
+      const row = document.createElement('div');
+      row.className = 'mlpr-watch-row';
+      const label = document.createElement('span');
+      label.textContent = watchEntryLabel(entry);
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.textContent = t('remove');
+      removeBtn.addEventListener('click', async () => {
+        const deleteResponse = await authedFetch(container, `/api/notifications/watchlist/${entry.id}`, {
+          method: 'DELETE',
+        });
+        if (!deleteResponse) return;
+        await loadWatchlist();
+      });
+      row.append(label, removeBtn);
+      itemsEl.appendChild(row);
+    }
+  }
+
+  addBtn.addEventListener('click', async () => {
+    errorEl.textContent = '';
+    const body = {
+      matchType: typeSelect.value,
+      matchValue: valueInput.value,
+      altitudeOperator: altOpSelect.value || null,
+      altitudeValue: altOpSelect.value ? Number(altValueInput.value) : null,
+    };
+
+    const response = await authedFetch(container, '/api/notifications/watchlist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response) return;
+
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      errorEl.textContent = data.error ?? t('somethingWentWrong');
+      return;
+    }
+
+    valueInput.value = '';
+    altOpSelect.value = '';
+    altValueInput.value = '';
+    altValueInput.style.display = 'none';
+    await loadWatchlist();
+  });
+
+  loadWatchlist();
+}
+
+async function renderSecuritySection(container) {
+  const statusEl = container.querySelector('#mlpr-security-status');
+  const formEl = container.querySelector('#mlpr-security-form');
+
+  let status;
+  try {
+    status = await fetch('/api/settings-auth/status').then((res) => res.json());
+  } catch {
+    status = { passwordSet: false };
+  }
+
+  statusEl.textContent = status.passwordSet ? t('passwordIsSet') : t('passwordNotSet');
+
+  formEl.innerHTML = status.passwordSet
+    ? `
+      <button type="button" id="mlpr-security-toggle">${t('changePassword')}</button>
+      <div id="mlpr-security-fields" style="display:none">
+        <label>${t('currentPassword')} <input type="password" id="mlpr-security-current"></label>
+        <label>${t('newPasswordOptional')} <input type="password" id="mlpr-security-new"></label>
+        <div class="mlpr-home-actions">
+          <button type="button" id="mlpr-security-save">${t('save')}</button>
+        </div>
+        <p id="mlpr-security-error" class="mlpr-gate-error"></p>
+      </div>
+    `
+    : `
+      <button type="button" id="mlpr-security-toggle">${t('securePasswordButton')}</button>
+      <div id="mlpr-security-fields" style="display:none">
+        <label>${t('newPassword')} <input type="password" id="mlpr-security-new"></label>
+        <div class="mlpr-home-actions">
+          <button type="button" id="mlpr-security-save">${t('save')}</button>
+        </div>
+        <p id="mlpr-security-error" class="mlpr-gate-error"></p>
+      </div>
+    `;
+
+  const fieldsEl = formEl.querySelector('#mlpr-security-fields');
+  formEl.querySelector('#mlpr-security-toggle').addEventListener('click', () => {
+    fieldsEl.style.display = fieldsEl.style.display === 'none' ? '' : 'none';
+  });
+
+  formEl.querySelector('#mlpr-security-save').addEventListener('click', async () => {
+    const newPassword = formEl.querySelector('#mlpr-security-new').value || null;
+    const currentPasswordInput = formEl.querySelector('#mlpr-security-current');
+    const currentPassword = currentPasswordInput ? currentPasswordInput.value : undefined;
+    const errorEl = formEl.querySelector('#mlpr-security-error');
+
+    const response = await fetch('/api/settings-auth/password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ newPassword, currentPassword }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+
+    if (!response.ok) {
+      errorEl.textContent = data.error ?? t('somethingWentWrong');
+      return;
+    }
+
+    if (data.token) storeToken(data.token);
+    if (!data.passwordSet) clearStoredToken();
+
+    renderSecuritySection(container);
+  });
 }

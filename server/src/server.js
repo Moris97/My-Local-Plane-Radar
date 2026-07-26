@@ -9,6 +9,8 @@ import { toWireAircraftList } from './wire.js';
 import { getEffectiveHome, setManualHome, clearManualHome } from './home.js';
 import { getHistory } from './stats-history.js';
 import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic } from './notifications/settings.js';
+import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
+import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -36,6 +38,43 @@ export async function buildServer() {
     decorateReply: false,
   });
 
+  async function requireSettingsAuth(request, reply) {
+    if (!isPasswordSet()) return;
+    if (!isValidToken(request.headers['x-mlpr-settings-token'])) {
+      reply.code(401).send({ error: 'Settings are password protected' });
+    }
+  }
+
+  app.get('/api/settings-auth/status', async () => ({ passwordSet: isPasswordSet() }));
+
+  app.post('/api/settings-auth/login', async (request, reply) => {
+    const { password } = request.body ?? {};
+    if (!verifyPassword(password)) {
+      return reply.code(401).send({ error: 'Incorrect password' });
+    }
+    return { token: issueToken() };
+  });
+
+  app.post('/api/settings-auth/password', async (request, reply) => {
+    const { newPassword, currentPassword } = request.body ?? {};
+
+    if (isPasswordSet() && !verifyPassword(currentPassword)) {
+      return reply.code(401).send({ error: 'Current password is incorrect' });
+    }
+
+    if (!newPassword) {
+      removePassword();
+      return { passwordSet: false };
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 4) {
+      return reply.code(400).send({ error: 'Password must be at least 4 characters' });
+    }
+
+    setPassword(newPassword);
+    return { passwordSet: true, token: issueToken() };
+  });
+
   function settingsPayload() {
     const home = getEffectiveHome();
     return {
@@ -45,9 +84,9 @@ export async function buildServer() {
     };
   }
 
-  app.get('/api/settings', async () => settingsPayload());
+  app.get('/api/settings', { preHandler: requireSettingsAuth }, async () => settingsPayload());
 
-  app.put('/api/settings', async (request, reply) => {
+  app.put('/api/settings', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
 
     if (body.homeLat === null && body.homeLon === null) {
@@ -68,9 +107,9 @@ export async function buildServer() {
 
   app.get('/api/stats/history', async () => getHistory());
 
-  app.get('/api/notifications/settings', async () => getNotificationSettings());
+  app.get('/api/notifications/settings', { preHandler: requireSettingsAuth }, async () => getNotificationSettings());
 
-  app.put('/api/notifications/settings', async (request, reply) => {
+  app.put('/api/notifications/settings', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     const patch = {};
 
@@ -98,9 +137,32 @@ export async function buildServer() {
     return updateNotificationSettings(patch);
   });
 
-  app.get('/api/notifications/ntfy-topic', async () => ({ topic: getNtfyTopic() }));
+  app.get('/api/notifications/ntfy-topic', { preHandler: requireSettingsAuth }, async () => ({ topic: getNtfyTopic() }));
 
-  app.post('/api/notifications/ntfy-topic/regenerate', async () => ({ topic: regenerateNtfyTopic() }));
+  app.post(
+    '/api/notifications/ntfy-topic/regenerate',
+    { preHandler: requireSettingsAuth },
+    async () => ({ topic: regenerateNtfyTopic() }),
+  );
+
+  app.get('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async () => getWatchList());
+
+  app.post('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const body = request.body ?? {};
+    const error = validateWatchEntryInput(body);
+    if (error) {
+      return reply.code(400).send({ error });
+    }
+    return addWatchEntry(body);
+  });
+
+  app.delete('/api/notifications/watchlist/:id', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const removed = removeWatchEntry(request.params.id);
+    if (!removed) {
+      return reply.code(404).send({ error: 'No watch entry with that id' });
+    }
+    return { removed: true };
+  });
 
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set();

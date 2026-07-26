@@ -2,6 +2,7 @@ import { hasSeenAircraft, markAircraftSeen, getConfig, setConfig } from '../db.j
 import { getNotificationSettings, getNtfyTopic } from './settings.js';
 import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
+import { getWatchList } from './watchlist.js';
 
 const SQUAWK_MEANINGS = {
   7500: 'Hijack',
@@ -19,6 +20,29 @@ export function setNotifySender(fn) {
 
 function notify(payload) {
   return notifySender(getNtfyTopic(), payload);
+}
+
+const WATCH_FIELD_BY_MATCH_TYPE = {
+  type: 'typeCode',
+  registration: 'registration',
+  flight: 'flight',
+};
+
+function satisfiesAltitudeCondition(aircraft, entry) {
+  if (!entry.altitudeOperator) return true;
+
+  const altitude = aircraft.onGround ? 0 : aircraft.altBaro;
+  if (typeof altitude !== 'number') return false;
+
+  if (entry.altitudeOperator === 'below') return altitude < entry.altitudeValue;
+  if (entry.altitudeOperator === 'above') return altitude > entry.altitudeValue;
+  return true;
+}
+
+function matchesWatchEntry(aircraft, entry) {
+  const field = aircraft[WATCH_FIELD_BY_MATCH_TYPE[entry.matchType]];
+  if (!field || field.toLowerCase() !== entry.matchValue.toLowerCase()) return false;
+  return satisfiesAltitudeCondition(aircraft, entry);
 }
 
 function aircraftLabel(aircraft) {
@@ -52,6 +76,19 @@ export function evaluateAircraftRules(aircraft) {
         message: aircraftLabel(aircraft),
         priority: 3,
         tags: ['eye'],
+      });
+    }
+  }
+
+  if (!isOnCooldown('watched', aircraft.hex)) {
+    const matchedEntry = getWatchList().find((entry) => matchesWatchEntry(aircraft, entry));
+    if (matchedEntry) {
+      markNotified('watched', aircraft.hex);
+      notify({
+        title: 'Watched aircraft',
+        message: aircraftLabel(aircraft),
+        priority: 4,
+        tags: ['eyes'],
       });
     }
   }

@@ -285,6 +285,69 @@ html, body {
   display: inline-block;
 }
 
+.mlpr-watch-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.mlpr-watch-form select,
+.mlpr-watch-form input {
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 13px;
+}
+
+.mlpr-watch-form input[type='text'],
+.mlpr-watch-form input[type='number'] {
+  width: 90px;
+}
+
+.mlpr-watch-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid #0f1920;
+  font-size: 13px;
+}
+
+.mlpr-gate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 260px;
+  margin: 40px auto;
+  text-align: center;
+}
+
+.mlpr-gate label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.mlpr-gate input {
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  border-radius: 4px;
+  padding: 6px 8px;
+}
+
+.mlpr-gate-error {
+  color: #e03131;
+  font-size: 12px;
+  min-height: 1em;
+  margin: 4px 0 0;
+}
+
 @media (min-width: 900px) {
   #panel-overlay {
     background: transparent;
