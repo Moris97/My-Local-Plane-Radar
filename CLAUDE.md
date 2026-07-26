@@ -176,10 +176,50 @@ example/test data.
   modules built on x86 don't run on ARM).
 - Frontend: plain JavaScript (ES modules) + MapLibre GL JS. **No framework,
   no build step.** Static files served directly by Fastify.
-- Basemap: Natural Earth 1:10m GeoJSON (coastlines, borders, rivers, major
-  cities), ~20 MB, public domain. Fetched by `scripts/fetch-mapdata.sh` at
-  install time — **never committed**. Design the map layer so a later swap to
-  Protomaps `.pmtiles` is possible, but do not implement that swap now.
+- Basemap: two modes, switchable in Settings → Map (`basemapMode`,
+  `public/js/settings-state.js`), **online is the default**:
+  - **Online**: OpenFreeMap (`https://tiles.openfreemap.org`) vector tiles —
+    no API key, no signup, no rate limit. We do **not** use one of their
+    ready-made styles (liberty/positron/bright) as-is — checked live and none
+    fit the dark green/blue/black theme without a full repaint anyway, so
+    `public/mapstyles/online-dark.json` is our own MapLibre style spec
+    authored against their `openmaptiles`-schema vector source (~20 curated
+    layers: water, landcover, roads by class, railways, boundaries, place
+    labels, and — fitting for a plane radar — airports/runways/taxiways
+    picked out in the same green as a fresh aircraft blip). Keep this file in
+    sync by hand if OpenFreeMap ever changes their schema; it intentionally
+    does not inherit from their styles, so it won't drift silently.
+  - **Offline**: Natural Earth 1:10m GeoJSON (coastlines, borders, rivers,
+    major cities), ~20 MB, public domain. Fetched by
+    `scripts/fetch-mapdata.sh` at install time — **never committed**.
+  - Switching modes calls `map.setStyle(...)` on the existing MapLibre
+    instance (`public/js/basemap.js`'s `applyBasemapMode`) — no page reload,
+    aircraft markers survive (DOM markers aren't part of the style). Because
+    `setStyle` wipes all sources/layers, the trail source/layer is re-added
+    every time via the `style.load` event, and the offline GeoJSON layers are
+    likewise re-added when switching back to offline.
+  - **Session-scoped auto-fallback**: if the online style can't be reached
+    (preflight fetch of OpenFreeMap's TileJSON fails, or a later `error`
+    event on the `openmaptiles` source looks like a network failure),
+    `basemap.js` switches to offline automatically for the rest of that
+    browser tab and won't retry online again until the page is reloaded —
+    the persisted `basemapMode` setting itself is untouched, so a reload (or
+    the user manually reselecting "Online" in Settings) tries online again.
+    Settings shows a small notice when this fallback is currently active.
+  - **Attribution**: OSM data is ODbL-licensed, which requires attribution —
+    not optional. We disabled MapLibre's default `AttributionControl`
+    (Stage 1), so instead there's our own small custom-styled attribution
+    div (`#mlpr-attribution` in `index.html`/`style.css`) with two parts: a
+    "MapLibre" credit (`maplibre.org`) always shown in both modes, and a
+    "© OpenStreetMap contributors" link (`#mlpr-osm-attribution`, toggled by
+    `updateAttributionVisibility()` in `app.js`) shown only while
+    `basemapMode` is effectively online. Note MapLibre GL JS itself
+    (BSD-3-Clause) does **not** legally require an on-map credit — only
+    keeping the license text in the repo/docs (already covered by
+    `THIRD_PARTY.md`/`LICENSE`) — the MapLibre credit is included anyway per
+    explicit request, not a license obligation. Offline mode (Natural Earth,
+    public domain) needs no data attribution, hence only the MapLibre half
+    shows.
 - Icons: inline SVG only, authored in-repo. No icon libraries, icon fonts, or
   CDNs — everything must work fully offline.
 
