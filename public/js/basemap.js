@@ -80,6 +80,7 @@ const ONLINE_LAYER_IDS = [
   'aeroway-fill',
   'aeroway-taxiway',
   'aeroway-runway',
+  'boundary-locality',
   'boundary-region',
   'boundary-country',
   'airport-label',

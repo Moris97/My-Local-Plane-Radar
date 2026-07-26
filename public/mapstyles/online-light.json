@@ -61,8 +61,8 @@
       "source-layer": "waterway",
       "filter": ["!=", ["get", "brunnel"], "tunnel"],
       "paint": {
-        "line-color": "#3d7aa8",
-        "line-width": ["match", ["get", "class"], "river", 1.5, 0.75]
+        "line-color": "#5f93b8",
+        "line-width": ["match", ["get", "class"], "river", 1.2, 0.6]
       }
     },
     {
@@ -161,6 +161,20 @@
       }
     },
     {
+      "id": "boundary-locality",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "boundary",
+      "minzoom": 9,
+      "filter": ["all", [">=", ["get", "admin_level"], 7], ["<=", ["get", "admin_level"], 10], ["!=", ["get", "maritime"], 1]],
+      "paint": {
+        "line-color": "#9a9a9a",
+        "line-width": 0.5,
+        "line-opacity": 0.6,
+        "line-dasharray": [1, 2]
+      }
+    },
+    {
       "id": "boundary-region",
       "type": "line",
       "source": "openmaptiles",
@@ -181,7 +195,8 @@
       "filter": ["all", ["==", ["get", "admin_level"], 2], ["!=", ["get", "maritime"], 1]],
       "paint": {
         "line-color": "#b3622c",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 1, 12, 2.5]
+        "line-opacity": 0.65,
+        "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.75, 12, 1.8]
       }
     },
     {
@@ -189,7 +204,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "aerodrome_label",
-      "minzoom": 9,
+      "minzoom": 8,
       "filter": ["has", "iata"],
       "layout": {
         "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]],
