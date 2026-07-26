@@ -10,7 +10,8 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "start": "node server/src/index.js"
+    "start": "node server/src/index.js",
+    "test": "node --test"
   },
   "dependencies": {
     "@fastify/static": "^10.1.2",

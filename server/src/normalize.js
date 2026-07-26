@@ -40,13 +40,3 @@ export function normalizeAircraft(raw) {
     seen: numberOrUndefined(raw.seen),
   };
 }
-
-export function normalizeSnapshot(rawSnapshot) {
-  const aircraft = Array.isArray(rawSnapshot?.aircraft) ? rawSnapshot.aircraft : [];
-
-  return {
-    now: numberOrUndefined(rawSnapshot?.now) ?? Date.now() / 1000,
-    messages: numberOrUndefined(rawSnapshot?.messages),
-    aircraft: aircraft.map(normalizeAircraft).filter((aircraft) => aircraft !== null),
-  };
-}

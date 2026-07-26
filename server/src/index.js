@@ -1,8 +1,7 @@
 import { buildServer } from './server.js';
 import { createSource } from './sources/index.js';
-import { normalizeSnapshot } from './normalize.js';
-import { setSnapshot } from './state.js';
-import { toWireSnapshot } from './wire.js';
+import { applyRawSnapshot } from './state.js';
+import { toWireAircraftList } from './wire.js';
 
 const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -14,9 +13,14 @@ async function pollOnce(broadcast) {
   const raw = await source.fetchSnapshot();
   if (raw === null) return;
 
-  const snapshot = normalizeSnapshot(raw);
-  setSnapshot(snapshot);
-  broadcast(toWireSnapshot(snapshot));
+  const updated = applyRawSnapshot(raw);
+  if (updated.length === 0) return;
+
+  broadcast({
+    type: 'delta',
+    now: Date.now() / 1000,
+    updated: toWireAircraftList(updated),
+  });
 }
 
 async function main() {

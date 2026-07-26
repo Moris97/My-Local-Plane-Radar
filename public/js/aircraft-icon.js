@@ -20,3 +20,7 @@ export function setPlaneHeading(element, trackDegrees) {
   const heading = typeof trackDegrees === 'number' ? trackDegrees : 0;
   svg.style.transform = `rotate(${heading}deg)`;
 }
+
+export function setPlaneColor(element, cssColor) {
+  element.querySelector('g').setAttribute('fill', cssColor);
+}

@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
-import { getSnapshot } from './state.js';
-import { toWireSnapshot } from './wire.js';
+import { getTrackedAircraft } from './state.js';
+import { toWireAircraftList } from './wire.js';
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,11 @@ export async function buildServer() {
     wss.handleUpgrade(request, socket, head, (ws) => {
       clients.add(ws);
       ws.on('close', () => clients.delete(ws));
-      ws.send(JSON.stringify(toWireSnapshot(getSnapshot())));
+      ws.send(JSON.stringify({
+        type: 'full',
+        now: Date.now() / 1000,
+        aircraft: toWireAircraftList(getTrackedAircraft()),
+      }));
     });
   });
 

@@ -6,15 +6,16 @@ function roundAltitude(value) {
   return typeof value === 'number' ? Math.round(value / 25) * 25 : value;
 }
 
-export function toWireSnapshot(snapshot) {
+export function toWireAircraft(aircraft) {
   return {
-    now: snapshot.now,
-    aircraft: snapshot.aircraft.map((aircraft) => ({
-      ...aircraft,
-      lat: round5(aircraft.lat),
-      lon: round5(aircraft.lon),
-      altBaro: roundAltitude(aircraft.altBaro),
-      altGeom: roundAltitude(aircraft.altGeom),
-    })),
+    ...aircraft,
+    lat: round5(aircraft.lat),
+    lon: round5(aircraft.lon),
+    altBaro: roundAltitude(aircraft.altBaro),
+    altGeom: roundAltitude(aircraft.altGeom),
   };
+}
+
+export function toWireAircraftList(list) {
+  return list.map(toWireAircraft);
 }
