@@ -50,9 +50,8 @@
       "type": "fill",
       "source": "openmaptiles",
       "source-layer": "landuse",
-      "maxzoom": 12,
       "filter": ["==", ["get", "class"], "residential"],
-      "paint": { "fill-color": "#0d1116", "fill-opacity": 0.5 }
+      "paint": { "fill-color": "#2b2820", "fill-opacity": 0.75 }
     },
     {
       "id": "waterway",
