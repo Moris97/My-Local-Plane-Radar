@@ -31,6 +31,12 @@ const DICTIONARIES = {
     resetToAuto: 'Reset to auto-detected',
     aircraftHistory: 'Aircraft (last 24h)',
     messagesHistory: 'Messages/min (last 24h)',
+    notifications: 'Notifications',
+    squawkAlerts: 'Squawk alerts',
+    firstSeen: 'First time seen aircraft',
+    rangeRecord: 'New range record',
+    ntfyInstructions: 'To receive push notifications, install the ntfy app and enter this code as the topic:',
+    regenerateTopic: 'Generate new code',
   },
   pl: {
     list: 'Lista',
@@ -64,6 +70,12 @@ const DICTIONARIES = {
     resetToAuto: 'Przywróć automatyczne wykrywanie',
     aircraftHistory: 'Samoloty (ostatnie 24h)',
     messagesHistory: 'Wiadomości/min (ostatnie 24h)',
+    notifications: 'Powiadomienia',
+    squawkAlerts: 'Alerty squawk',
+    firstSeen: 'Pierwszy raz widziany samolot',
+    rangeRecord: 'Nowy rekord zasięgu',
+    ntfyInstructions: 'Aby otrzymywać powiadomienia push, zainstaluj aplikację ntfy i wpisz ten kod jako temat:',
+    regenerateTopic: 'Wygeneruj nowy kod',
   },
 };
 

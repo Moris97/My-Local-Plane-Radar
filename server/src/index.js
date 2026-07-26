@@ -5,6 +5,8 @@ import { toWireAircraftList } from './wire.js';
 import { setAutoDetectedHome } from './home.js';
 import { ingestStats, getDailyAccumulator, getLatestStatsValues } from './stats-history.js';
 import { upsertDailyStats } from './db.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
+import { pruneCooldowns } from './notifications/cooldown.js';
 
 const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -12,6 +14,7 @@ const POLL_INTERVAL_MS = 1000;
 const STATS_POLL_INTERVAL_MS = 15000;
 const STATS_BROADCAST_INTERVAL_MS = 5000;
 const DAILY_STATS_FLUSH_INTERVAL_MS = 45000;
+const COOLDOWN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 const source = createSource();
 
@@ -20,6 +23,10 @@ async function pollOnce(broadcast) {
   if (raw === null) return;
 
   const updated = applyRawSnapshot(raw);
+
+  for (const aircraft of updated) {
+    evaluateAircraftRules(aircraft);
+  }
 
   broadcast({
     type: 'delta',
@@ -31,7 +38,11 @@ async function pollOnce(broadcast) {
 async function pollStats() {
   const stats = await source.fetchStats();
   if (stats === null) return;
-  ingestStats(stats);
+
+  const sample = ingestStats(stats);
+  if (sample) {
+    evaluateRangeRecordRule(sample.maxRangeKm);
+  }
 }
 
 function broadcastStats(broadcast) {
@@ -76,6 +87,8 @@ async function main() {
       app.log.error(err, 'daily stats flush failed');
     }
   }, DAILY_STATS_FLUSH_INTERVAL_MS);
+
+  setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
 
   await app.listen({ port: PORT, host: HOST });
 }

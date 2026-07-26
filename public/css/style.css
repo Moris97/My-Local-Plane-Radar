@@ -264,6 +264,27 @@ html, body {
   cursor: pointer;
 }
 
+.mlpr-notif-squawk-codes {
+  display: flex;
+  gap: 12px;
+  margin: 0 0 6px 24px;
+}
+
+.mlpr-notif-squawk-codes label {
+  margin: 0;
+}
+
+.mlpr-ntfy-topic {
+  font: 600 16px/1.4 ui-monospace, monospace;
+  letter-spacing: 1px;
+  color: #3ddc84;
+  background: #0e161c;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin: 0 0 8px;
+  display: inline-block;
+}
+
 @media (min-width: 900px) {
   #panel-overlay {
     background: transparent;

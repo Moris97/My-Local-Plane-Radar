@@ -26,6 +26,13 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seen_aircraft (
+    hex TEXT PRIMARY KEY,
+    first_seen_at INTEGER NOT NULL
+  )
+`);
+
 export function getConfig(key) {
   const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
   return row ? row.value : null;
@@ -55,4 +62,26 @@ export function upsertDailyStats(date, { maxAircraft, totalMessages, maxRangeKm 
 
 export function getDailyStats(date) {
   return db.prepare('SELECT * FROM daily_stats WHERE date = ?').get(date) ?? null;
+}
+
+export function getConfigJSON(key, fallback) {
+  const raw = getConfig(key);
+  if (raw === null) return fallback;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+export function setConfigJSON(key, value) {
+  setConfig(key, JSON.stringify(value));
+}
+
+export function hasSeenAircraft(hex) {
+  return db.prepare('SELECT 1 FROM seen_aircraft WHERE hex = ?').get(hex) !== undefined;
+}
+
+export function markAircraftSeen(hex) {
+  db.prepare('INSERT OR IGNORE INTO seen_aircraft (hex, first_seen_at) VALUES (?, ?)').run(hex, Date.now());
 }

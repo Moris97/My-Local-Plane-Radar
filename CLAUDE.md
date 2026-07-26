@@ -216,16 +216,42 @@ example/test data.
   up on it returning.
 - Type + callsign label appears at appropriate zoom levels.
 
-## Notification engine (design now, do not implement yet)
+## Notification engine
 
-Condition -> action rules, configured in YAML or JSON. Planned triggers:
-squawk 7500/7600/7700, military flag in `dbFlags`, watched hex/registration,
-entering a radius around home or dropping below an altitude, first-time-seen
-aircraft, new range record. Delivery: **ntfy first** (single POST, no certs,
-works on Android/iOS); Web Push deferred (needs secure context, awkward over
-plain HTTP on a LAN). **Every rule needs a per-hex cooldown (default 30 min)
-and deduplication** — otherwise one aircraft circling a radius boundary spams
-dozens of alerts.
+Implemented (Stage 5) in `server/src/notifications/`: `rules.js` (evaluation),
+`cooldown.js` (per-`${ruleType}:${hex}` in-memory cooldown, default 30 min),
+`ntfy.js` (delivery), `settings.js` (enabled/disabled rules + the ntfy topic,
+persisted in the SQLite `config` table — see `db.js`'s JSON config helpers).
+
+Live triggers: squawk 7500/7600/7700, first-time-seen aircraft (checked
+against the `seen_aircraft` table — grows for the life of the install, bounded
+by distinct aircraft ever seen, not a "position history" table so it's fine
+under hard rule 4), new all-time range record (compared against a
+`allTimeMaxRangeKm` config value, fed by `stats.json`'s own `max_distance` —
+no per-aircraft distance math needed). Each rule respects its own
+enabled/disabled toggle from Settings; **squawk has a per-hex cooldown**
+(first-seen and range-record are naturally one-shot per hex/record already).
+
+**Delivery**: ntfy.sh (public instance), using its **JSON publish API** (POST
+to `https://ntfy.sh/` with `{topic, title, message, priority, tags}` as the
+body) — not the header-based API, which breaks on non-ASCII content.
+`priority` must be a **number 1–5**, not the string values ("default" etc.)
+the header API accepts.
+
+**ntfy topic**: an 8-character random alphanumeric string, auto-generated on
+first use and persisted in `config`, shown in Settings with "install ntfy,
+enter this as the topic." Regenerable. Never hardcode or log a real topic
+value anywhere persistent — whoever knows it can read the notifications.
+
+Deferred to later (see `TODO.md`): watched hex/registration list, radius-from-
+home / altitude-threshold rule. Web Push is deferred for good (needs a secure
+context, awkward over plain HTTP on a LAN) — ntfy is the only delivery channel
+for now.
+
+**Known rough edge**: on a fresh install (empty `seen_aircraft` table), every
+aircraft currently in range will fire a "first seen" notification. Not fixed
+— mention it if the user is surprised by a notification burst right after
+first setup.
 
 ## How we work
 
@@ -241,3 +267,6 @@ dozens of alerts.
   dependencies) get verified by the user on real hardware. If something isn't
   certain, say so instead of guessing.
 - When in doubt about a requirement — ask, don't assume.
+- Whenever the user says something is deferred ("we'll do that later",
+  "improve it later"), add it to `TODO.md` immediately rather than letting it
+  evaporate.
