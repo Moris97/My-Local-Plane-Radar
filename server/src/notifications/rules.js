@@ -22,7 +22,11 @@ function notify(payload) {
 }
 
 function aircraftLabel(aircraft) {
-  return aircraft.flight || aircraft.hex;
+  const parts = [aircraft.flight || aircraft.hex];
+  if (aircraft.registration) parts.push(aircraft.registration);
+  if (aircraft.typeCode) parts.push(aircraft.typeCode);
+  if (aircraft.category) parts.push(`cat ${aircraft.category}`);
+  return parts.join(' · ');
 }
 
 export function evaluateAircraftRules(aircraft) {
@@ -33,7 +37,7 @@ export function evaluateAircraftRules(aircraft) {
       markNotified('squawk', aircraft.hex);
       notify({
         title: `Squawk ${aircraft.squawk} — ${SQUAWK_MEANINGS[aircraft.squawk] ?? 'Alert'}`,
-        message: `${aircraftLabel(aircraft)}${aircraft.typeCode ? ` (${aircraft.typeCode})` : ''}`,
+        message: aircraftLabel(aircraft),
         priority: 5,
         tags: ['rotating_light'],
       });
@@ -45,7 +49,7 @@ export function evaluateAircraftRules(aircraft) {
     if (settings.firstSeenEnabled) {
       notify({
         title: 'First time seen',
-        message: `${aircraftLabel(aircraft)}${aircraft.typeCode ? ` (${aircraft.typeCode})` : ''}`,
+        message: aircraftLabel(aircraft),
         priority: 3,
         tags: ['eye'],
       });
