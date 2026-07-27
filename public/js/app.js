@@ -59,6 +59,15 @@ function ensureTrailLayer() {
   map.addSource(TRAIL_SOURCE_ID, {
     type: 'geojson',
     data: { type: 'FeatureCollection', features: [] },
+    // The trail is built as one separate 2-point LineString per segment
+    // (so each can carry its own altitude color) rather than a single
+    // multi-point line. With the default tolerance, MapLibre's internal
+    // tile simplification (geojson-vt) can collapse very short segments
+    // below its pixel tolerance at low zoom, making them disappear --
+    // reported as "gaps that appear zoomed out, vanish zoomed in", which
+    // is the textbook symptom of this. tolerance: 0 disables that
+    // simplification so short segments always render regardless of zoom.
+    tolerance: 0,
   });
   map.addLayer({
     id: TRAIL_SOURCE_ID,
@@ -160,6 +169,16 @@ document.addEventListener('click', (event) => {
   }
 });
 
+// A "gone" aircraft (marker already removed, state.goneAt set -- see the
+// REMOVE_MS handling below) is kept around in aircraftState/trail history
+// for up to FORGET_MS purely so a reappearance can be linked with a grey
+// gap segment. Its trail must not keep rendering on the map for that whole
+// window, though -- previously it stayed visible for up to 5 minutes after
+// the plane icon itself had already vanished.
+function isCurrentlyTracked(hex) {
+  return aircraftState.get(hex)?.goneAt === null;
+}
+
 function renderTrail() {
   const source = map.getSource(TRAIL_SOURCE_ID);
   if (!source) return;
@@ -170,9 +189,10 @@ function renderTrail() {
   if (trailsEnabled) {
     if (trailMode === 'all') {
       for (const hex of aircraftState.keys()) {
+        if (!isCurrentlyTracked(hex)) continue;
         features = features.concat(trailFeaturesFor(hex));
       }
-    } else if (selectedHex) {
+    } else if (selectedHex && isCurrentlyTracked(selectedHex)) {
       features = trailFeaturesFor(selectedHex);
     }
   }
@@ -372,6 +392,7 @@ function handleSnapshot(snapshot) {
 
 setInterval(() => {
   const now = Date.now();
+  let trailNeedsRefresh = false;
 
   for (const [hex, state] of aircraftState) {
     if (state.goneAt !== null) {
@@ -390,6 +411,10 @@ setInterval(() => {
       state.marker?.remove();
       state.marker = null;
       state.goneAt = now;
+      // The trail must stop rendering right when the icon disappears, not
+      // whenever some other aircraft's update happens to next trigger a
+      // redraw (see isCurrentlyTracked() in renderTrail()).
+      trailNeedsRefresh = true;
       continue;
     }
 
@@ -397,6 +422,8 @@ setInterval(() => {
       setPlaneColor(state.marker.getElement(), colorForElapsed(elapsed));
     }
   }
+
+  if (trailNeedsRefresh) renderTrail();
 }, TICK_INTERVAL_MS);
 
 function connect() {
