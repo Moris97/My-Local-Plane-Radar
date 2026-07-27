@@ -106,11 +106,14 @@ function ensureTrailLayer() {
       layout: { 'line-cap': 'butt', 'line-join': 'round' },
       paint: {
         'line-color': ['get', 'color'],
-        'line-width': 3,
-        // Units are multiples of line-width, so this is a ~9px dash / ~7.5px
-        // gap -- clearly readable as "no contact here" without looking like
-        // a separate map feature.
-        'line-dasharray': [3, 2.5],
+        // Deliberately thinner and slightly translucent compared to the
+        // solid trail: a stretch with no data should read as a faint
+        // placeholder, not as a feature competing with real track.
+        'line-width': 2,
+        'line-opacity': 0.85,
+        // Dash units are multiples of line-width, so this is a 5px dash /
+        // 5px gap -- fine enough to look delicate at any zoom.
+        'line-dasharray': [2.5, 2.5],
       },
     });
   }

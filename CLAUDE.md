@@ -375,7 +375,17 @@ photo fetch, and is the piece wired into `panels.js`.
   the app), but the photo is fetched exactly once per panel open — rebuilding
   it on every redraw would flicker/reload the image constantly.
 - Trail color follows altitude, smooth gradient: green below 10,000 ft, blue
-  in the 10,000–25,000 ft band, red trending to dark red at 40,000 ft.
+  by 25,000 ft, then violet/magenta to red at 36,000 ft and dark red at
+  40,000 ft. **Both** the green→blue and blue→red legs interpolate in HSL
+  (`lerpSpace: 'hsl'` in `ALTITUDE_STOPS`), deliberately: a plain RGB lerp
+  between two colors of different hue *and* lightness passes through
+  desaturated mud. That produced `rgb(92,57,83)` at 35,000 ft — typical
+  cruise altitude, so most trails — a grey-maroon barely distinguishable
+  from the grey no-contact color. Every altitude now stays above ~65%
+  saturation while the gap grey sits at ~3%, which is what keeps "changed
+  altitude" and "lost contact" visually separable. Regression tests in
+  `trail.test.js` assert both the saturation floor and that a 3,000 ft step
+  is a visibly different color — don't switch these legs back to RGB.
 - Signal loss handling: no update for 3s → aircraft starts fading toward red;
   fully red by 10s, **stays fully red for another 10s** (found via real use —
   it was disappearing too abruptly), actually removed at 20s
