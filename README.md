@@ -1,58 +1,127 @@
 # My Local Plane Radar (MLPR)
 
-A self-hosted web interface for a local ADS-B receiver running on Raspberry Pi.
+**Version 1.0** — a self-hosted web interface for a local ADS-B receiver
+running on Raspberry Pi.
 
 MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wiedehopf/readsb)
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy) — without touching readsb itself.
 
-**Status: past Stage 6 of the build plan**, plus most of the post-launch
-backlog. Live map with delta updates, signal-loss fading, altitude-colored
-trails, a basemap, a bottom-bar UI (List/Stats/Settings), receiver stats with
-a 24h history chart, SQLite-backed daily aggregates, a notification engine
-(squawk 7500/7600/7700, first-time-seen aircraft, new range record, and a
-configurable watch list matching aircraft type/registration/flight number
-with an optional altitude condition — delivered via ntfy), an opt-in password
-for the Settings panel, and a systemd service for production are all in
-place. See [CLAUDE.md](./CLAUDE.md) for the architecture and the staged build
-plan, and [TODO.md](./TODO.md) for what's explicitly deferred.
+Live map with delta updates, signal-loss fading, altitude-colored trails, a
+basemap (online or fully offline), a bottom-bar UI (List/Stats/Settings),
+receiver stats with history charts, a notification engine (squawk
+7500/7600/7700, first-time-seen aircraft, new range record, and a
+configurable watch list matching aircraft type/registration/flight number),
+an opt-in password for the Settings panel, and a systemd service for
+production are all in place. See [CLAUDE.md](./CLAUDE.md) for the
+architecture and [TODO.md](./TODO.md) for what's explicitly deferred.
 
-## Running it
+## Before you start
 
-### Development (any machine)
+MLPR is a **display and notification layer** — it does not talk to an SDR
+dongle itself. It needs an existing, already-running
+[readsb](https://github.com/wiedehopf/readsb) installation on the same
+machine, producing `/run/readsb/aircraft.json`. If you don't have that yet,
+set up readsb (or another ADS-B decoder you can point `MLPR_SOURCE=http` at
+— see below) first; the
+[wiedehopf/adsb-scripts install guide](https://github.com/wiedehopf/adsb-scripts)
+is the usual starting point on a Raspberry Pi. Once `readsb` is running and
+you can see aircraft in its own web page, come back here.
+
+## Installing on a Raspberry Pi (step by step)
+
+This is the normal path for a home install. It assumes a Raspberry Pi (3 or
+newer) running Raspberry Pi OS, readsb already set up per above, and that
+you're comfortable pasting commands into a terminal (over SSH or directly).
+Every command below can be copy-pasted as-is.
+
+**1. Check/install Node.js.** MLPR needs Node.js 22.13 or newer. Debian/Raspberry
+Pi OS's own `apt` package is too old, so install it from NodeSource instead:
 
 ```
-npm install
-./scripts/fetch-mapdata.sh   # one-time: downloads the basemap (~12 MB) into data/naturalearth/
-npm start                    # MLPR_PORT (default 1090), MLPR_SOURCE=file|http|replay
+node --version   # if this prints v22.13.0 or higher, skip to step 2
 ```
 
-Then open `http://<host>:1090/`.
+If it's missing or too old:
 
-### Production (Raspberry Pi, as a systemd service)
+```
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
+sudo apt-get install -y nodejs
+```
 
-Requires Node.js >= 22.13 already installed from
-[NodeSource](https://github.com/nodesource/distributions) — **not**
-`apt install nodejs` (Debian Trixie's own package is too old). `install.sh`
-detects this and aborts with instructions if it's missing or too old.
+**2. Download MLPR:**
 
 ```
 git clone https://github.com/Moris97/My-Local-Plane-Radar.git
 cd My-Local-Plane-Radar
+```
+
+**3. Run the installer:**
+
+```
 ./scripts/install.sh
 ```
 
-This installs production dependencies only (skips Playwright), fetches the
-basemap if missing, and installs+enables a `mlpr@<your-user>.service` systemd
-unit (`systemd/mlpr@.service`) that starts on boot, restarts on crash, and is
-capped at `MemoryMax=300M` / `--max-old-space-size=192` so a leak can't starve
-readsb via the OOM killer.
+This installs MLPR's dependencies, downloads the offline basemap and airline
+database (best-effort — skipped if you're offline, can be re-run later), and
+sets up a systemd service (`mlpr@<your-user>.service`) that starts
+automatically on every boot and restarts itself if it ever crashes. It will
+ask for your `sudo` password near the end — that's expected, it's needed to
+install the systemd unit.
+
+**4. Open it in a browser.** From any device on the same network (phone,
+laptop):
 
 ```
-sudo systemctl status mlpr@$(whoami).service   # check it's running
-journalctl -u mlpr@$(whoami).service -f        # follow logs
-git pull && sudo systemctl restart mlpr@$(whoami).service   # update
+http://<your-pi's-ip-address>:1090
 ```
+
+Replace `<your-pi's-ip-address>` with the Pi's LAN IP (find it with
+`hostname -I` on the Pi itself). If you're on the Pi's own desktop, you can
+also just use `http://localhost:1090`.
+
+That's it — you should see the live map. If nothing shows up, check that
+readsb itself is working first (its own web interface, usually port 8080),
+then see **Troubleshooting** below.
+
+### Checking on it later / updating
+
+```
+sudo systemctl status mlpr@$(whoami).service   # is it running?
+journalctl -u mlpr@$(whoami).service -f        # watch live logs
+git pull && sudo systemctl restart mlpr@$(whoami).service   # update to the latest version
+```
+
+### Troubleshooting
+
+- **"Node.js not found" / "too old"** — re-run step 1's NodeSource commands,
+  then re-run `./scripts/install.sh`.
+- **The page loads but no aircraft ever appear** — readsb likely isn't
+  writing to `/run/readsb/aircraft.json`, or MLPR is pointed at the wrong
+  path. Check `journalctl -u mlpr@$(whoami).service -f` for errors, and
+  confirm readsb's own web page shows live traffic. If readsb writes
+  `aircraft.json` somewhere non-standard, `MLPR_AIRCRAFT_JSON_PATH` in the
+  systemd unit (`systemd/mlpr@.service`) is the place to fix it.
+- **No registration/aircraft type ever shows up** — `install.sh` tries to
+  wire up readsb's aircraft database automatically; if that step failed
+  (shown in the install output), see the `--db-file` note in
+  [CLAUDE.md](./CLAUDE.md).
+- **Still stuck** — open an
+  [issue](https://github.com/Moris97/My-Local-Plane-Radar/issues) with what
+  you tried and the relevant `journalctl` output.
+
+## Development (any machine, not just a Pi)
+
+For working on MLPR itself, or trying it out without a real receiver
+(`MLPR_SOURCE=replay` plays back recorded sample data):
+
+```
+npm install
+./scripts/fetch-mapdata.sh   # one-time: downloads the offline basemap (~12 MB) into data/naturalearth/
+npm start                    # MLPR_PORT (default 1090), MLPR_SOURCE=file|http|replay
+```
+
+Then open `http://<host>:1090/`.
 
 ## Why
 
