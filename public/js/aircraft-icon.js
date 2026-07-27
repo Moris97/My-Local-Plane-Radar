@@ -20,17 +20,24 @@ const ICONS = {
     <polygon points="9,20 12,18 15,20 12,19.3"/>
     <circle cx="12" cy="2.3" r="1"/>
   `,
-  // Helicopter: main rotor disk spanning almost the full width on a short
-  // mast, a teardrop-shaped cabin, and a long tapered tail boom ending in
-  // a tail rotor bar. The boom is deliberately long relative to the cabin
-  // -- too short and it reads as a lollipop/balloon instead of a
-  // helicopter (caught during development, first draft had a 6-unit boom
-  // that was barely visible at icon scale).
+  // Helicopter: X-pattern rotor blades (a single straight bar read as "|",
+  // not obviously a rotor) mounted directly over the cabin roof -- not out
+  // ahead of the nose, which is where the mast sat in the first draft
+  // (reported: "the rotor is in the wrong place, it belongs on the
+  // fuselage, not the front"). The cabin's own nose tip now extends above
+  // the rotor hub, so the blades visibly cross over the airframe instead of
+  // floating in front of it. Tail boom stays long relative to the cabin --
+  // too short and it reads as a lollipop/balloon instead of a helicopter
+  // (caught during development).
   helicopter: `
-    <rect x="1" y="4.3" width="22" height="1.5" rx="0.75"/>
-    <rect x="11.3" y="5.8" width="1.4" height="2"/>
-    <polygon points="12,7.8 14.8,10 14.2,13.5 9.8,13.5 9.2,10"/>
-    <polygon points="10.8,13.5 13.2,13.5 12.5,21.8 11.5,21.8"/>
+    <g transform="translate(12,9)">
+      <rect x="-8" y="-0.7" width="16" height="1.4" rx="0.7" transform="rotate(45)"/>
+      <rect x="-8" y="-0.7" width="16" height="1.4" rx="0.7" transform="rotate(-45)"/>
+      <circle r="1"/>
+    </g>
+    <rect x="11.3" y="9" width="1.4" height="2.2"/>
+    <polygon points="12,7.5 14.8,11.8 14.2,15.3 9.8,15.3 9.2,11.8"/>
+    <polygon points="10.8,15.3 13.2,15.3 12.5,21.8 11.5,21.8"/>
     <rect x="9.3" y="21.2" width="5.4" height="1.4" rx="0.7"/>
   `,
   // Ground-station beacon (readsb reports these with typeCode "TWR") --
