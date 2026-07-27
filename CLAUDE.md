@@ -82,21 +82,60 @@ file and atomically renames it — we will never read a half-written file, so no
 locking is needed on our side.
 
 Fields we use on each aircraft object — **treat every one of these as
-optional**, many are frequently absent:
+optional**, many are frequently absent. `server/src/normalize.js` is the
+single place that reads raw readsb field names; everywhere else in the
+codebase uses the camelCase names on the right.
 
 - `hex` — 24-bit ICAO address, our primary key
-- `flight` — callsign, has trailing spaces, must be trimmed
-- `lat`, `lon`, `seen_pos` — position and its age in seconds
-- `alt_baro` — barometric altitude, **can be the string `"ground"` instead of a number**
-- `alt_geom`, `gs`, `track`, `baro_rate`
+- `flight` → `flight` — callsign, has trailing spaces, must be trimmed
+- `lat`, `lon`, `seen_pos` → `seenPos` — position and its age in seconds
+- `alt_baro` → `altBaro` — barometric altitude, **can be the string
+  `"ground"` instead of a number** (becomes `onGround: true`, `altBaro`
+  cleared)
+- `alt_geom` → `altGeom`, `gs`, `track`, `baro_rate` → `baroRate`
+- `ias`, `tas`, `mach` — indicated/true airspeed, Mach number
+- `track_rate` → `trackRate`, `roll`, `mag_heading` → `magHeading`,
+  `true_heading` → `trueHeading`, `geom_rate` → `geomRate`
 - `squawk` — string, not a number (e.g. `"7700"`)
-- `category`, `r` (registration), `t` (type code), `desc`
-- `dbFlags` — bitmask; bit 1 = military
+- `emergency` — string enum; `"none"` is normalized away to `undefined`
+  (it's the common case and not worth a tile in the details panel)
+- `category`, `version`, `type` → `sourceType` (renamed to avoid clashing
+  with `typeCode`; this is the ADS-B/MLAT/Mode-S source-quality enum, e.g.
+  `adsb_icao`), `r` → `registration`, `t` → `typeCode`, `desc`
+- `dbFlags` — bitmask; bit 1 = `military`, bit 2 = `interesting`, bit 4 =
+  `pia` (Privacy ICAO Address), bit 8 = `ladd` (Limiting Aircraft Data
+  Displayed) — all four decoded in `normalizeAircraft`
+- `nav_qnh` → `navQnh`, `nav_altitude_mcp` → `navAltitudeMcp`,
+  `nav_altitude_fms` → `navAltitudeFms`, `nav_heading` → `navHeading`,
+  `nav_modes` → `navModes` (array of strings, e.g. `["autopilot",
+  "althold"]`) — `nav_modes` is deliberately **not** in `state.js`'s
+  `CHANGE_FIELDS` (see below)
+- `nic`, `rc`, `nic_baro` → `nicBaro`, `nac_p` → `nacP`, `nac_v` → `nacV`,
+  `sil`, `sil_type` → `silType`, `gva`, `sda` — data-quality metrics, mostly
+  passed straight through for the aircraft details panel's bottom tier
+- `alert`, `spi` — 0/1 in the raw JSON, converted to booleans
 - `rssi`, `messages`, `seen`
+- `wd`, `ws`, `oat`, `tat` — readsb-computed wind/temperature, passed through
+  as-is
+
+Deliberately **not** read: `lastPosition`/`rr_lat`/`rr_lon` (position
+fallback plumbing, not user-facing info), `acas_ra`/`gpsOkBefore`
+(readsb's own docs mark these experimental — don't build anything on them).
 
 Do not invent fields that aren't listed here. If something is needed that
 isn't confirmed above, ask — verify against docs or a live file rather than
 guessing.
+
+`server/src/state.js`'s `CHANGE_FIELDS` decides which fields force an
+immediate resend to the browser when they change vs. riding along passively
+on the next resend triggered by something else. The rule of thumb: primary
+flight-dynamics fields (position, altitude, speed, heading, squawk, nav
+targets, alert/spi/emergency) are tracked; receiver/signal-quality metrics
+and computed secondary stats (rssi, messages, seen, nic/rc/nac/sil/gva/sda,
+wd/ws/oat/tat) are volatile. Arrays (`navModes`) can't go in `CHANGE_FIELDS`
+at all — `normalizeAircraft` allocates a new array every poll, so a
+reference-equality check would treat it as "changed" every single tick and
+force a resend every second regardless of content.
 
 ### `receiver.json` and `stats.json` (siblings of `aircraft.json`)
 
@@ -268,7 +307,58 @@ example/test data.
 - **Dark theme is the default** — this is a radar display, must be readable
   at night without glare. Color theme: green, blue, black.
 - Plane icon rotates to heading. Click shows trail + basic info with a "show
-  more details" button (still a stub — see `TODO.md`).
+  more details" button that opens the full aircraft details panel (see
+  below) — reuses the same bottom-sheet/side-panel mechanism as
+  List/Stats/Settings (`public/js/panels.js`'s `PANELS.aircraft`), just not
+  tied to a bottom-bar button — opened contextually via `openPanel('aircraft')`
+  after `setInspectedHex(hex)` (`radar-state.js`).
+
+### Aircraft details panel (`public/js/aircraft-details.js` + `aircraft-panel.js`)
+
+Split in two deliberately: `aircraft-details.js` is pure data-shaping (which
+fields to show, in what order, formatted how) with **zero DOM/browser
+dependency**, so it's testable with plain `node --test`
+(`aircraft-details.test.js`) the same way the server code is — importing
+`i18n.js` or `radar-state.js` at module scope would crash under plain Node
+(`i18n.js` reads `navigator.language` at import time). `aircraft-panel.js`
+does the actual DOM rendering, translation (`t()`), and the Planespotters
+photo fetch, and is the piece wired into `panels.js`.
+
+- Fields are tiered: `core` (always visible: identity, squawk, altitude,
+  vertical rate, a speed cluster) and `extra` (behind a "show more
+  fields" button: heading/attitude, autopilot/FMS targets, flags,
+  weather, signal/reception, data-quality ballast, raw hex) — ordered
+  roughly most-to-least interesting to a spotter, least-interesting
+  (nic/rc/sil/gva/sda) at the very bottom.
+- A field with no data for a given aircraft simply produces no tile —
+  never a blank/dash placeholder.
+- Related fields that should read as one group (e.g. `gs`/`ias`/`tas`/`mach`)
+  are `cluster` entries: a labeled full-width row of inline chips, only the
+  chips that have data.
+- Two independent fields that should still sit side by side even when one
+  is missing (e.g. altitude/vertical rate) share a `pairId`. Rendering
+  (`aircraft-panel.js`'s `reorderForPairing`) matches pairs up explicitly
+  and promotes an unpaired survivor to a full-width row — **don't rely on
+  plain array adjacency for this**, it drifts as soon as an earlier tile in
+  the list gets filtered out for a given aircraft (found and fixed during
+  development: a missing `emergency` value shifted `altBaro` into squawk's
+  slot and left `baroRate` stranded alone).
+- Boolean flags (`military`/`interesting`/`pia`/`ladd`/`alert`/`spi`) only
+  produce a tile when `true` — "not military" isn't worth a row.
+- **Photo**: fetched client-side (never proxied through our server — see
+  `THIRD_PARTY.md` for why that's a hard requirement of the API's terms) from
+  Planespotters' free public Photo API, by ICAO hex. No photo, or the fetch
+  failing, just means no photo section — never an error shown to the user.
+  Headless/automated browsers get blocked by Cloudflare bot detection (hit
+  this repeatedly verifying the feature during development — curl and
+  headless Chromium both 403, a real/headed browser works fine); that's a
+  property of automation, not of real users' browsers, so don't read a 403
+  in a headless test as the integration being broken.
+- The photo section and the tiles section are separate DOM subtrees updated
+  independently: tiles redraw on every `radar-state.js` change (matching
+  `list.js`'s existing pattern, imprecise but consistent with the rest of
+  the app), but the photo is fetched exactly once per panel open — rebuilding
+  it on every redraw would flicker/reload the image constantly.
 - Trail color follows altitude, smooth gradient: green below 10,000 ft, blue
   in the 10,000–25,000 ft band, red trending to dark red at 40,000 ft.
 - Signal loss handling: no update for 3s → aircraft starts fading toward red;
@@ -332,6 +422,22 @@ to `https://ntfy.sh/` with `{topic, title, message, priority, tags}` as the
 body) — not the header-based API, which breaks on non-ASCII content.
 `priority` must be a **number 1–5**, not the string values ("default" etc.)
 the header API accepts.
+
+**Message content** (`rules.js`'s `aircraftLabel`): flight/hex, registration,
+type code, altitude (or "ground"), speed — in that order, each omitted when
+not available. The notification's **title** already carries the reason
+(squawk code + meaning, "First time seen", "Watched aircraft"), so the
+message body doesn't repeat it.
+
+**Click-to-open** (`ntfy.js`): ntfy's JSON API supports a `click` URL,
+opened when the notification is tapped on whatever device receives it
+(typically the user's phone) — so it must be a LAN address reachable from
+there, never `localhost` (which would mean the phone itself). Auto-detected
+once at startup via `os.networkInterfaces()` (first non-internal IPv4); on
+a Pi with one NIC that's always correct. Best-effort by design — if it ever
+picks the wrong interface, tapping the notification just does nothing
+useful, which was explicitly signed off as an acceptable trade-off for a
+"nice to have, skip if it can't be done cleanly" feature.
 
 **ntfy topic**: an 8-character random string, auto-generated on first use and
 persisted in `config`, shown in Settings with "install ntfy, enter this as
