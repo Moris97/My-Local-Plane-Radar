@@ -67,9 +67,19 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Anchors .mlpr-plane-label's absolute positioning below (not some
-     further-out ancestor). */
-  position: relative;
+  /* No `position` rule here on purpose -- this element IS the MapLibre
+     marker root (the library adds its own .maplibregl-marker class
+     alongside .mlpr-plane on the same node), and maplibre-gl.css already
+     sets `position: absolute; left: 0; top: 0` on it, which its own
+     `transform: translate(Xpx, Ypx)` positioning depends on. A same-
+     specificity `.mlpr-plane { position: relative }` rule here, loaded
+     after maplibre-gl.css, silently overrode that and put every aircraft
+     icon in the wrong place on screen (while trails, a separate GeoJSON
+     layer, stayed correct) -- caught live, not in this sandbox, since
+     WebGL doesn't run here. `position: absolute` is already just as valid
+     a containing block for .mlpr-plane-label's `position: absolute` below
+     as `relative` would have been, so the fix is simply not touching
+     `position` here at all. */
 }
 
 .mlpr-plane svg {
