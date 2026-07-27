@@ -509,6 +509,22 @@ dev-only, never needed on the Pi), fetches the basemap if missing, then
 installs/enables the unit (needs sudo — expected, this is a script the user
 runs themselves, not a web endpoint).
 
+It also wires up readsb's `--db-file` if readsb is present (`/etc/default/readsb`
+exists) and doesn't already have it configured: downloads
+[wiedehopf/tar1090-db](https://github.com/wiedehopf/tar1090-db)'s
+`aircraft.csv.gz` to `/usr/local/share/tar1090/`, appends `--db-file` to
+`JSON_OPTIONS` (or adds the line if missing), and restarts readsb. Without
+this, `r`/`t`/`desc` (registration/type/description) are never present in
+`aircraft.json` **for any aircraft, ever** — not a per-aircraft data gap, a
+missing local lookup file — which silently breaks both the aircraft details
+panel's registration/type tiles and the `military`/`interesting`/`pia`/`ladd`
+dbFlags bits everywhere. Idempotent (checked by grepping for `--db-file`
+first) and best-effort (a failed download warns and continues rather than
+failing the whole install — same philosophy as the basemap fetch step).
+This is configuring readsb via its own documented `EnvironmentFile`
+mechanism, not modifying readsb itself — doesn't cross the GPL boundary
+described earlier.
+
 `index.js` handles `SIGTERM`/`SIGINT` (what `systemctl stop`/`restart` send):
 flushes the in-memory daily-stats accumulator to SQLite before exiting, so a
 routine restart doesn't lose up to 45s of that day's aggregate. This is the

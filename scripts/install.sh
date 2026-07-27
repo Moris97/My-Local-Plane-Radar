@@ -38,6 +38,41 @@ if [ ! -d "$REPO_ROOT/data/naturalearth" ]; then
   ./scripts/fetch-mapdata.sh
 fi
 
+READSB_ENV_FILE="/etc/default/readsb"
+TAR1090_DB_DIR="/usr/local/share/tar1090"
+TAR1090_DB_FILE="$TAR1090_DB_DIR/aircraft.csv.gz"
+TAR1090_DB_URL="https://github.com/wiedehopf/tar1090-db/raw/csv/aircraft.csv.gz"
+
+# readsb only reports registration/aircraft-type (used by the aircraft
+# details panel and notifications) when started with --db-file pointing at
+# this database. Wire it up automatically on a fresh install so nobody has
+# to go find this out the hard way (see CLAUDE.md). Best-effort and
+# idempotent: skipped entirely if readsb isn't installed the standard way,
+# left alone if --db-file is already configured, and a failed download
+# (offline, GitHub unreachable) is a warning, not a failed install.
+if [ -f "$READSB_ENV_FILE" ]; then
+  if grep -q -- '--db-file' "$READSB_ENV_FILE"; then
+    echo "readsb already has --db-file configured -- leaving it alone."
+  else
+    echo
+    echo "readsb found without --db-file (needed for aircraft registration/type) -- setting it up..."
+    if sudo mkdir -p "$TAR1090_DB_DIR" && sudo wget -q -O "$TAR1090_DB_FILE" "$TAR1090_DB_URL"; then
+      if grep -q '^JSON_OPTIONS=' "$READSB_ENV_FILE"; then
+        sudo sed -i "s#^JSON_OPTIONS=\"\(.*\)\"#JSON_OPTIONS=\"\1 --db-file $TAR1090_DB_FILE\"#" "$READSB_ENV_FILE"
+      else
+        echo "JSON_OPTIONS=\"--db-file $TAR1090_DB_FILE\"" | sudo tee -a "$READSB_ENV_FILE" >/dev/null
+      fi
+      sudo systemctl restart readsb
+      echo "Done -- readsb now has --db-file configured and was restarted."
+    else
+      echo "Could not download the aircraft database (offline? GitHub unreachable?) -- skipping." >&2
+      echo "You can do this manually later -- see CLAUDE.md for the --db-file steps." >&2
+    fi
+  fi
+else
+  echo "No $READSB_ENV_FILE found -- skipping aircraft database setup (is readsb installed?)."
+fi
+
 SERVICE_NAME="mlpr@$(whoami).service"
 UNIT_SRC="$REPO_ROOT/systemd/mlpr@.service"
 UNIT_DST="/etc/systemd/system/mlpr@.service"
