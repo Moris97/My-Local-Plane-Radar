@@ -162,6 +162,21 @@ coordinates anywhere in code, tests, commits, or this file** — they're the
 user's real home location. Use placeholder values (e.g. `50.0, 20.0`) in any
 example/test data.
 
+**Home marker** (`app.js`'s `homeMarker`/`refreshHomeLocation`, toggle
+`showHomeMarker` in `settings-state.js`, Settings → Map): a small pulsing
+dot at the receiver's location, rendered only when one is configured. This
+is a **deliberate exception** to `/api/daylight`'s "never hand exact
+coordinates to the browser" caution — a home marker drawn *on the map* is
+the whole point of a personal plane radar and inherently requires the real
+lat/lon client-side, unlike the daylight boolean which never needed to.
+Reuses the existing `GET /api/settings` endpoint as-is (same one the Server
+tab's own home-location field calls) rather than adding a second one, which
+means the marker is subject to the exact same access control as that field:
+if a Settings password is set, a browser without a valid session simply
+won't see it (the fetch 401s, treated the same as "no home configured") —
+consistent with home location being Server-tab-gated everywhere else,
+not a special case that bypasses it.
+
 ## License policy
 
 - Project license: **MIT** (`LICENSE` at repo root).
@@ -338,8 +353,13 @@ example/test data.
   centers map), Stats, Settings (theme, units, altitude filter, layer
   visibility). Deliberately compact/centered, not stretched across the bar.
 - List and Settings are bottom sheets on phones, a side panel on large
-  screens; closable via X or Android/iOS back-gesture. Map stays visible on
-  desktop. **Stats is a full-screen view instead** (`#fullscreen-modal` in
+  screens; closable via X, Android/iOS back-gesture, click on the overlay,
+  or **Escape** (`panels.js`'s top-level `keydown` listener — closes
+  whichever of `currentPanel`/`currentModal` is open via the same
+  `closePanel`/`closeFullscreenModal` functions the X button uses, so it
+  consumes the pushed history entry the same way; a no-op if nothing is
+  open). Map stays visible on desktop.
+  **Stats is a full-screen view instead** (`#fullscreen-modal` in
   `index.html`, `FULLSCREEN_MODALS` registry in `panels.js`, separate from
   `PANELS`) — deliberately more screen real estate for the growing set of
   stats options, but still leaves the bottom bar reachable (`z-index` below
@@ -440,6 +460,17 @@ photo fetch, and is the piece wired into `panels.js`.
   `list.js`'s existing pattern, imprecise but consistent with the rest of
   the app), but the photo is fetched exactly once per panel open — rebuilding
   it on every redraw would flicker/reload the image constantly.
+- **`radar-state.js`'s aircraft mutators (`noteAircraft`/`removeAircraft`/
+  `clearAircraft`) are deliberately silent** — they don't call `notify()`
+  themselves. `app.js` applies a whole batch (every aircraft in one WS
+  delta, or every hex swept in one forget-tick) and then calls
+  `notifyAircraftChanged()` exactly once. This used to notify per-aircraft,
+  which meant a delta touching dozens of aircraft rebuilt `list.js`'s entire
+  `<table>` (and every other `onChange` listener) dozens of times a second —
+  found and fixed as a real perf complaint (list flicker/scroll-reset under
+  load), not a hypothetical one. Any new caller that mutates `liveAircraft`
+  must remember to flush afterward, same as the two existing call sites in
+  `app.js`; forgetting means listeners never find out, silently.
 - Trail color follows altitude, smooth gradient: golden green at ground
   level, pure green by 10,000 ft, blue by 17,500 ft, then violet/magenta to
   red at 30,250 ft and dark red at 40,000 ft. Every leg (`ALTITUDE_STOPS` in
@@ -473,7 +504,27 @@ photo fetch, and is the piece wired into `panels.js`.
   **and dashed** (`GAP_COLOR` in `trail.js` is a fixed neutral grey,
   deliberately identical in both map themes). After 5 minutes with no
   update, give up on it returning.
-- Type + callsign label appears at appropriate zoom levels.
+- **Map label under each aircraft** (`public/js/aircraft-icon.js`'s
+  `setPlaneLabel`, built by `app.js`'s `buildAircraftLabel`): configurable
+  per-field in Settings → Aircraft (`aircraftLabelFields` in
+  `settings-state.js` — flight/hex, type, altitude, speed, default just
+  flight/hex), so it stays as minimal as the user wants rather than
+  cluttering the map by default. A field with no data for a given aircraft
+  contributes nothing to the label (same "no tile, not a dash" philosophy as
+  the aircraft details panel) rather than a placeholder; all-fields-off (or
+  all-unavailable) collapses to an empty string, and `.mlpr-plane-label:empty`
+  in `style.css` hides the pill entirely rather than showing an empty one.
+  Rendered as a plain HTML div, a **sibling** of the `<svg>` inside
+  `.mlpr-plane` (not inside it) — `setPlaneHeading` only rotates the `<svg>`,
+  so the label never spins with the aircraft's heading, with no
+  counter-rotation needed. Colors follow the **map's** resolved light/dark
+  theme (`#map.mlpr-map-theme-light`/`-dark`, toggled in `app.js`'s
+  `switchBasemap` against the *resolved* theme, not the raw `auto` setting),
+  deliberately independent of the app's own always-dark UI theme, per
+  explicit request. Hidden below `LABEL_MIN_ZOOM` (zoom 7) via one class
+  toggle on the map container (`updateLabelZoomVisibility`) rather than
+  touching every marker on every zoom tick — dozens of overlapping labels at
+  a zoomed-out view is pure noise, not useful.
 - **Trails are always on**, with `trailMode` (Settings → Map) choosing
   `click` (only the selected aircraft, default) or `all` (every aircraft's
   trail drawn simultaneously, colors included). There used to be a separate

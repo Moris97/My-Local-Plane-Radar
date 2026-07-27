@@ -54,6 +54,10 @@ const ICONS = {
   `,
 };
 
+// Includes the label div as a sibling of <svg> (not inside it) deliberately
+// -- setPlaneHeading only rotates the <svg> element, so keeping the label
+// outside it means the label text never spins with the aircraft's heading,
+// with no extra counter-rotation needed.
 function iconSvg(kind) {
   return `
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -61,6 +65,7 @@ function iconSvg(kind) {
     ${ICONS[kind] ?? ICONS.passenger}
   </g>
 </svg>
+<div class="mlpr-plane-label"></div>
 `;
 }
 
@@ -93,9 +98,17 @@ export function setPlaneKind(element, aircraft) {
   const kind = classifyAircraftKind(aircraft);
   if (element.dataset.kind === kind) return;
   const color = element.querySelector('g')?.getAttribute('fill');
+  const labelText = element.querySelector('.mlpr-plane-label')?.textContent ?? '';
   element.dataset.kind = kind;
   element.innerHTML = iconSvg(kind);
   if (color) element.querySelector('g').setAttribute('fill', color);
+  const labelEl = element.querySelector('.mlpr-plane-label');
+  if (labelEl) labelEl.textContent = labelText;
+}
+
+export function setPlaneLabel(element, text) {
+  const labelEl = element.querySelector('.mlpr-plane-label');
+  if (labelEl) labelEl.textContent = text;
 }
 
 export function setPlaneHeading(element, trackDegrees) {

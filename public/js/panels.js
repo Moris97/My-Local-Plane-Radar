@@ -187,3 +187,12 @@ window.addEventListener('popstate', () => {
   closePanel({ fromPopstate: true });
   closeFullscreenModal({ fromPopstate: true });
 });
+
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape') return;
+  // Not fromPopstate -- this is a fresh close, same as clicking X or the
+  // overlay, so it still needs to consume the pushed history entry itself
+  // (closePanel/closeFullscreenModal call history.back() for that).
+  if (currentPanel) closePanel();
+  else if (currentModal) closeFullscreenModal();
+});

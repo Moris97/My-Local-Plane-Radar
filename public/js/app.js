@@ -1,4 +1,4 @@
-import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind } from './aircraft-icon.js';
+import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind, setPlaneLabel } from './aircraft-icon.js';
 import { applyBasemapMode, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails, colorForAltitude } from './trail.js';
 import { colorForElapsed, colorForSpeed } from './aircraft-color.js';
@@ -7,6 +7,7 @@ import {
   noteAircraft,
   removeAircraft,
   clearAircraft,
+  notifyAircraftChanged,
   noteLiveStats,
   setSelectRequestHandler,
   setInspectedHex,
@@ -24,6 +25,10 @@ const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
 const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
+// Below this zoom, dozens of overlapping labels would be pure noise rather
+// than useful -- matches the "at appropriate zoom levels" behavior other
+// ADS-B radar UIs default to.
+const LABEL_MIN_ZOOM = 7;
 
 const TRAIL_SOURCE_ID = 'mlpr-trail';
 const TRAIL_GAP_LAYER_ID = 'mlpr-trail-gap';
@@ -164,6 +169,14 @@ function resolveMapTheme(mapTheme) {
 async function switchBasemap(mode, theme) {
   lastRequestedBasemapMode = mode;
   lastRequestedMapTheme = theme;
+  // Drives .mlpr-plane-label's colors (style.css) -- deliberately the
+  // *map's* resolved theme, not the app's own always-dark UI theme, so
+  // labels stay readable against whichever basemap is actually showing.
+  // Set synchronously here (not inside onStyleLoaded) so labels don't lag a
+  // beat behind an automatic sunset/sunrise flip while tiles are still
+  // loading.
+  map.getContainer().classList.toggle('mlpr-map-theme-dark', theme === 'dark');
+  map.getContainer().classList.toggle('mlpr-map-theme-light', theme === 'light');
   await applyBasemapMode(
     map,
     mode,
@@ -180,7 +193,74 @@ function applyIconSize(sizePx) {
   document.documentElement.style.setProperty('--mlpr-plane-size', `${sizePx}px`);
 }
 
+// Home marker: a small pulsing dot at the receiver's location, toggleable
+// (Settings -> Map). Reuses GET /api/settings, the same endpoint the
+// Server tab's own home-location field already calls -- which means this
+// marker is subject to the exact same access control as that field: if a
+// Settings password is set, browsers without a valid session simply won't
+// see it (the fetch 401s and is treated the same as "no home configured"),
+// consistent with home location being Server-tab-gated everywhere else
+// rather than a special case.
+let homeMarker = null;
+let homeLocation = null; // { lat, lon } | null -- null also covers "not configured" and "not authorized"
+
+async function refreshHomeLocation() {
+  try {
+    const response = await fetch('/api/settings');
+    if (response.ok) {
+      const data = await response.json();
+      homeLocation =
+        typeof data.homeLat === 'number' && typeof data.homeLon === 'number'
+          ? { lat: data.homeLat, lon: data.homeLon }
+          : null;
+    }
+  } catch {
+    // Offline/unreachable -- keep whatever we last knew rather than flapping.
+  }
+  updateHomeMarker();
+}
+
+function homeMarkerElement() {
+  const el = document.createElement('div');
+  el.className = 'mlpr-home-marker';
+  // Two rings on staggered delays for a continuous outward pulse, plus a
+  // solid center dot. transform/opacity (not r/cx/cy) so the animation
+  // works the same everywhere without relying on animating SVG geometry
+  // properties directly.
+  el.innerHTML = `
+    <svg viewBox="0 0 40 40" width="40" height="40">
+      <circle class="mlpr-home-ring" cx="20" cy="20" r="4"/>
+      <circle class="mlpr-home-ring mlpr-home-ring-delay" cx="20" cy="20" r="4"/>
+      <circle class="mlpr-home-dot" cx="20" cy="20" r="4"/>
+    </svg>
+  `;
+  return el;
+}
+
+function updateHomeMarker() {
+  const { showHomeMarker } = getSettings();
+  if (!homeLocation || !showHomeMarker) {
+    homeMarker?.remove();
+    homeMarker = null;
+    return;
+  }
+  const lngLat = [homeLocation.lon, homeLocation.lat];
+  if (!homeMarker) {
+    homeMarker = new maplibregl.Marker({ element: homeMarkerElement() }).setLngLat(lngLat).addTo(map);
+  } else {
+    homeMarker.setLngLat(lngLat);
+  }
+}
+
+// One class toggle on the map container rather than touching every marker
+// on every zoom tick -- style.css's .mlpr-labels-hidden rule does the rest.
+function updateLabelZoomVisibility() {
+  map.getContainer().classList.toggle('mlpr-labels-hidden', map.getZoom() < LABEL_MIN_ZOOM);
+}
+map.on('zoom', updateLabelZoomVisibility);
+
 map.on('load', async () => {
+  updateLabelZoomVisibility();
   const initialSettings = getSettings();
   setShorterTrails(initialSettings.shorterTrails);
   applyIconSize(initialSettings.aircraftIconSize);
@@ -191,6 +271,7 @@ map.on('load', async () => {
     handleSnapshot(snapshot);
   }
   refreshTrailForSettings();
+  refreshHomeLocation();
 });
 
 // Re-check daylight periodically so an open tab flips itself at sunset/
@@ -230,6 +311,15 @@ onSettingsChange(() => {
   if (basemapMode !== lastRequestedBasemapMode || resolvedTheme !== lastRequestedMapTheme) {
     switchBasemap(basemapMode, resolvedTheme);
   }
+  // Self-heals a never-succeeded first fetch (e.g. toggled on before the
+  // initial map.on('load') request finished, or that request failed) --
+  // otherwise re-enabling the setting would do nothing until reload.
+  if (getSettings().showHomeMarker && homeLocation === null) {
+    refreshHomeLocation();
+  } else {
+    updateHomeMarker();
+  }
+  const { aircraftLabelFields, units } = getSettings();
   for (const state of aircraftState.values()) {
     if (state.marker && state.lastAircraft) {
       state.marker.getElement().style.display = passesAltitudeFilter(state.lastAircraft) ? '' : 'none';
@@ -238,6 +328,9 @@ onSettingsChange(() => {
       // for the other two modes) -- switching the mode in Settings should
       // repaint every currently-visible marker right away.
       setPlaneColor(state.marker.getElement(), colorForAircraft(state.lastAircraft, Date.now() - state.lastUpdateAt));
+      // Same idea for labels -- toggling a field checkbox should relabel
+      // every marker immediately, not wait for its next position update.
+      setPlaneLabel(state.marker.getElement(), buildAircraftLabel(state.lastAircraft, aircraftLabelFields, units));
     }
   }
   refreshTrailForSettings();
@@ -320,6 +413,27 @@ async function refreshTrailForSettings() {
     await loadTrailForHex(selectedHex);
   }
   renderTrail();
+}
+
+// Settings -> Aircraft's per-field checkboxes (aircraftLabelFields) build
+// this up piece by piece; an aircraft with none of the enabled fields
+// available (e.g. altitude enabled but not yet decoded) just contributes
+// nothing rather than a placeholder, same philosophy as the details panel's
+// tiles. All-false (or all-empty) naturally returns '' -- setPlaneLabel
+// writes that straight into the label div, and :empty in CSS hides it.
+function buildAircraftLabel(aircraft, fields, units) {
+  const parts = [];
+  if (fields.flight) parts.push((aircraft.flight || '').trim() || aircraft.hex);
+  if (fields.type && aircraft.typeCode) parts.push(aircraft.typeCode);
+  if (fields.altitude) {
+    const altitude = aircraft.onGround ? t('onGround') : formatAltitude(aircraft.altBaro, units);
+    if (altitude) parts.push(altitude);
+  }
+  if (fields.speed) {
+    const speed = formatSpeed(aircraft.gs, units);
+    if (speed) parts.push(speed);
+  }
+  return parts.join(' · ');
 }
 
 function formatAircraftInfo(aircraft) {
@@ -436,9 +550,11 @@ function applyAircraftUpdate(aircraft) {
     state.marker.setLngLat(lngLat);
   }
 
+  const { aircraftLabelFields, units } = getSettings();
   setPlaneKind(state.marker.getElement(), aircraft);
   setPlaneHeading(state.marker.getElement(), aircraft.track);
   setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
+  setPlaneLabel(state.marker.getElement(), buildAircraftLabel(aircraft, aircraftLabelFields, units));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
 
   state.lastUpdateAt = now;
@@ -470,10 +586,12 @@ function handleSnapshot(snapshot) {
     for (const aircraft of snapshot.aircraft) {
       applyAircraftUpdate(aircraft);
     }
+    notifyAircraftChanged();
   } else if (snapshot.type === 'delta') {
     for (const aircraft of snapshot.updated) {
       applyAircraftUpdate(aircraft);
     }
+    notifyAircraftChanged();
   } else if (snapshot.type === 'stats') {
     noteLiveStats({
       aircraftCount: snapshot.aircraftCount,
@@ -486,6 +604,7 @@ function handleSnapshot(snapshot) {
 setInterval(() => {
   const now = Date.now();
   let trailNeedsRefresh = false;
+  let anyRemoved = false;
   const { planeColorMode } = getSettings();
 
   for (const [hex, state] of aircraftState) {
@@ -494,6 +613,7 @@ setInterval(() => {
         aircraftState.delete(hex);
         clearHistory(hex);
         removeAircraft(hex);
+        anyRemoved = true;
         if (hex === selectedHex) deselectAircraft();
       }
       continue;
@@ -522,6 +642,7 @@ setInterval(() => {
   }
 
   if (trailNeedsRefresh) renderTrail();
+  if (anyRemoved) notifyAircraftChanged();
 }, TICK_INTERVAL_MS);
 
 function connect() {

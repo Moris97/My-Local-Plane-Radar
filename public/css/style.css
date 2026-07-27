@@ -13,6 +13,51 @@ html, body {
   inset: 0;
 }
 
+.mlpr-home-marker {
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+}
+
+.mlpr-home-marker svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.mlpr-home-dot {
+  fill: #3ddc84;
+  stroke: #05070a;
+  stroke-width: 1;
+}
+
+/* Two rings on staggered delays pulse outward and fade -- a continuous
+   "radar ping" rather than a single one-shot animation. transform/opacity
+   only (never animating r/cx/cy directly), so this doesn't depend on
+   animating SVG geometry properties, just a plain CSS transform. */
+.mlpr-home-ring {
+  fill: none;
+  stroke: #3ddc84;
+  stroke-width: 2;
+  transform-origin: 20px 20px;
+  animation: mlpr-home-pulse 2.4s ease-out infinite;
+}
+
+.mlpr-home-ring-delay {
+  animation-delay: 1.2s;
+}
+
+@keyframes mlpr-home-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(4.5);
+    opacity: 0;
+  }
+}
+
 .mlpr-plane {
   /* Set live from settings-state.js's aircraftIconSize via app.js
      (document.documentElement.style.setProperty) -- the fallback here only
@@ -22,12 +67,57 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Anchors .mlpr-plane-label's absolute positioning below (not some
+     further-out ancestor). */
+  position: relative;
 }
 
 .mlpr-plane svg {
   width: 100%;
   height: 100%;
   transform-origin: center center;
+}
+
+/* Deliberately a sibling of <svg>, not inside it (see aircraft-icon.js) --
+   plain HTML/CSS text renders far more cheaply than adding a MapLibre
+   symbol layer per aircraft would, and stays perfectly upright regardless
+   of the icon's own heading rotation for free. Colors are theme-aware via
+   the #map.mlpr-map-theme-* classes below (app.js's switchBasemap sets
+   these) rather than the app's own always-dark UI theme, per explicit
+   request ("dopasowująca się do stylu mapy: ciemny/jasny"). Empty text
+   (no label fields enabled in Settings) collapses to nothing via :empty,
+   not an empty pill. */
+.mlpr-plane-label {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translate(-50%, 3px);
+  white-space: nowrap;
+  font: 600 10px/1.3 ui-monospace, monospace;
+  letter-spacing: 0.01em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+.mlpr-plane-label:empty {
+  display: none;
+}
+
+/* Zoomed out far enough that dozens of labels would just be visual noise
+   overlapping each other -- see app.js's updateLabelZoomVisibility. */
+.mlpr-labels-hidden .mlpr-plane-label {
+  display: none;
+}
+
+#map.mlpr-map-theme-dark .mlpr-plane-label {
+  color: #d8f3e6;
+  background: rgba(5, 7, 10, 0.6);
+}
+
+#map.mlpr-map-theme-light .mlpr-plane-label {
+  color: #16232d;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .mlpr-popup .maplibregl-popup-content {

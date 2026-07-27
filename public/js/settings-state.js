@@ -16,8 +16,14 @@ const defaults = {
   mapTheme: 'light', // 'light' | 'dark' | 'auto'
   trailMode: 'click', // 'click' | 'all'
   shorterTrails: false, // performance option: cap client-side trail length lower than the server default
+  showHomeMarker: true, // pulsing dot at the receiver's location -- see app.js's homeMarker
   aircraftIconSize: 40, // px, side of the .mlpr-plane marker
   planeColorMode: 'signalLoss', // 'signalLoss' | 'altitude' | 'speed'
+  // Which fields appear in the small map label under each aircraft (empty
+  // object/all-false = no label at all). Kept minimal by default (just the
+  // callsign) so the map stays uncluttered until the user opts into more --
+  // see app.js's buildAircraftLabel and aircraft-icon.js's setPlaneLabel.
+  aircraftLabelFields: { flight: true, type: false, altitude: false, speed: false },
 };
 
 function load() {

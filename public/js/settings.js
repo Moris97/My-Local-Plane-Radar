@@ -110,6 +110,11 @@ function renderSettingsForm(container) {
         </div>
       </fieldset>
 
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('homeMarker')}</legend>
+        <label><input type="checkbox" id="mlpr-show-home-marker" ${settings.showHomeMarker ? 'checked' : ''}> ${t('showHomeMarker')}</label>
+      </fieldset>
+
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="aircraft" style="display:none">
@@ -127,6 +132,15 @@ function renderSettingsForm(container) {
           <label><input type="radio" name="mlpr-plane-color-mode" value="altitude" ${settings.planeColorMode === 'altitude' ? 'checked' : ''}> ${t('planeColorModeAltitude')}</label>
           <label><input type="radio" name="mlpr-plane-color-mode" value="speed" ${settings.planeColorMode === 'speed' ? 'checked' : ''}> ${t('planeColorModeSpeed')}</label>
         </div>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('mapLabels')}</legend>
+        <p class="mlpr-home-status">${t('mapLabelsHint')}</p>
+        <label><input type="checkbox" id="mlpr-label-flight" ${settings.aircraftLabelFields.flight ? 'checked' : ''}> ${t('labelFieldFlight')}</label>
+        <label><input type="checkbox" id="mlpr-label-type" ${settings.aircraftLabelFields.type ? 'checked' : ''}> ${t('labelFieldType')}</label>
+        <label><input type="checkbox" id="mlpr-label-altitude" ${settings.aircraftLabelFields.altitude ? 'checked' : ''}> ${t('labelFieldAltitude')}</label>
+        <label><input type="checkbox" id="mlpr-label-speed" ${settings.aircraftLabelFields.speed ? 'checked' : ''}> ${t('labelFieldSpeed')}</label>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
@@ -291,6 +305,18 @@ function wireDisplaySettings(container) {
     input.addEventListener('change', (event) => updateSettings({ planeColorMode: event.target.value }));
   }
 
+  const labelFieldInputs = {
+    flight: container.querySelector('#mlpr-label-flight'),
+    type: container.querySelector('#mlpr-label-type'),
+    altitude: container.querySelector('#mlpr-label-altitude'),
+    speed: container.querySelector('#mlpr-label-speed'),
+  };
+  for (const [field, input] of Object.entries(labelFieldInputs)) {
+    input.addEventListener('change', (event) => {
+      updateSettings({ aircraftLabelFields: { ...getSettings().aircraftLabelFields, [field]: event.target.checked } });
+    });
+  }
+
   for (const input of container.querySelectorAll('input[name="mlpr-basemap-mode"]')) {
     input.addEventListener('change', (event) => updateSettings({ basemapMode: event.target.value }));
   }
@@ -305,6 +331,10 @@ function wireDisplaySettings(container) {
 
   container.querySelector('#mlpr-shorter-trails').addEventListener('change', (event) => {
     updateSettings({ shorterTrails: event.target.checked });
+  });
+
+  container.querySelector('#mlpr-show-home-marker').addEventListener('change', (event) => {
+    updateSettings({ showHomeMarker: event.target.checked });
   });
 }
 
