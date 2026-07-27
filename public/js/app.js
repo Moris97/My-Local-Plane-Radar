@@ -12,6 +12,7 @@ import {
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { openPanel } from './panels.js';
+import { formatAltitude, formatSpeed } from './units.js';
 
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
@@ -140,6 +141,7 @@ onSettingsChange(() => {
     }
   }
   refreshTrailForSettings();
+  if (selectedHex) showInfoPopup(selectedHex);
 });
 
 map.on('click', () => {
@@ -212,14 +214,17 @@ async function refreshTrailForSettings() {
 }
 
 function formatAircraftInfo(aircraft) {
+  const { units } = getSettings();
   const lines = [aircraft.flight || aircraft.hex];
   if (aircraft.typeCode) lines.push(`${t('type')}: ${aircraft.typeCode}`);
   if (aircraft.onGround) {
     lines.push(t('onGround'));
-  } else if (typeof aircraft.altBaro === 'number') {
-    lines.push(`${t('altitude')}: ${aircraft.altBaro} ft`);
+  } else {
+    const altitude = formatAltitude(aircraft.altBaro, units);
+    if (altitude) lines.push(`${t('altitude')}: ${altitude}`);
   }
-  if (typeof aircraft.gs === 'number') lines.push(`${t('speed')}: ${Math.round(aircraft.gs)} kt`);
+  const speed = formatSpeed(aircraft.gs, units);
+  if (speed) lines.push(`${t('speed')}: ${speed}`);
   return lines.join('<br>');
 }
 

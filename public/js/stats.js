@@ -1,6 +1,8 @@
 import { t } from './i18n.js';
 import { getLiveStats, onChange } from './radar-state.js';
+import { getSettings, onSettingsChange } from './settings-state.js';
 import { renderSparklineSvg } from './chart.js';
+import { formatDistance } from './units.js';
 
 const HISTORY_REFRESH_MS = 20000;
 
@@ -35,9 +37,10 @@ export function renderStatsPanel(container) {
 
   function drawLiveNumbers() {
     const stats = getLiveStats();
+    const { units } = getSettings();
     countEl.textContent = String(stats.aircraftCount ?? 0);
     rateEl.textContent = typeof stats.messagesPerSec === 'number' ? stats.messagesPerSec.toFixed(1) : '–';
-    rangeEl.textContent = typeof stats.maxRangeKm === 'number' ? `${stats.maxRangeKm.toFixed(0)} km` : '–';
+    rangeEl.textContent = formatDistance(stats.maxRangeKm, units) ?? '–';
   }
 
   async function drawCharts() {
@@ -51,11 +54,13 @@ export function renderStatsPanel(container) {
   drawLiveNumbers();
   drawCharts();
 
-  const unsubscribe = onChange(drawLiveNumbers);
+  const unsubscribeAircraft = onChange(drawLiveNumbers);
+  const unsubscribeSettings = onSettingsChange(drawLiveNumbers);
   const refreshTimer = setInterval(drawCharts, HISTORY_REFRESH_MS);
 
   return () => {
-    unsubscribe();
+    unsubscribeAircraft();
+    unsubscribeSettings();
     clearInterval(refreshTimer);
   };
 }

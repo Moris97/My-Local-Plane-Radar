@@ -1,5 +1,7 @@
 import { t } from './i18n.js';
 import { getLiveAircraft, requestSelect, onChange } from './radar-state.js';
+import { getSettings, onSettingsChange } from './settings-state.js';
+import { formatAltitude, formatSpeed } from './units.js';
 
 const COLUMNS = [
   { key: 'flight', label: () => t('flight') },
@@ -11,17 +13,17 @@ const COLUMNS = [
 let sortKey = 'flight';
 let sortAsc = true;
 
-function formatCell(aircraft, key) {
+function formatCell(aircraft, key, units) {
   if (key === 'flight') return aircraft.flight || aircraft.hex;
-  if (key === 'altBaro') return aircraft.onGround ? t('onGround') : (aircraft.altBaro ?? '—');
-  if (key === 'gs') return typeof aircraft.gs === 'number' ? Math.round(aircraft.gs) : '—';
+  if (key === 'altBaro') return aircraft.onGround ? t('onGround') : (formatAltitude(aircraft.altBaro, units) ?? '—');
+  if (key === 'gs') return formatSpeed(aircraft.gs, units) ?? '—';
   return aircraft[key] ?? '—';
 }
 
-function sortedAircraft() {
+function sortedAircraft(units) {
   const rows = getLiveAircraft();
   rows.sort((a, b) => {
-    const cmp = String(formatCell(a, sortKey)).localeCompare(String(formatCell(b, sortKey)), undefined, {
+    const cmp = String(formatCell(a, sortKey, units)).localeCompare(String(formatCell(b, sortKey, units)), undefined, {
       numeric: true,
     });
     return sortAsc ? cmp : -cmp;
@@ -31,7 +33,8 @@ function sortedAircraft() {
 
 export function renderListPanel(container) {
   function draw() {
-    const rows = sortedAircraft();
+    const { units } = getSettings();
+    const rows = sortedAircraft(units);
     container.innerHTML = '';
 
     if (rows.length === 0) {
@@ -69,7 +72,7 @@ export function renderListPanel(container) {
       const row = document.createElement('tr');
       for (const col of COLUMNS) {
         const td = document.createElement('td');
-        td.textContent = formatCell(aircraft, col.key);
+        td.textContent = formatCell(aircraft, col.key, units);
         row.appendChild(td);
       }
       row.addEventListener('click', () => requestSelect(aircraft.hex));
@@ -80,5 +83,10 @@ export function renderListPanel(container) {
   }
 
   draw();
-  return onChange(draw);
+  const unsubscribeAircraft = onChange(draw);
+  const unsubscribeSettings = onSettingsChange(draw);
+  return () => {
+    unsubscribeAircraft();
+    unsubscribeSettings();
+  };
 }
