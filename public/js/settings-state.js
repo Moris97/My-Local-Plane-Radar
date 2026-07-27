@@ -24,6 +24,11 @@ const defaults = {
   // callsign) so the map stays uncluttered until the user opts into more --
   // see app.js's buildAircraftLabel and aircraft-icon.js's setPlaneLabel.
   aircraftLabelFields: { flight: true, type: false, altitude: false, speed: false },
+  // Fetches a photo from Planespotters (external site) when an aircraft's
+  // details panel is opened -- see aircraft-panel.js's loadPhoto. Opt-out
+  // matters here specifically because the project advertises a fully
+  // offline mode; every other network call MLPR makes is to its own Pi.
+  fetchAircraftPhotos: true,
 };
 
 function load() {

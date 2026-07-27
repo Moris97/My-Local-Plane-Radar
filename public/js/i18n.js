@@ -192,6 +192,10 @@ const DICTIONARIES = {
     detailGva: 'GVA',
     detailSda: 'SDA',
     detailHex: 'ICAO hex',
+    photos: 'Photos',
+    fetchAircraftPhotos: 'Fetch aircraft photos',
+    fetchAircraftPhotosHint:
+      "Fetches a photo of the aircraft from Planespotters.net (an external site) when you open its details panel. Requires internet access. Turn this off to keep MLPR fully offline -- previously cached photos won't be shown either while this is off.",
   },
   pl: {
     list: 'Lista',
@@ -386,6 +390,10 @@ const DICTIONARIES = {
     detailGva: 'GVA',
     detailSda: 'SDA',
     detailHex: 'Adres ICAO (hex)',
+    photos: 'Zdjęcia',
+    fetchAircraftPhotos: 'Pobieraj zdjęcia samolotów',
+    fetchAircraftPhotosHint:
+      'Pobiera zdjęcie samolotu z Planespotters.net (zewnętrzna strona) po otwarciu jego szczegółów. Wymaga dostępu do internetu. Wyłącz tę opcję, aby MLPR działało w pełni offline -- gdy opcja jest wyłączona, nie pokazują się też wcześniej zapisane w pamięci podręcznej zdjęcia.',
   },
 };
 

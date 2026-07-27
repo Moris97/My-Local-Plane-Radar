@@ -2,6 +2,7 @@ import { t } from './i18n.js';
 import { getInspectedHex, getAircraftByHex, onChange } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { buildAircraftDetailTiles, FLAG_VALUE_MARKER, GROUND_MARKER } from './aircraft-details.js';
+import { getCachedPhoto, setCachedPhoto } from './photo-cache.js';
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -75,27 +76,51 @@ function renderGroupHtml(items) {
   return `<div class="mlpr-detail-grid">${reorderForPairing(items).map(renderItemHtml).join('')}</div>`;
 }
 
+function renderPhoto(photo, photoEl) {
+  const link = escapeHtml(photo.link);
+  photoEl.innerHTML = `
+    <a href="${link}" target="_blank" rel="noopener">
+      <img src="${escapeHtml(photo.src)}" alt="" class="mlpr-detail-photo-img">
+    </a>
+    <p class="mlpr-detail-photo-credit">${escapeHtml(t('photoCredit'))}
+      <a href="${link}" target="_blank" rel="noopener">${escapeHtml(photo.photographer || 'Planespotters.net')}</a>
+    </p>`;
+}
+
 async function loadPhoto(hex, photoEl) {
   if (!hex) return;
-  try {
-    const cleanHex = hex.replace(/^~/, '').toLowerCase();
-    const response = await fetch(`https://api.planespotters.net/pub/photos/hex/${cleanHex}`);
-    if (!response.ok) return;
-    const data = await response.json();
-    const photo = data?.photos?.[0];
-    if (!photo?.thumbnail_large?.src || !photo?.link) return;
+  // Opt-out for the fully-offline case -- the project advertises working
+  // with no internet at all, so this external call must be disableable.
+  if (!getSettings().fetchAircraftPhotos) return;
 
-    const link = escapeHtml(photo.link);
-    photoEl.innerHTML = `
-      <a href="${link}" target="_blank" rel="noopener">
-        <img src="${escapeHtml(photo.thumbnail_large.src)}" alt="" class="mlpr-detail-photo-img">
-      </a>
-      <p class="mlpr-detail-photo-credit">${escapeHtml(t('photoCredit'))}
-        <a href="${link}" target="_blank" rel="noopener">${escapeHtml(photo.photographer || 'Planespotters.net')}</a>
-      </p>`;
+  const cleanHex = hex.replace(/^~/, '').toLowerCase();
+
+  const cached = getCachedPhoto(cleanHex);
+  if (cached.cached) {
+    if (cached.photo) renderPhoto(cached.photo, photoEl);
+    return;
+  }
+
+  try {
+    const response = await fetch(`https://api.planespotters.net/pub/photos/hex/${cleanHex}`);
+    // Not cached on a non-ok response -- could be transient (rate limit,
+    // Planespotters outage), so worth trying again next time rather than
+    // remembering a week-long false miss.
+    if (!response.ok) return;
+
+    const data = await response.json();
+    const photoData = data?.photos?.[0];
+    const photo =
+      photoData?.thumbnail_large?.src && photoData?.link
+        ? { src: photoData.thumbnail_large.src, link: photoData.link, photographer: photoData.photographer }
+        : null;
+
+    setCachedPhoto(cleanHex, photo);
+    if (photo) renderPhoto(photo, photoEl);
   } catch {
-    // No photo available (network error, no CORS in this context, nothing
-    // found) -- fine, the panel just shows tiles without a photo section.
+    // No photo available (network error, no CORS in this context) -- fine,
+    // the panel just shows tiles without a photo section. Not cached, same
+    // reasoning as the non-ok response above.
   }
 }
 

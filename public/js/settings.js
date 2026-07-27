@@ -149,6 +149,14 @@ function renderSettingsForm(container) {
         <label>${t('hideAbove')} <input type="number" id="mlpr-alt-max" value="${settings.altitudeFilterMax ?? ''}" step="500"> ft</label>
       </fieldset>
 
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('photos')}</legend>
+        <div class="mlpr-checkbox-row">
+          <label><input type="checkbox" id="mlpr-fetch-photos" ${settings.fetchAircraftPhotos ? 'checked' : ''}> ${t('fetchAircraftPhotos')}</label>
+          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('fetchAircraftPhotosHint')}</span></button>
+        </div>
+      </fieldset>
+
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="notifications" style="display:none">
@@ -335,6 +343,10 @@ function wireDisplaySettings(container) {
 
   container.querySelector('#mlpr-show-home-marker').addEventListener('change', (event) => {
     updateSettings({ showHomeMarker: event.target.checked });
+  });
+
+  container.querySelector('#mlpr-fetch-photos').addEventListener('change', (event) => {
+    updateSettings({ fetchAircraftPhotos: event.target.checked });
   });
 }
 
