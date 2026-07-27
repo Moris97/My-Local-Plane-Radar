@@ -16,6 +16,37 @@ an opt-in password for the Settings panel, and a systemd service for
 production are all in place. See [CLAUDE.md](./CLAUDE.md) for the
 architecture and [TODO.md](./TODO.md) for what's explicitly deferred.
 
+**[Full user guide →](./docs/README.md)** — a tour of the map, the List and
+Stats panels, and every Settings tab, with screenshots.
+
+<p>
+  <img src="./docs/images/stats-panel.png" alt="Stats panel with history charts" width="49%">
+  <img src="./docs/images/list-panel.png" alt="List panel" width="49%">
+</p>
+
+## Features
+
+- **Live map** — MapLibre GL JS vector map, aircraft icons that rotate to
+  heading, altitude-colored trails, configurable map labels, a pulsing
+  receiver-location marker, online (detailed) or fully offline basemap.
+- **Aircraft details** — click any aircraft for identity, altitude, speed,
+  squawk, autopilot targets, signal quality, and (when a registration is
+  known) a photo.
+- **List** — sortable, searchable table of everything currently in range.
+- **Stats** — live counters plus six history charts (aircraft seen,
+  position coverage, antenna range, new registrations, most common
+  type/airline) and a searchable table of every registration ever seen,
+  over 24h/7d/31d/1y/all-time ranges.
+- **Notifications** — push alerts via [ntfy](https://ntfy.sh) for emergency
+  squawks (7500/7600/7700), first-time-seen aircraft, new range records,
+  and a configurable watch list (by type, registration, or flight number,
+  with an optional altitude condition).
+- **Runs entirely on a Raspberry Pi 3** — 1 GB RAM, no Docker, no native
+  dependencies, SD-card-friendly (batched writes, no raw position history).
+
+See the [user guide](./docs/README.md) for a full walkthrough with
+screenshots, or [CLAUDE.md](./CLAUDE.md) for the architecture.
+
 ## Before you start
 
 MLPR is a **display and notification layer** — it does not talk to an SDR

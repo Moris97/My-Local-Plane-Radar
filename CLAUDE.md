@@ -1027,6 +1027,20 @@ so a routine restart loses at most the current in-progress interval, not
 the whole day. Restored once at startup, before the poll loops start, so
 the first client to connect after a restart already sees the real numbers.
 
+## Documentation (`docs/`)
+
+`docs/README.md` is the user-facing guide (GitHub renders it automatically
+when browsing the `docs/` folder) — a screen-by-screen tour of the map, List,
+Stats, and every Settings tab, linked from the main `README.md`'s new
+"Features" section. `docs/images/` holds real screenshots (Settings' five
+tabs, List, Stats + its registrations table/pagination, and a hand-built
+aircraft-icon-shape gallery) taken against synthetic seeded data — **never
+real receiver data or coordinates**, consistent with the home-location rule
+above. This is separate from `CLAUDE.md` (architecture/decisions, for
+future development sessions) and `TODO.md` (deferred work) — `docs/` is
+purely for end users setting up and using the app, written to grow
+alongside the feature set rather than as a one-time snapshot.
+
 ## How we work
 
 - Small, vertical slices — always something working end-to-end, never "all
