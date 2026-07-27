@@ -45,11 +45,27 @@ function matchesWatchEntry(aircraft, entry) {
   return satisfiesAltitudeCondition(aircraft, entry);
 }
 
+function formatAltitude(aircraft) {
+  if (aircraft.onGround) return 'ground';
+  return typeof aircraft.altBaro === 'number' ? `${aircraft.altBaro} ft` : null;
+}
+
+function formatSpeed(aircraft) {
+  return typeof aircraft.gs === 'number' ? `${Math.round(aircraft.gs)} kt` : null;
+}
+
+// The notification's title already carries the reason (squawk code, "First
+// time seen", "Watched aircraft") -- this is just the aircraft identity +
+// current altitude/speed, so registration/type/flight/altitude/speed are
+// always present when available.
 function aircraftLabel(aircraft) {
   const parts = [aircraft.flight || aircraft.hex];
   if (aircraft.registration) parts.push(aircraft.registration);
   if (aircraft.typeCode) parts.push(aircraft.typeCode);
-  if (aircraft.category) parts.push(`cat ${aircraft.category}`);
+  const altitude = formatAltitude(aircraft);
+  if (altitude) parts.push(altitude);
+  const speed = formatSpeed(aircraft);
+  if (speed) parts.push(speed);
   return parts.join(' · ');
 }
 

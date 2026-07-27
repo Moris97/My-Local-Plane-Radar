@@ -45,6 +45,20 @@ test('squawk 7700 triggers a notification', () => {
   assert.equal(sent.filter((n) => n.payload.title.startsWith('Squawk')).length, 1);
 });
 
+test('notification message includes registration, type, flight, altitude and speed', () => {
+  rules.evaluateAircraftRules(
+    aircraftFixture({ squawk: '7700', registration: 'SP-TEST', typeCode: 'B738', altBaro: 5000, gs: 210.6 }),
+  );
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'TEST123 · SP-TEST · B738 · 5000 ft · 211 kt');
+});
+
+test('notification message shows "ground" for an on-ground aircraft and omits missing speed', () => {
+  rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700', onGround: true }));
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'TEST123 · ground');
+});
+
 test('a non-emergency squawk does not trigger', () => {
   rules.evaluateAircraftRules(aircraftFixture({ squawk: '1200' }));
   assert.equal(sent.filter((n) => n.payload.title.startsWith('Squawk')).length, 0);
