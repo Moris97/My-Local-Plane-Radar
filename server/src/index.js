@@ -2,13 +2,17 @@ import { buildServer } from './server.js';
 import { createSource } from './sources/index.js';
 import { applyRawSnapshot, getTrackedAircraft } from './state.js';
 import { toWireAircraftList } from './wire.js';
-import { setAutoDetectedHome } from './home.js';
-import { ingestStats, getDailyAccumulator, getLatestStatsValues } from './stats-history.js';
+import { setAutoDetectedHome, getEffectiveHome } from './home.js';
+import { ingestStats, getDailyAccumulator, getLatestStatsValues, recordRangeSample, getRangeSummary } from './stats-history.js';
 import { upsertDailyStats } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { pruneTokens } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
+import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
+import { resolveAirlineIcao } from './airline-lookup.js';
+import { getAirlines } from './airlines-data.js';
+import { distanceKm } from './range.js';
 
 const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -40,11 +44,40 @@ async function pollOnce(broadcast) {
     }
   }
 
+  recordRangeAndRegistrationSightings();
+
   broadcast({
     type: 'delta',
     now: Date.now() / 1000,
     updated: toWireAircraftList(updated),
   });
+}
+
+// Deliberately iterates *every* currently tracked aircraft each tick, not
+// just this tick's delta (`updated` above) -- a stationary aircraft with
+// unchanged tracked fields wouldn't show up in the delta every tick, but it
+// should still count as "still being seen right now" for both the range
+// sample and the registration's lastSeenAt.
+function recordRangeAndRegistrationSightings() {
+  const home = getEffectiveHome();
+  const airlines = getAirlines();
+  let bestRangeKm = null;
+
+  for (const aircraft of getTrackedAircraft()) {
+    if (home && typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+      const km = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
+      if (bestRangeKm === null || km > bestRangeKm) bestRangeKm = km;
+    }
+
+    if (aircraft.registration) {
+      recordSighting(aircraft.registration, {
+        typeCode: aircraft.typeCode,
+        airlineIcao: resolveAirlineIcao(aircraft, airlines),
+      });
+    }
+  }
+
+  if (bestRangeKm !== null) recordRangeSample(bestRangeKm);
 }
 
 async function pollStats() {
@@ -69,11 +102,28 @@ function broadcastStats(broadcast) {
 
 function flushDailyStats() {
   const accumulator = getDailyAccumulator();
+  // Today's max/top-avg range come from our own Haversine sampling
+  // (getRangeSummary), not accumulator.maxRangeKm -- that field only ever
+  // reflects readsb's own all-time running record's value as observed
+  // today, not a true daily max. See stats-history.js.
+  const rangeSummary = getRangeSummary();
+  const avgAircraft = accumulator.sampleCount ? accumulator.sumAircraft / accumulator.sampleCount : 0;
+  const avgWithPos = accumulator.sampleCount ? accumulator.sumWithPos / accumulator.sampleCount : 0;
+  const avgWithoutPos = accumulator.sampleCount ? accumulator.sumWithoutPos / accumulator.sampleCount : 0;
+
   upsertDailyStats(accumulator.date, {
     maxAircraft: accumulator.maxAircraft,
     totalMessages: accumulator.totalMessages,
-    maxRangeKm: accumulator.maxRangeKm,
+    maxRangeKm: rangeSummary.maxRangeKm,
+    avgAircraft,
+    avgWithPos,
+    maxWithPos: accumulator.maxWithPos,
+    avgWithoutPos,
+    maxWithoutPos: accumulator.maxWithoutPos,
+    rangeTopAvgKm: rangeSummary.rangeTopAvgKm,
   });
+
+  flushDirtyRegistrations();
 }
 
 async function main() {

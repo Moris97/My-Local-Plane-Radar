@@ -38,6 +38,11 @@ if [ ! -d "$REPO_ROOT/data/naturalearth" ]; then
   ./scripts/fetch-mapdata.sh
 fi
 
+if [ ! -f "$REPO_ROOT/data/airlines.json" ]; then
+  echo "Fetching airline database (for Stats -> most common airline)..."
+  ./scripts/fetch-airlines.sh || echo "Could not fetch the airline database (offline?) -- skipping, airline names just won't resolve until this is re-run." >&2
+fi
+
 READSB_ENV_FILE="/etc/default/readsb"
 TAR1090_DB_DIR="/usr/local/share/tar1090"
 TAR1090_DB_FILE="$TAR1090_DB_DIR/aircraft.csv.gz"

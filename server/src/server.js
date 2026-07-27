@@ -7,11 +7,21 @@ import { WebSocketServer } from 'ws';
 import { getTrackedAircraft } from './state.js';
 import { toWireAircraftList } from './wire.js';
 import { getEffectiveHome, setManualHome, clearManualHome } from './home.js';
-import { getHistory } from './stats-history.js';
 import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic } from './notifications/settings.js';
 import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
 import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
 import { getTrail, getAllTrails } from './trail-history.js';
+import { getStatsHistoryForRange } from './stats-query.js';
+import { rangeStartMs, bucketGranularityForRange } from './time-buckets.js';
+import { getTypeCounts, getAirlineCounts, getNewRegistrationsBuckets, getRegistrationsList } from './stats-registrations.js';
+import { getAirlines } from './airlines-data.js';
+
+const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
+
+function parseStatsRange(request) {
+  const range = request.query?.range;
+  return VALID_STATS_RANGES.has(range) ? range : 'all';
+}
 
 const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -106,7 +116,29 @@ export async function buildServer() {
     return settingsPayload();
   });
 
-  app.get('/api/stats/history', async () => getHistory());
+  app.get('/api/stats/history', async (request) => getStatsHistoryForRange(parseStatsRange(request)));
+
+  app.get('/api/stats/types', async (request) => {
+    const range = parseStatsRange(request);
+    return getTypeCounts(rangeStartMs(range));
+  });
+
+  app.get('/api/stats/airlines', async (request) => {
+    const range = parseStatsRange(request);
+    return getAirlineCounts(rangeStartMs(range));
+  });
+
+  app.get('/api/stats/new-registrations', async (request) => {
+    const range = parseStatsRange(request);
+    return getNewRegistrationsBuckets(rangeStartMs(range), bucketGranularityForRange(range));
+  });
+
+  // Full list, unfiltered by range -- the point-7 table is "loaded on
+  // click" and does its own client-side sorting, same as list.js's live
+  // aircraft table.
+  app.get('/api/stats/registrations', async () => getRegistrationsList());
+
+  app.get('/api/airlines', async () => Object.fromEntries(getAirlines()));
 
   app.get('/api/trails', async () => getAllTrails());
 
