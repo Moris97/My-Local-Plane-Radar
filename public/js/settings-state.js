@@ -9,6 +9,7 @@ const defaults = {
   mapTheme: 'dark', // 'dark' | 'light' — map style only, not the app's own UI theme
   trailsEnabled: true,
   trailMode: 'click', // 'click' | 'all'
+  shorterTrails: false, // performance option: cap client-side trail length lower than the server default
 };
 
 function load() {

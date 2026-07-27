@@ -1,7 +1,19 @@
-const MAX_HISTORY_POINTS = 300;
+// Matches the server-side cap in server/src/trail-history.js. The "shorter
+// trails" performance setting (settings-state.js's shorterTrails) lowers
+// this at runtime via setShorterTrails -- see app.js's settings-change
+// handler -- so a weaker device can trade trail length for less GeoJSON to
+// render, without touching how much history the server itself retains.
+const DEFAULT_MAX_HISTORY_POINTS = 1000;
+const SHORT_MAX_HISTORY_POINTS = 200;
 const GAP_COLOR = '#888a8f';
 
+let maxHistoryPoints = DEFAULT_MAX_HISTORY_POINTS;
+
 const history = new Map(); // hex -> [{ lngLat, alt, t, isGap }]
+
+export function setShorterTrails(enabled) {
+  maxHistoryPoints = enabled ? SHORT_MAX_HISTORY_POINTS : DEFAULT_MAX_HISTORY_POINTS;
+}
 
 const ALTITUDE_STOPS = [
   { ft: 0, color: [61, 220, 132] }, // green
@@ -105,15 +117,16 @@ export function colorForAltitude(altitudeFt) {
 }
 
 export function seedHistory(hex, serverPoints) {
-  history.set(
-    hex,
-    serverPoints.map((point) => ({
-      lngLat: [point.lon, point.lat],
-      alt: point.onGround ? 0 : point.altBaro,
-      t: point.t,
-      isGap: false,
-    })),
-  );
+  const points = serverPoints.map((point) => ({
+    lngLat: [point.lon, point.lat],
+    alt: point.onGround ? 0 : point.altBaro,
+    t: point.t,
+    isGap: false,
+  }));
+  if (points.length > maxHistoryPoints) {
+    points.splice(0, points.length - maxHistoryPoints);
+  }
+  history.set(hex, points);
 }
 
 export function recordPosition(hex, lngLat, altitudeFt, timestamp, isGap = false) {
@@ -123,8 +136,8 @@ export function recordPosition(hex, lngLat, altitudeFt, timestamp, isGap = false
     history.set(hex, points);
   }
   points.push({ lngLat, alt: altitudeFt, t: timestamp, isGap });
-  if (points.length > MAX_HISTORY_POINTS) {
-    points.splice(0, points.length - MAX_HISTORY_POINTS);
+  if (points.length > maxHistoryPoints) {
+    points.splice(0, points.length - maxHistoryPoints);
   }
 }
 

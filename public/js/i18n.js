@@ -97,6 +97,9 @@ const DICTIONARIES = {
     showTrails: 'Show trails',
     trailModeClick: 'Only on click',
     trailModeAll: 'All aircraft',
+    shorterTrails: 'Use shorter trails',
+    shorterTrailsHint:
+      'If your map has a lot of aircraft, performance may suffer from having to render a large number of trails. Enable this option to limit the number of trails. Useful on weaker hardware if you notice poor page performance.',
     aircraftDetails: 'Aircraft details',
     aircraftGone: 'This aircraft is no longer in range.',
     photoCredit: 'Photo:',
@@ -257,6 +260,9 @@ const DICTIONARIES = {
     showTrails: 'Pokazuj szlaki',
     trailModeClick: 'Tylko po kliknięciu',
     trailModeAll: 'Wszystkie samoloty',
+    shorterTrails: 'Używaj krótszych szlaków',
+    shorterTrailsHint:
+      'Jeśli na twojej mapie jest dużo samolotów, wydajność może spaść przez konieczność renderowania dużej ilości szlaków. Włącz tę opcję aby ograniczyć ilość szlaków. Opcja przydatna przy słabszym sprzęcie gdy zauważysz słabą wydajność strony.',
     aircraftDetails: 'Szczegóły samolotu',
     aircraftGone: 'Ten samolot nie jest już w zasięgu.',
     photoCredit: 'Zdjęcie:',

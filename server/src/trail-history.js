@@ -1,4 +1,4 @@
-const MAX_POINTS_PER_AIRCRAFT = 200;
+const MAX_POINTS_PER_AIRCRAFT = 1000;
 
 const history = new Map();
 

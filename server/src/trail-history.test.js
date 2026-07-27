@@ -38,12 +38,12 @@ test('trails for different hexes are independent', () => {
 });
 
 test('trail length is capped so it cannot grow unbounded', () => {
-  for (let i = 0; i < 250; i += 1) {
+  for (let i = 0; i < 1050; i += 1) {
     recordPosition('abc', point({ lat: 50 + i * 0.001 }));
   }
   const trail = getTrail('abc');
-  assert.equal(trail.length, 200);
-  assert.equal(trail[trail.length - 1].lat, 50 + 249 * 0.001);
+  assert.equal(trail.length, 1000);
+  assert.equal(trail[trail.length - 1].lat, 50 + 1049 * 0.001);
 });
 
 test('getAllTrails returns every tracked hex', () => {

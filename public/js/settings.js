@@ -117,6 +117,10 @@ function renderSettingsForm(container) {
           <label><input type="radio" name="mlpr-trail-mode" value="click" ${settings.trailMode === 'click' ? 'checked' : ''}> ${t('trailModeClick')}</label>
           <label><input type="radio" name="mlpr-trail-mode" value="all" ${settings.trailMode === 'all' ? 'checked' : ''}> ${t('trailModeAll')}</label>
         </div>
+        <div class="mlpr-checkbox-row">
+          <label><input type="checkbox" id="mlpr-shorter-trails" ${settings.shorterTrails ? 'checked' : ''}> ${t('shorterTrails')}</label>
+          <span class="mlpr-info-icon" tabindex="0">i<span class="mlpr-tooltip">${t('shorterTrailsHint')}</span></span>
+        </div>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
@@ -240,6 +244,10 @@ function wireDisplaySettings(container) {
   for (const input of container.querySelectorAll('input[name="mlpr-trail-mode"]')) {
     input.addEventListener('change', (event) => updateSettings({ trailMode: event.target.value }));
   }
+
+  container.querySelector('#mlpr-shorter-trails').addEventListener('change', (event) => {
+    updateSettings({ shorterTrails: event.target.checked });
+  });
 }
 
 function wireHomeLocation(container) {

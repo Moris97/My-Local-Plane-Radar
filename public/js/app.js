@@ -1,6 +1,6 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind } from './aircraft-icon.js';
 import { applyBasemapMode, getBasemapLayerIds, BLANK_STYLE } from './basemap.js';
-import { recordPosition, clearHistory, trailFeaturesFor, seedHistory } from './trail.js';
+import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails } from './trail.js';
 import { t } from './i18n.js';
 import {
   noteAircraft,
@@ -112,6 +112,7 @@ async function switchBasemap(mode, theme) {
 
 map.on('load', async () => {
   const initialSettings = getSettings();
+  setShorterTrails(initialSettings.shorterTrails);
   await switchBasemap(initialSettings.basemapMode, initialSettings.mapTheme);
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
@@ -139,7 +140,8 @@ function passesAltitudeFilter(aircraft) {
 }
 
 onSettingsChange(() => {
-  const { basemapMode, mapTheme } = getSettings();
+  const { basemapMode, mapTheme, shorterTrails } = getSettings();
+  setShorterTrails(shorterTrails);
   if (basemapMode !== lastRequestedBasemapMode || mapTheme !== lastRequestedMapTheme) {
     switchBasemap(basemapMode, mapTheme);
   }

@@ -477,6 +477,59 @@ html, body {
   padding: 2px 6px;
 }
 
+.mlpr-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.mlpr-checkbox-row label {
+  margin: 0;
+}
+
+.mlpr-info-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid #3d5566;
+  color: #7fa3b3;
+  font: 600 10px/1 ui-monospace, monospace;
+  cursor: help;
+  flex: none;
+}
+
+.mlpr-info-icon .mlpr-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  width: 240px;
+  max-width: 60vw;
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  font: 400 12px/1.4 system-ui, sans-serif;
+  padding: 8px 10px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease;
+  z-index: 40;
+  pointer-events: none;
+}
+
+.mlpr-info-icon:hover .mlpr-tooltip,
+.mlpr-info-icon:focus .mlpr-tooltip {
+  opacity: 1;
+  visibility: visible;
+}
+
 .mlpr-home-status {
   margin: 0 0 8px;
   color: #6f8a97;
