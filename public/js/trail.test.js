@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { colorForAltitude } from './trail.js';
+import { colorForAltitude, recordPosition, clearHistory, trailFeaturesFor } from './trail.js';
 
 test('colorForAltitude is pure green at and below 10,000 ft', () => {
   assert.equal(colorForAltitude(0), 'rgb(61,220,132)');
@@ -32,4 +32,69 @@ test('colorForAltitude reaches exactly dark red at 40,000 ft and beyond', () => 
 test('colorForAltitude treats a missing/non-number altitude as ground level (pure green)', () => {
   assert.equal(colorForAltitude(undefined), 'rgb(61,220,132)');
   assert.equal(colorForAltitude('ground'), 'rgb(61,220,132)');
+});
+
+const HEX = 'abc123';
+
+beforeEach(() => {
+  clearHistory(HEX);
+});
+
+function record(lng, alt, isGap = false) {
+  recordPosition(HEX, [lng, 50], alt, Date.now(), isGap);
+}
+
+test('consecutive segments at a steady altitude merge into one polyline', () => {
+  // Regression test for the "trail looks dashed when zoomed out" report:
+  // every 2-point feature was a seam antialiasing could show as a hairline.
+  for (let i = 0; i < 6; i += 1) record(20 + i * 0.01, 35000);
+
+  const features = trailFeaturesFor(HEX);
+  assert.equal(features.length, 1);
+  assert.equal(features[0].geometry.coordinates.length, 6);
+});
+
+test('small altitude wobble within one band still merges (banding is what makes runs mergeable)', () => {
+  for (const alt of [35000, 35040, 34980, 35010]) record(20, alt);
+
+  assert.equal(trailFeaturesFor(HEX).length, 1);
+});
+
+test('a genuine altitude change starts a new run with its own color', () => {
+  for (let i = 0; i < 3; i += 1) record(20 + i * 0.01, 5000);
+  for (let i = 0; i < 3; i += 1) record(21 + i * 0.01, 30000);
+
+  const features = trailFeaturesFor(HEX);
+  assert.ok(features.length >= 2, `expected the climb to split the run, got ${features.length}`);
+  assert.notEqual(features[0].properties.color, features[features.length - 1].properties.color);
+});
+
+test('a gap segment is its own feature, flagged and grey, and never merged into a colored run', () => {
+  record(20.0, 35000);
+  record(20.01, 35000);
+  record(20.5, 35000, true); // reappeared after a loss of contact
+  record(20.51, 35000);
+
+  const features = trailFeaturesFor(HEX);
+  const gaps = features.filter((f) => f.properties.isGap);
+
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].geometry.coordinates.length, 2);
+  assert.equal(gaps[0].properties.color, '#888a8f');
+  // The colored runs on either side must not have swallowed it.
+  assert.ok(features.every((f) => f.properties.isGap || f.properties.color !== '#888a8f'));
+});
+
+test('every feature carries an explicit isGap boolean so the dashed layer filter can match on it', () => {
+  record(20.0, 35000);
+  record(20.01, 35000);
+
+  for (const feature of trailFeaturesFor(HEX)) {
+    assert.equal(typeof feature.properties.isGap, 'boolean');
+  }
+});
+
+test('a single recorded position produces no segments at all', () => {
+  record(20, 35000);
+  assert.deepEqual(trailFeaturesFor(HEX), []);
 });

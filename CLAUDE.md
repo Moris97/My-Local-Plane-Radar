@@ -380,19 +380,34 @@ photo fetch, and is the piece wired into `panels.js`.
   fully red by 10s, **stays fully red for another 10s** (found via real use —
   it was disappearing too abruptly), actually removed at 20s
   (`FADE_START_MS`/`FADE_END_MS`/`REMOVE_MS` in `app.js`). If it reappears,
-  the trail segment between last contact and reappearance is drawn grey.
-  After 5 minutes with no update, give up on it returning.
+  the trail segment between last contact and reappearance is drawn grey
+  **and dashed** (`GAP_COLOR` in `trail.js` is a fixed neutral grey,
+  deliberately identical in both map themes). After 5 minutes with no
+  update, give up on it returning.
 - Type + callsign label appears at appropriate zoom levels.
 - **Trails are opt-in per Settings → Map**: `trailsEnabled` (on/off) +
   `trailMode` (`click` — only the selected aircraft, default; `all` — every
   aircraft's trail drawn simultaneously, colors included). The grey
   signal-loss segment and the altitude-colored segments are the *same*
   per-hex feature list (`public/js/trail.js`, entries carry an `isGap` flag)
-  rendered into one shared `mlpr-trail` GeoJSON source — there is no separate
-  always-on gap layer anymore. (There used to be one that rendered
-  unconditionally regardless of selection — that was the bug reported and
-  fixed here: grey trails appearing without clicking anything and never
-  clearing.)
+  rendered into one shared `mlpr-trail` GeoJSON source. That single source
+  feeds **two** layers — `mlpr-trail` (solid, `isGap != true`) and
+  `mlpr-trail-gap` (dashed, `isGap == true`) — which is forced by MapLibre:
+  `line-dasharray` is not data-driven, so "dashed only for gaps" can't be an
+  expression on one layer. Two *layers* over the shared source is fine; what
+  must never come back is a separate always-populated gap **source**, which
+  is what once drew grey trails for unselected aircraft that never cleared.
+- **Trail geometry is built as merged per-color runs**, not one 2-point
+  LineString per sample (`trailFeaturesFor`). Altitude is quantised into
+  200 ft bands (`ALTITUDE_BAND_FT`) purely so consecutive samples at a
+  steady altitude produce an identical color string and collapse into a
+  single polyline — at cruise that's the whole trail in one feature. This
+  plus `line-cap: round` is the fix for "the trail looks dashed when zoomed
+  out": each feature boundary is a seam that antialiasing renders as a
+  hairline once a segment is only a few pixels long, and there used to be
+  one seam per second of flight. `tolerance: 0` on the source (disabling
+  geojson-vt simplification) is still needed as well — the two address
+  different halves of the same symptom, don't remove either.
 - **Trail history is server-side** (`server/src/trail-history.js`), not just
   accumulated in the browser tab: an in-memory (never SQLite — hard rule 4 is
   about exactly this, raw position history) capped ring buffer per hex,

@@ -27,6 +27,7 @@ const FRESH_COLOR = [61, 220, 132]; // #3ddc84
 const STALE_COLOR = [224, 49, 49]; // #e03131
 
 const TRAIL_SOURCE_ID = 'mlpr-trail';
+const TRAIL_GAP_LAYER_ID = 'mlpr-trail-gap';
 
 const map = new maplibregl.Map({
   container: 'map',
@@ -55,29 +56,64 @@ let lastRequestedBasemapMode = null;
 let lastRequestedMapTheme = null;
 
 function ensureTrailLayer() {
-  if (map.getSource(TRAIL_SOURCE_ID)) return;
-  map.addSource(TRAIL_SOURCE_ID, {
-    type: 'geojson',
-    data: { type: 'FeatureCollection', features: [] },
-    // The trail is built as one separate 2-point LineString per segment
-    // (so each can carry its own altitude color) rather than a single
-    // multi-point line. With the default tolerance, MapLibre's internal
-    // tile simplification (geojson-vt) can collapse very short segments
-    // below its pixel tolerance at low zoom, making them disappear --
-    // reported as "gaps that appear zoomed out, vanish zoomed in", which
-    // is the textbook symptom of this. tolerance: 0 disables that
-    // simplification so short segments always render regardless of zoom.
-    tolerance: 0,
-  });
-  map.addLayer({
-    id: TRAIL_SOURCE_ID,
-    type: 'line',
-    source: TRAIL_SOURCE_ID,
-    paint: {
-      'line-color': ['get', 'color'],
-      'line-width': 3.5,
-    },
-  });
+  if (!map.getSource(TRAIL_SOURCE_ID)) {
+    map.addSource(TRAIL_SOURCE_ID, {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: [] },
+      // The trail can't be one single polyline (each stretch carries its own
+      // altitude color), so it is split into per-color runs. With the default
+      // tolerance, MapLibre's internal tile simplification (geojson-vt) can
+      // collapse very short runs below its pixel tolerance at low zoom,
+      // making them disappear -- reported as "gaps that appear zoomed out,
+      // vanish zoomed in", which is the textbook symptom of this.
+      // tolerance: 0 disables that simplification so short runs always
+      // render regardless of zoom.
+      tolerance: 0,
+    });
+  }
+
+  // Two layers over one shared source: solid altitude-colored trail, plus a
+  // dashed layer for signal-loss bridge segments. Splitting them is forced
+  // by MapLibre -- line-dasharray is not data-driven, so "dashed only for
+  // gaps" cannot be expressed as an expression on a single layer. Note this
+  // is deliberately still ONE source fed only by renderTrail(): the old bug
+  // was a separate always-populated gap *source* that drew grey trails for
+  // unselected aircraft, which a second layer over the shared source does
+  // not reintroduce.
+  if (!map.getLayer(TRAIL_SOURCE_ID)) {
+    map.addLayer({
+      id: TRAIL_SOURCE_ID,
+      type: 'line',
+      source: TRAIL_SOURCE_ID,
+      filter: ['!=', ['get', 'isGap'], true],
+      // Round caps/joins let consecutive runs overlap slightly instead of
+      // meeting at butt ends, closing the hairline seams that read as a
+      // dashed line when zoomed out.
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 3.5,
+      },
+    });
+  }
+
+  if (!map.getLayer(TRAIL_GAP_LAYER_ID)) {
+    map.addLayer({
+      id: TRAIL_GAP_LAYER_ID,
+      type: 'line',
+      source: TRAIL_SOURCE_ID,
+      filter: ['==', ['get', 'isGap'], true],
+      layout: { 'line-cap': 'butt', 'line-join': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 3,
+        // Units are multiples of line-width, so this is a ~9px dash / ~7.5px
+        // gap -- clearly readable as "no contact here" without looking like
+        // a separate map feature.
+        'line-dasharray': [3, 2.5],
+      },
+    });
+  }
 }
 
 function updateAttributionVisibility(mode) {

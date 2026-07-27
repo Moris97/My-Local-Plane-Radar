@@ -149,17 +149,50 @@ export function clearHistory(hex) {
   history.delete(hex);
 }
 
+// Altitude is quantised into bands before picking a color purely so that
+// consecutive segments at a steady altitude come out byte-identical and can
+// be merged into one polyline below. 200 ft out of the 0-40,000 ft range is
+// ~200 distinct colors -- far finer than the eye resolves on a 3.5px line,
+// so the gradient still reads as smooth.
+const ALTITUDE_BAND_FT = 200;
+
+function bandedColor(alt) {
+  if (typeof alt !== 'number') return colorForAltitude(alt);
+  return colorForAltitude(Math.round(alt / ALTITUDE_BAND_FT) * ALTITUDE_BAND_FT);
+}
+
+// Consecutive segments sharing a color (and gap-ness) are emitted as a
+// single multi-point LineString rather than one 2-point feature each.
+// Two reasons, both about the "trail looks dashed when zoomed out" report:
+// every feature boundary is a seam that antialiasing can show as a hairline
+// when the segment is only a few pixels long at low zoom, and thousands of
+// tiny features are also just more work to render. At a steady cruise
+// altitude this collapses an entire trail into one polyline. Gap segments
+// are never merged into a colored run -- they are drawn by their own dashed
+// layer (see app.js) and must stay separate features.
 export function trailFeaturesFor(hex) {
   const points = getHistory(hex);
   const features = [];
+  let run = null;
+
   for (let i = 1; i < points.length; i += 1) {
     const a = points[i - 1];
     const b = points[i];
-    features.push({
+    const isGap = Boolean(b.isGap);
+    const color = isGap ? GAP_COLOR : bandedColor(b.alt);
+
+    if (run && !isGap && !run.properties.isGap && run.properties.color === color) {
+      run.geometry.coordinates.push(b.lngLat);
+      continue;
+    }
+
+    run = {
       type: 'Feature',
-      properties: { color: b.isGap ? GAP_COLOR : colorForAltitude(b.alt) },
+      properties: { color, isGap },
       geometry: { type: 'LineString', coordinates: [a.lngLat, b.lngLat] },
-    });
+    };
+    features.push(run);
   }
+
   return features;
 }
