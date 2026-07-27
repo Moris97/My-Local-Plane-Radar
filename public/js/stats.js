@@ -12,6 +12,7 @@ import {
 import { formatDistance } from './units.js';
 
 const HISTORY_REFRESH_MS = 20000;
+const REGISTRATIONS_PAGE_SIZE = 20;
 
 const RANGES = ['24h', '7d', '31d', '1y', 'all'];
 const RANGE_LABEL_KEYS = {
@@ -22,11 +23,30 @@ const RANGE_LABEL_KEYS = {
   all: 'statsRangeAll',
 };
 
-// Not persisted -- resets to the confirmed default ("since the beginning")
-// on every fresh page load, but keeps whatever the user picked for as long
-// as the tab stays open (switching to another panel and back to Stats
-// doesn't reset it).
-let currentRange = 'all';
+// Persisted directly (not via settings-state.js) -- this is remembered UI
+// state ("what was I last looking at"), not a user-facing Settings option,
+// so it doesn't belong in that module's schema alongside things that
+// actually appear as Settings controls.
+const RANGE_STORAGE_KEY = 'mlpr-stats-range';
+
+function loadPersistedRange() {
+  try {
+    const stored = localStorage.getItem(RANGE_STORAGE_KEY);
+    return RANGES.includes(stored) ? stored : 'all';
+  } catch {
+    return 'all';
+  }
+}
+
+function persistRange(range) {
+  try {
+    localStorage.setItem(RANGE_STORAGE_KEY, range);
+  } catch {
+    // Private browsing / storage disabled -- fine, just won't persist.
+  }
+}
+
+let currentRange = loadPersistedRange();
 
 let airlinesCache = null;
 
@@ -104,8 +124,13 @@ export function renderStatsPanel(container) {
     </div>
 
     <section class="mlpr-stat-chart">
+      <p class="mlpr-chart-label">${t('allRegistrations')}</p>
       <button type="button" id="mlpr-load-registrations" class="mlpr-detail-expand">${t('showRegistrations')}</button>
-      <div id="mlpr-registrations-table"></div>
+      <div id="mlpr-reg-controls" style="display:none">
+        <input type="search" id="mlpr-reg-search" class="mlpr-list-search" placeholder="${t('regSearchPlaceholder')}">
+      </div>
+      <div id="mlpr-reg-table-wrap"></div>
+      <div class="mlpr-pagination" id="mlpr-reg-pagination"></div>
     </section>
   `;
 
@@ -132,6 +157,7 @@ export function renderStatsPanel(container) {
       btn.addEventListener('click', () => {
         if (currentRange === btn.dataset.range) return;
         currentRange = btn.dataset.range;
+        persistRange(currentRange);
         drawRangeSelector();
         drawCharts();
       });
@@ -143,6 +169,16 @@ export function renderStatsPanel(container) {
   // it) gets a plain "no data yet" message instead of a silently blank box.
   function emptyChartMessage(el) {
     el.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+  }
+
+  // Every chart div starts truly empty (see the container.innerHTML template
+  // below) and each chart does its own fetch, so without this a slow
+  // request (a real possibility for "all time" on a well-established
+  // install) reads as a blank box -- indistinguishable from "no data yet"
+  // until the response lands. Set for every chart at the start of
+  // drawCharts(), before any of its awaits.
+  function loadingChartMessage(el) {
+    el.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
   }
 
   function drawAircraftCountChart(history) {
@@ -244,6 +280,13 @@ export function renderStatsPanel(container) {
   }
 
   async function drawCharts() {
+    for (const el of container.querySelectorAll('[id^="mlpr-chart-"]')) {
+      loadingChartMessage(el);
+    }
+    for (const el of container.querySelectorAll('[id^="mlpr-legend-"]')) {
+      el.innerHTML = '';
+    }
+
     const history = await fetchJson(`/api/stats/history?range=${currentRange}`, []);
     drawAircraftCountChart(history);
     drawPositionChart(history);
@@ -277,45 +320,117 @@ export function renderStatsPanel(container) {
     { key: 'lastSeenAt', label: () => t('colLastSeen') },
   ];
 
+  // Prev/first-window/current-window/last-window/next, with an ellipsis
+  // wherever a gap opens up -- so a fleet of a few thousand registrations
+  // (a well-established install, "all time" range) doesn't render a
+  // hundred page-number buttons in a row.
+  function paginationHtml(page, totalPages) {
+    if (totalPages <= 1) return '';
+    const keep = new Set([1, totalPages, page - 1, page, page + 1]);
+    const pages = [...keep].filter((p) => p >= 1 && p <= totalPages).sort((a, b) => a - b);
+
+    let html = `<button type="button" class="mlpr-page-btn" data-page="${page - 1}" ${page === 1 ? 'disabled' : ''}>‹</button>`;
+    let prev = 0;
+    for (const p of pages) {
+      if (p - prev > 1) html += `<span class="mlpr-page-ellipsis">…</span>`;
+      html += `<button type="button" class="mlpr-page-btn${p === page ? ' active' : ''}" data-page="${p}">${p}</button>`;
+      prev = p;
+    }
+    html += `<button type="button" class="mlpr-page-btn" data-page="${page + 1}" ${page === totalPages ? 'disabled' : ''}>›</button>`;
+    if (page !== totalPages) {
+      html += `<button type="button" class="mlpr-page-btn mlpr-page-last" data-page="${totalPages}">${t('lastPage')}</button>`;
+    }
+    return html;
+  }
+
   async function loadRegistrationsTable() {
-    const tableEl = container.querySelector('#mlpr-registrations-table');
+    const tableWrap = container.querySelector('#mlpr-reg-table-wrap');
+    const paginationEl = container.querySelector('#mlpr-reg-pagination');
+    const controlsEl = container.querySelector('#mlpr-reg-controls');
+    const searchInput = container.querySelector('#mlpr-reg-search');
     const loadBtn = container.querySelector('#mlpr-load-registrations');
     loadBtn.remove();
+    tableWrap.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
 
     const [airlines, registrations] = await Promise.all([getAirlinesMap(), fetchJson('/api/stats/registrations', [])]);
 
-    let sortKey = 'lastSeenAt';
+    // Default view: the 20 most-often-seen aircraft first, rather than
+    // most-recently-seen -- "most popular" is what a spotter actually wants
+    // to see by default; recency is still one click away via the column
+    // header.
+    let sortKey = 'timesSeen';
     let sortAsc = false;
+    let page = 1;
+    let query = '';
+
+    function matchesQuery(entry) {
+      const needle = query.trim().toLowerCase();
+      if (!needle) return true;
+      const airlineName = entry.airlineIcao ? (airlines.get(entry.airlineIcao)?.name ?? entry.airlineIcao) : '';
+      return [entry.registration, entry.typeCode, entry.airlineIcao, airlineName].some((value) =>
+        String(value ?? '').toLowerCase().includes(needle),
+      );
+    }
 
     function draw() {
       if (registrations.length === 0) {
-        tableEl.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+        tableWrap.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+        paginationEl.innerHTML = '';
         return;
       }
-      const rows = [...registrations].sort((a, b) => {
+
+      const filtered = registrations.filter(matchesQuery);
+      const sorted = [...filtered].sort((a, b) => {
         const cmp = String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? ''), undefined, { numeric: true });
         return sortAsc ? cmp : -cmp;
       });
 
-      tableEl.innerHTML = `
-        <table class="mlpr-list-table">
-          <thead><tr>${REGISTRATIONS_COLUMNS.map((col) => `<th data-key="${col.key}">${col.label()}</th>`).join('')}</tr></thead>
-          <tbody>${rows.map((r) => watchEntryRowHtml(r, airlines)).join('')}</tbody>
-        </table>`;
+      const totalPages = Math.max(1, Math.ceil(sorted.length / REGISTRATIONS_PAGE_SIZE));
+      page = Math.min(page, totalPages);
+      const pageRows = sorted.slice((page - 1) * REGISTRATIONS_PAGE_SIZE, page * REGISTRATIONS_PAGE_SIZE);
 
-      for (const th of tableEl.querySelectorAll('th')) {
-        th.addEventListener('click', () => {
-          if (sortKey === th.dataset.key) {
-            sortAsc = !sortAsc;
-          } else {
-            sortKey = th.dataset.key;
-            sortAsc = true;
-          }
+      if (pageRows.length === 0) {
+        tableWrap.innerHTML = `<p class="mlpr-empty">${t('noSearchResults')}</p>`;
+      } else {
+        const sortIndicator = (key) => (sortKey === key ? (sortAsc ? ' ▲' : ' ▼') : '');
+        tableWrap.innerHTML = `
+          <table class="mlpr-list-table">
+            <thead><tr>${REGISTRATIONS_COLUMNS.map((col) => `<th data-key="${col.key}">${col.label()}${sortIndicator(col.key)}</th>`).join('')}</tr></thead>
+            <tbody>${pageRows.map((r) => watchEntryRowHtml(r, airlines)).join('')}</tbody>
+          </table>`;
+
+        for (const th of tableWrap.querySelectorAll('th')) {
+          th.addEventListener('click', () => {
+            if (sortKey === th.dataset.key) {
+              sortAsc = !sortAsc;
+            } else {
+              sortKey = th.dataset.key;
+              sortAsc = true;
+            }
+            page = 1;
+            draw();
+          });
+        }
+      }
+
+      paginationEl.innerHTML = paginationHtml(page, totalPages);
+      for (const btn of paginationEl.querySelectorAll('.mlpr-page-btn:not([disabled])')) {
+        btn.addEventListener('click', () => {
+          page = Number(btn.dataset.page);
           draw();
         });
       }
     }
 
+    // Outside draw()'s rebuilt subtree deliberately -- same reasoning as
+    // list.js's search box, so typing doesn't lose focus on every redraw.
+    searchInput.addEventListener('input', () => {
+      query = searchInput.value;
+      page = 1;
+      draw();
+    });
+
+    controlsEl.style.display = '';
     draw();
   }
 

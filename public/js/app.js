@@ -11,6 +11,7 @@ import {
   noteLiveStats,
   setSelectRequestHandler,
   setInspectedHex,
+  setSelectedHex,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { openPanel } from './panels.js';
@@ -475,6 +476,7 @@ function showInfoPopup(hex) {
 
 async function selectAircraft(hex) {
   selectedHex = hex;
+  setSelectedHex(hex);
   if (getSettings().trailMode === 'click') {
     await loadTrailForHex(hex);
   }
@@ -494,6 +496,7 @@ setSelectRequestHandler(selectAndCenter);
 
 function deselectAircraft() {
   selectedHex = null;
+  setSelectedHex(null);
   renderTrail();
   activePopup?.remove();
   activePopup = null;

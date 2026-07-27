@@ -349,9 +349,25 @@ not a special case that bypasses it.
 - Auto-detects browser/system language; ships Polish + English at launch.
 - Full-screen map, bottom bar with three small labeled icon buttons (own
   inline SVG, translated label under each via `t()`, semi-transparent pill
-  background, hover/press feedback): List (sortable, clickable, click
-  centers map), Stats, Settings (theme, units, altitude filter, layer
+  background, hover/press feedback): List (sortable, searchable, clickable,
+  click centers map), Stats, Settings (theme, units, altitude filter, layer
   visibility). Deliberately compact/centered, not stretched across the bar.
+  List (`public/js/list.js`) shows a total-aircraft count above the table
+  (always the live unfiltered count, not the search-filtered row count —
+  "how many are there," not "how many am I currently looking at"), and
+  highlights whichever row matches the currently-selected aircraft
+  (`.mlpr-list-row-selected`). Selection itself is `app.js`'s own
+  `selectedHex` (used in over a dozen places there already, so it stays the
+  source of truth) mirrored into `radar-state.js`'s `setSelectedHex`/
+  `getSelectedHex` purely so other UI modules can read it without `app.js`
+  importing back from them — distinct from that file's `setInspectedHex`/
+  `getInspectedHex`, which is specifically "whose full details panel is
+  open," a narrower, later action. The search box
+  (`#mlpr-list-search`) matches flight/callsign, hex, type, and
+  registration, and — like the Stats registrations table's search box —
+  lives outside the subtree `drawTable()` rebuilds on every redraw
+  (roughly once a second with live traffic, per `radar-state.js`'s
+  batching), so typing in it doesn't lose focus every redraw.
 - List and Settings are bottom sheets on phones, a side panel on large
   screens; closable via X, Android/iOS back-gesture, click on the overlay,
   or **Escape** (`panels.js`'s top-level `keydown` listener — closes
@@ -673,7 +689,17 @@ first setup.
 The Stats view (`public/js/stats.js`) has six charts plus a lazily-loaded
 table of every registration ever seen, each chart re-fetched against a
 shared range selector (24h / 7d / 31d / 1y / all, default **all**) rendered
-above the charts. `server/src/stats-query.js`'s `getStatsHistoryForRange`
+above the charts. The selected range is persisted to `localStorage`
+(`mlpr-stats-range`, `loadPersistedRange`/`persistRange` in `stats.js`) —
+**directly**, not through `settings-state.js`, because it's remembered UI
+state ("what was I last looking at"), not a user-facing Settings option, so
+it doesn't belong in that module's schema alongside things that actually
+appear as Settings controls. Every chart container shows a `loadingStats`
+placeholder the instant a range change (or the initial render) kicks off a
+refetch (`drawCharts`'s loop over `[id^="mlpr-chart-"]`/`[id^="mlpr-legend-"]`
+elements, before any `await`) — otherwise a slow `all`-range request on a
+well-established install reads as a blank box, indistinguishable from
+"no data yet". `server/src/stats-query.js`'s `getStatsHistoryForRange`
 picks the source and bucket granularity per range: 24h reads the existing
 in-memory `history` array (minute-level already) plus today's in-progress
 range samples; everything else reads `daily_stats` rows. Bucket granularity
@@ -682,6 +708,29 @@ range samples; everything else reads `daily_stats` rows. Bucket granularity
 Thursday, so e.g. 2025-12-29 buckets into `2026-W01`), all → monthly. This
 keeps every chart at roughly 12–60 points regardless of how long the install
 has been running, rather than one point per day forever.
+
+### Registrations table (`public/js/stats.js`'s `loadRegistrationsTable`)
+
+`GET /api/stats/registrations` still returns every registration ever seen,
+unfiltered — sorting, searching, and paging are all client-side over that
+one fetched array, not separate server round-trips. Reasonable at this
+project's scale (a home receiver, realistically hundreds to low thousands of
+distinct registrations even after a year) and keeps the server-side query
+trivial; revisit only if that assumption stops holding. Defaults to sorted
+by `timesSeen` descending (most-often-seen first, i.e. "most popular") —
+distinct from every other sortable column's own default of ascending on
+first click — because "what shows up here a lot" is a more useful landing
+view for a spotter than "what showed up most recently." Paginated 20 rows
+at a time (`REGISTRATIONS_PAGE_SIZE`); `paginationHtml` renders a
+prev/first/current-window/last/next control with an ellipsis wherever a gap
+opens up, rather than one button per page, so a few-thousand-row fleet
+doesn't turn into a wall of page buttons. The search box
+(`#mlpr-reg-search`) matches registration, type, ICAO airline code, and the
+*resolved* airline name (not just the code) against a single query, and —
+like `list.js`'s aircraft search — lives outside the subtree that
+`draw()` rebuilds on every sort/page/search change, specifically so typing
+in it doesn't lose focus/cursor position on every keystroke; only
+`#mlpr-reg-table-wrap` and `#mlpr-reg-pagination` get rebuilt.
 
 ### Range/position sampling (`server/src/stats-history.js`, `range.js`)
 

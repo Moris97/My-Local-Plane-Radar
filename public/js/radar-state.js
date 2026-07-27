@@ -46,6 +46,25 @@ export function getInspectedHex() {
   return inspectedHex;
 }
 
+// The map/list "selected" aircraft (trail + popup shown for it) -- distinct
+// from inspectedHex above, which is specifically "whose details panel is
+// open". app.js keeps its own selectedHex as the source of truth (used in
+// over a dozen places already) and mirrors it here purely so other UI
+// modules -- list.js highlighting the selected row -- can read it without
+// app.js having to import back from them. Unlike the aircraft mutators
+// above, this DOES notify immediately: selection changes on a user click,
+// not in a per-tick hot loop, so there's no batching concern here.
+let selectedHex = null;
+
+export function setSelectedHex(hex) {
+  selectedHex = hex;
+  notify();
+}
+
+export function getSelectedHex() {
+  return selectedHex;
+}
+
 export function noteLiveStats(stats) {
   liveStats = stats;
   notify();
