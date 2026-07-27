@@ -1,3 +1,5 @@
+import { formatAltitude, formatSpeed, formatVerticalRate } from './units.js';
+
 // Emitter category (ADS-B), the subset actually useful to show -- A0/B0/C0/D*
 // mean "no info" or are reserved, so they're deliberately left unmapped and
 // just fall back to the raw code.
@@ -71,22 +73,22 @@ function round(value, decimals = 0) {
   return Math.round(value * factor) / factor;
 }
 
-function altitudeValue(aircraft, altKey) {
-  if (altKey === 'altBaro' && aircraft.onGround) return 'ground';
-  const v = num(aircraft[altKey]);
-  return v === null ? null : `${round(v)} ft`;
+// Sentinel: altitude for an on-ground aircraft -- resolved to the localized
+// "on ground" string at render time (aircraft-details.js stays i18n-free so
+// its output is testable with plain `node --test`).
+const GROUND_VALUE_MARKER = 'ground';
+
+function altitudeValue(aircraft, altKey, units) {
+  if (altKey === 'altBaro' && aircraft.onGround) return GROUND_VALUE_MARKER;
+  return formatAltitude(num(aircraft[altKey]), units);
 }
 
-function rateValue(aircraft, key) {
-  const v = num(aircraft[key]);
-  if (v === null) return null;
-  const rounded = round(v);
-  return `${rounded > 0 ? '+' : ''}${rounded} ft/min`;
+function rateValue(aircraft, key, units) {
+  return formatVerticalRate(num(aircraft[key]), units);
 }
 
-function speedValue(aircraft, key) {
-  const v = num(aircraft[key]);
-  return v === null ? null : `${round(v)} kt`;
+function speedValue(aircraft, key, units) {
+  return formatSpeed(num(aircraft[key]), units);
 }
 
 function degreesValue(aircraft, key) {
@@ -102,8 +104,8 @@ function degreesValue(aircraft, key) {
 function tile(key, labelKey, format, pairId = null) {
   return {
     type: 'tile',
-    build(aircraft) {
-      const value = format(aircraft);
+    build(aircraft, units) {
+      const value = format(aircraft, units);
       return value == null || value === '' ? null : { key, labelKey, value, pairId };
     },
   };
@@ -112,10 +114,10 @@ function tile(key, labelKey, format, pairId = null) {
 function cluster(labelKey, parts) {
   return {
     type: 'cluster',
-    build(aircraft) {
+    build(aircraft, units) {
       const chips = parts
         .map(({ key, labelKey: partLabelKey, format }) => {
-          const value = format(aircraft);
+          const value = format(aircraft, units);
           return value == null || value === '' ? null : { key, labelKey: partLabelKey, value };
         })
         .filter(Boolean);
@@ -133,18 +135,25 @@ function flagTile(key, labelKey) {
 const t_TRUE_MARKER = 'flag';
 
 const CORE_SPEC = [
+  // Paired so fields that come from the *same* underlying availability tend
+  // to succeed or fail together: flight/squawk are both plain ADS-B/Mode-S
+  // broadcast fields (almost always present); registration/typeCode both
+  // require readsb's --db-file (either both present or both absent); category
+  // is always broadcast (so it's the more reliable partner for the rarer
+  // emergency field, rather than pairing with typeCode which may not exist
+  // at all on installs without --db-file).
   tile('flight', 'detailFlight', (a) => a.flight ?? null, 'p-identity'),
-  tile('registration', 'detailRegistration', (a) => a.registration ?? null, 'p-identity'),
-  tile('typeCode', 'detailType', (a) => a.typeCode ?? null, 'p-type'),
-  tile('category', 'detailCategory', (a) => (a.category ? (CATEGORY_LABELS[a.category] ?? a.category) : null), 'p-type'),
-  tile('squawk', 'detailSquawk', (a) => a.squawk ?? null, 'p-squawk'),
-  tile('emergency', 'detailEmergency', (a) => (a.emergency ? (EMERGENCY_LABELS[a.emergency] ?? a.emergency) : null), 'p-squawk'),
-  tile('altBaro', 'detailAltitude', (a) => altitudeValue(a, 'altBaro'), 'p-altitude'),
-  tile('baroRate', 'detailVerticalRate', (a) => rateValue(a, 'baroRate'), 'p-altitude'),
+  tile('squawk', 'detailSquawk', (a) => a.squawk ?? null, 'p-identity'),
+  tile('registration', 'detailRegistration', (a) => a.registration ?? null, 'p-database'),
+  tile('typeCode', 'detailType', (a) => a.typeCode ?? null, 'p-database'),
+  tile('category', 'detailCategory', (a) => (a.category ? (CATEGORY_LABELS[a.category] ?? a.category) : null), 'p-broadcast'),
+  tile('emergency', 'detailEmergency', (a) => (a.emergency ? (EMERGENCY_LABELS[a.emergency] ?? a.emergency) : null), 'p-broadcast'),
+  tile('altBaro', 'detailAltitude', (a, u) => altitudeValue(a, 'altBaro', u), 'p-altitude'),
+  tile('baroRate', 'detailVerticalRate', (a, u) => rateValue(a, 'baroRate', u), 'p-altitude'),
   cluster('detailSpeedGroup', [
-    { key: 'gs', labelKey: 'detailGs', format: (a) => speedValue(a, 'gs') },
-    { key: 'ias', labelKey: 'detailIas', format: (a) => speedValue(a, 'ias') },
-    { key: 'tas', labelKey: 'detailTas', format: (a) => speedValue(a, 'tas') },
+    { key: 'gs', labelKey: 'detailGs', format: (a, u) => speedValue(a, 'gs', u) },
+    { key: 'ias', labelKey: 'detailIas', format: (a, u) => speedValue(a, 'ias', u) },
+    { key: 'tas', labelKey: 'detailTas', format: (a, u) => speedValue(a, 'tas', u) },
     { key: 'mach', labelKey: 'detailMach', format: (a) => (num(a.mach) === null ? null : round(a.mach, 2)) },
   ]),
 ];
@@ -157,11 +166,11 @@ const EXTRA_SPEC = [
     { key: 'roll', labelKey: 'detailRoll', format: (a) => degreesValue(a, 'roll') },
     { key: 'trackRate', labelKey: 'detailTrackRate', format: (a) => (num(a.trackRate) === null ? null : `${round(a.trackRate, 1)}°/s`) },
   ]),
-  tile('altGeom', 'detailAltGeom', (a) => altitudeValue(a, 'altGeom'), 'p-altgeom'),
-  tile('geomRate', 'detailGeomRate', (a) => rateValue(a, 'geomRate'), 'p-altgeom'),
+  tile('altGeom', 'detailAltGeom', (a, u) => altitudeValue(a, 'altGeom', u), 'p-altgeom'),
+  tile('geomRate', 'detailGeomRate', (a, u) => rateValue(a, 'geomRate', u), 'p-altgeom'),
   cluster('detailNavGroup', [
-    { key: 'navAltitudeMcp', labelKey: 'detailNavMcp', format: (a) => altitudeValue(a, 'navAltitudeMcp') },
-    { key: 'navAltitudeFms', labelKey: 'detailNavFms', format: (a) => altitudeValue(a, 'navAltitudeFms') },
+    { key: 'navAltitudeMcp', labelKey: 'detailNavMcp', format: (a, u) => altitudeValue(a, 'navAltitudeMcp', u) },
+    { key: 'navAltitudeFms', labelKey: 'detailNavFms', format: (a, u) => altitudeValue(a, 'navAltitudeFms', u) },
     { key: 'navHeading', labelKey: 'detailNavHeading', format: (a) => degreesValue(a, 'navHeading') },
     { key: 'navQnh', labelKey: 'detailNavQnh', format: (a) => (num(a.navQnh) === null ? null : `${round(a.navQnh)} hPa`) },
   ]),
@@ -181,7 +190,7 @@ const EXTRA_SPEC = [
   flagTile('spi', 'detailSpi'),
   cluster('detailWeatherGroup', [
     { key: 'wd', labelKey: 'detailWd', format: (a) => degreesValue(a, 'wd') },
-    { key: 'ws', labelKey: 'detailWs', format: (a) => speedValue(a, 'ws') },
+    { key: 'ws', labelKey: 'detailWs', format: (a, u) => speedValue(a, 'ws', u) },
     { key: 'oat', labelKey: 'detailOat', format: (a) => (num(a.oat) === null ? null : `${round(a.oat)}°C`) },
     { key: 'tat', labelKey: 'detailTat', format: (a) => (num(a.tat) === null ? null : `${round(a.tat)}°C`) },
   ]),
@@ -203,15 +212,16 @@ const EXTRA_SPEC = [
   tile('hex', 'detailHex', (a) => a.hex?.toUpperCase() ?? null),
 ];
 
-function buildFrom(aircraft, spec) {
-  return spec.map((entry) => entry.build(aircraft)).filter(Boolean);
+function buildFrom(aircraft, spec, units) {
+  return spec.map((entry) => entry.build(aircraft, units)).filter(Boolean);
 }
 
-export function buildAircraftDetailTiles(aircraft) {
+export function buildAircraftDetailTiles(aircraft, units = 'imperial') {
   return {
-    core: buildFrom(aircraft, CORE_SPEC),
-    extra: buildFrom(aircraft, EXTRA_SPEC),
+    core: buildFrom(aircraft, CORE_SPEC, units),
+    extra: buildFrom(aircraft, EXTRA_SPEC, units),
   };
 }
 
 export const FLAG_VALUE_MARKER = t_TRUE_MARKER;
+export const GROUND_MARKER = GROUND_VALUE_MARKER;

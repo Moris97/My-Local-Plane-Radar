@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildAircraftDetailTiles } from './aircraft-details.js';
+import { buildAircraftDetailTiles, GROUND_MARKER } from './aircraft-details.js';
 
 function findTile(tiles, key) {
   return tiles.find((t) => t.key === key);
@@ -17,14 +17,19 @@ test('core tiles only include fields that are actually present', () => {
   assert.equal(findTile(core, 'typeCode'), undefined);
 });
 
-test('altitude shows "ground" when onGround, ignoring altBaro', () => {
+test('altitude shows the ground marker when onGround, ignoring altBaro', () => {
   const { core } = buildAircraftDetailTiles({ hex: 'abc', onGround: true, altBaro: 0 });
-  assert.equal(findTile(core, 'altBaro').value, 'ground');
+  assert.equal(findTile(core, 'altBaro').value, GROUND_MARKER);
 });
 
-test('altitude shows the rounded value in feet when airborne', () => {
+test('altitude shows the rounded value in feet when airborne (imperial, the default)', () => {
   const { core } = buildAircraftDetailTiles({ hex: 'abc', altBaro: 5000.4 });
   assert.equal(findTile(core, 'altBaro').value, '5000 ft');
+});
+
+test('altitude converts to meters when units is "metric"', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', altBaro: 35000 }, 'metric');
+  assert.equal(findTile(core, 'altBaro').value, '10668 m');
 });
 
 test('vertical rate is sign-prefixed, and zero is shown (not filtered out)', () => {
@@ -36,6 +41,11 @@ test('vertical rate is sign-prefixed, and zero is shown (not filtered out)', () 
 
   const level = buildAircraftDetailTiles({ hex: 'abc', baroRate: 0 });
   assert.equal(findTile(level.core, 'baroRate').value, '0 ft/min');
+});
+
+test('vertical rate converts to m/s when units is "metric"', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', baroRate: 500 }, 'metric');
+  assert.equal(findTile(core, 'baroRate').value, '+2.5 m/s');
 });
 
 test('speed cluster only includes the speed fields that are present', () => {
@@ -52,6 +62,13 @@ test('speed cluster only includes the speed fields that are present', () => {
 test('speed cluster is entirely absent when no speed field has data', () => {
   const { core } = buildAircraftDetailTiles({ hex: 'abc' });
   assert.equal(findCluster(core, 'detailSpeedGroup'), undefined);
+});
+
+test('speed converts to km/h when units is "metric" (mach is unaffected -- dimensionless)', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', gs: 420, mach: 0.79 }, 'metric');
+  const speedCluster = findCluster(core, 'detailSpeedGroup');
+  assert.equal(speedCluster.chips.find((c) => c.key === 'gs').value, '778 km/h');
+  assert.equal(speedCluster.chips.find((c) => c.key === 'mach').value, 0.79);
 });
 
 test('mach is rounded to two decimals', () => {
@@ -107,6 +124,21 @@ test('quality cluster groups the low-priority fields together and skips absent o
 test('hex is always present and uppercased', () => {
   const { extra } = buildAircraftDetailTiles({ hex: 'a1b2c3' });
   assert.equal(findTile(extra, 'hex').value, 'A1B2C3');
+});
+
+test('flight and squawk share a pairId (both are plain broadcast fields, likely present together)', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', flight: 'WZZ66', squawk: '2451' });
+  const flightTile = findTile(core, 'flight');
+  const squawkTile = findTile(core, 'squawk');
+  assert.equal(flightTile.pairId, squawkTile.pairId);
+});
+
+test('registration and typeCode share a pairId (both require --db-file, so they are correlated)', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', registration: 'SP-TEST', typeCode: 'B738' });
+  const regTile = findTile(core, 'registration');
+  const typeTile = findTile(core, 'typeCode');
+  assert.equal(regTile.pairId, typeTile.pairId);
+  assert.notEqual(regTile.pairId, findTile(core, 'flight')?.pairId);
 });
 
 test('an aircraft with almost no data still produces a valid (mostly empty) result', () => {
