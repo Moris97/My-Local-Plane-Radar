@@ -223,6 +223,19 @@ html, body {
   padding: 1px 6px;
   border-radius: 4px;
   pointer-events: none;
+  /* The full OpenFreeMap/OpenMapTiles/OpenStreetMap credit (online mode) is
+     much longer than the offline-mode text ever was -- this box has no
+     intrinsic width limit and is right-anchored, so on a narrow phone it
+     could otherwise run off the left edge of the screen instead of wrapping. */
+  max-width: calc(100vw - 12px);
+  white-space: normal;
+  text-align: right;
+  /* The plain-text parts of the credit ("©", "Data from") sit outside the
+     <a> tags -- OpenFreeMap's required attribution format is a name/symbol/
+     name chain, not every word a link. Without an explicit color here they
+     inherit the browser default (black), invisible on this near-black
+     background. */
+  color: #6f93ab;
 }
 
 #mlpr-attribution a {

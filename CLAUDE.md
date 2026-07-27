@@ -304,16 +304,29 @@ not a special case that bypasses it.
     not optional. We disabled MapLibre's default `AttributionControl`
     (Stage 1), so instead there's our own small custom-styled attribution
     div (`#mlpr-attribution` in `index.html`/`style.css`) with two parts: a
-    "MapLibre" credit (`maplibre.org`) always shown in both modes, and a
-    "© OpenStreetMap contributors" link (`#mlpr-osm-attribution`, toggled by
+    "MapLibre" credit (`maplibre.org`) always shown in both modes, and the
+    data credit (`#mlpr-osm-attribution`, toggled by
     `updateAttributionVisibility()` in `app.js`) shown only while
-    `basemapMode` is effectively online. Note MapLibre GL JS itself
-    (BSD-3-Clause) does **not** legally require an on-map credit — only
-    keeping the license text in the repo/docs (already covered by
-    `THIRD_PARTY.md`/`LICENSE`) — the MapLibre credit is included anyway per
-    explicit request, not a license obligation. Offline mode (Natural Earth,
-    public domain) needs no data attribution, hence only the MapLibre half
-    shows.
+    `basemapMode` is effectively online. The data credit must name **three**
+    separate parties, not just OSM — verified against
+    [OpenFreeMap's own quick-start docs](https://openfreemap.org/quick_start/),
+    which specify the exact required text: "OpenFreeMap © OpenMapTiles Data
+    from OpenStreetMap" (each name individually linked — OpenFreeMap to
+    `openfreemap.org`, OpenMapTiles to `openmaptiles.org`, OpenStreetMap to
+    `openstreetmap.org/copyright`). An earlier version of this credit only
+    said "© OpenStreetMap contributors", omitting the tile host
+    (OpenFreeMap) and the schema/processing project (OpenMapTiles) —
+    caught and fixed 2026-07-28. Because the required format has plain text
+    ("©", "Data from") *between* the links rather than every word being a
+    link, `#mlpr-attribution` needs its own explicit `color` — the old
+    all-link version never needed one, so this was a real (if minor)
+    invisible-text bug the moment the fix went in, not just a style
+    preference. Note MapLibre GL JS itself (BSD-3-Clause) does **not**
+    legally require an on-map credit — only keeping the license text in the
+    repo/docs (already covered by `THIRD_PARTY.md`/`LICENSE`) — the MapLibre
+    credit is included anyway per explicit request, not a license
+    obligation. Offline mode (Natural Earth, public domain) needs no data
+    attribution, hence only the MapLibre half shows.
   - **Position**: pinned to the true bottom-right corner (`bottom: 6px`) only
     on screens `>=720px` wide (`public/css/style.css`, reusing the
     breakpoint the bottom-sheet/side-panel split already uses) — below that

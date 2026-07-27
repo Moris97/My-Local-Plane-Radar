@@ -31,7 +31,9 @@ Stats panels, and every Settings tab, with screenshots.
   receiver-location marker, online (detailed) or fully offline basemap.
 - **Aircraft details** — click any aircraft for identity, altitude, speed,
   squawk, autopilot targets, signal quality, and (when a registration is
-  known) a photo.
+  known) a photo fetched directly from
+  [Planespotters.net](https://www.planespotters.net/photo/api)'s free public
+  Photo API — disableable in Settings → Aircraft for a fully offline setup.
 - **List** — sortable, searchable table of everything currently in range.
 - **Stats** — live counters plus six history charts (aircraft seen,
   position coverage, antenna range, new registrations, most common
