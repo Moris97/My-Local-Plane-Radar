@@ -57,9 +57,16 @@ const ICONS = {
 // Includes the label div as a sibling of <svg> (not inside it) deliberately
 // -- setPlaneHeading only rotates the <svg> element, so keeping the label
 // outside it means the label text never spins with the aircraft's heading,
-// with no extra counter-rotation needed.
+// with no extra counter-rotation needed. .mlpr-plane-glow is likewise a
+// sibling, placed *before* the svg so it paints behind it -- a soft
+// breathing halo shown only while .mlpr-plane-selected is toggled on the
+// wrapper (app.js), deliberately achromatic (white/black depending on map
+// theme, see style.css) since color here is reserved for whichever plane
+// color mode is active (signal loss/altitude/speed) -- the selection
+// indicator can't also be a color without confusing the two.
 function iconSvg(kind) {
   return `
+<div class="mlpr-plane-glow"></div>
 <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
   <g fill="#3ddc84" stroke="#05070a" stroke-width="0.5">
     ${ICONS[kind] ?? ICONS.passenger}

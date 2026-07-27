@@ -12,6 +12,8 @@ import {
   setSelectRequestHandler,
   setInspectedHex,
   setSelectedHex,
+  setHoveredHex,
+  setHoverRequestHandler,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { openPanel } from './panels.js';
@@ -49,6 +51,13 @@ const aircraftState = new Map();
 let hasCentered = false;
 let mapReady = false;
 let selectedHex = null;
+// Which marker currently has the .mlpr-plane-hover class applied *because
+// the list asked for it* (requestHover, see setHoverRequestHandler below)
+// -- tracked separately from hovering the marker directly (that toggles
+// the class from its own mouseenter/mouseleave, no bookkeeping needed)
+// purely so a later requestHover(null) or a different hex knows which
+// element to clear it from.
+let lastHoverRequestHex = null;
 let activePopup = null;
 const pendingMessages = [];
 
@@ -474,7 +483,24 @@ function showInfoPopup(hex) {
     .addTo(map);
 }
 
+// A persistent, achromatic glow (.mlpr-plane-glow, styled in style.css) on
+// whichever marker is currently selected -- deliberately not a color, since
+// color on the icon itself is reserved for the active plane-color mode
+// (signal loss/altitude/speed, see colorForAircraft below) and would either
+// clash with or be mistaken for it. Markers persist across updates (see
+// applyAircraftUpdate), so the class sticks until explicitly moved/cleared
+// here -- no need to reapply every poll tick.
+function setSelectionHighlight(hex) {
+  if (selectedHex && selectedHex !== hex) {
+    aircraftState.get(selectedHex)?.marker?.getElement().classList.remove('mlpr-plane-selected');
+  }
+  if (hex) {
+    aircraftState.get(hex)?.marker?.getElement().classList.add('mlpr-plane-selected');
+  }
+}
+
 async function selectAircraft(hex) {
+  setSelectionHighlight(hex);
   selectedHex = hex;
   setSelectedHex(hex);
   if (getSettings().trailMode === 'click') {
@@ -494,7 +520,23 @@ function selectAndCenter(hex) {
 
 setSelectRequestHandler(selectAndCenter);
 
+// List row hover -> highlight the matching marker. Same .mlpr-plane-hover
+// class a direct marker hover uses (see applyAircraftUpdate), just applied
+// from the other direction -- one global handler is enough since there's
+// exactly one map, unlike selection/inspection which need per-aircraft
+// bookkeeping.
+setHoverRequestHandler((hex) => {
+  if (lastHoverRequestHex) {
+    aircraftState.get(lastHoverRequestHex)?.marker?.getElement().classList.remove('mlpr-plane-hover');
+  }
+  lastHoverRequestHex = hex;
+  if (hex) {
+    aircraftState.get(hex)?.marker?.getElement().classList.add('mlpr-plane-hover');
+  }
+});
+
 function deselectAircraft() {
+  setSelectionHighlight(null);
   selectedHex = null;
   setSelectedHex(null);
   renderTrail();
@@ -545,9 +587,23 @@ function applyAircraftUpdate(aircraft) {
 
   if (!state.marker) {
     state.marker = new maplibregl.Marker({ element: createPlaneElement(aircraft) }).setLngLat(lngLat).addTo(map);
-    state.marker.getElement().addEventListener('click', (event) => {
+    const el = state.marker.getElement();
+    el.addEventListener('click', (event) => {
       event.stopPropagation();
       selectAircraft(aircraft.hex);
+    });
+    // Map -> list direction of the hover cross-highlight: broadcasts via
+    // radar-state so list.js can highlight the matching row. The reverse
+    // direction (list row hover -> highlight this marker) is handled once,
+    // globally, by the setHoverRequestHandler registration below -- not
+    // per-marker here.
+    el.addEventListener('mouseenter', () => {
+      el.classList.add('mlpr-plane-hover');
+      setHoveredHex(aircraft.hex);
+    });
+    el.addEventListener('mouseleave', () => {
+      el.classList.remove('mlpr-plane-hover');
+      setHoveredHex(null);
     });
   } else {
     state.marker.setLngLat(lngLat);

@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { getLiveAircraft, requestSelect, onChange, getSelectedHex } from './radar-state.js';
+import { getLiveAircraft, requestSelect, onChange, getSelectedHex, requestHover, onHoverChange, getHoveredHex } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { formatAltitude, formatSpeed } from './units.js';
 
@@ -134,6 +134,7 @@ export function renderListPanel(container) {
     const tbody = document.createElement('tbody');
     for (const aircraft of rows) {
       const row = document.createElement('tr');
+      row.dataset.hex = aircraft.hex;
       if (aircraft.hex === selectedHex) row.classList.add('mlpr-list-row-selected');
       for (const col of COLUMNS) {
         const td = document.createElement('td');
@@ -141,17 +142,41 @@ export function renderListPanel(container) {
         row.appendChild(td);
       }
       row.addEventListener('click', () => requestSelect(aircraft.hex));
+      // List row -> highlight the marker on the map (different style than
+      // a click/selection -- see style.css's .mlpr-plane-hover). The
+      // reverse direction (hovering the marker highlights this row) is
+      // handled by updateHoverHighlight below, driven by radar-state's
+      // hover broadcast rather than rebuilding here.
+      row.addEventListener('mouseenter', () => requestHover(aircraft.hex));
+      row.addEventListener('mouseleave', () => requestHover(null));
       tbody.appendChild(row);
     }
     table.appendChild(tbody);
     tableWrap.appendChild(table);
+    updateHoverHighlight();
+  }
+
+  // Cheap class-toggle on already-rendered rows -- deliberately not part of
+  // drawTable's rebuild path, and driven by its own onHoverChange
+  // subscription rather than the shared onChange one. Hovering a marker can
+  // fire many times a second while the cursor crosses a cluster of
+  // aircraft; routing that through the same channel as aircraft-data
+  // updates would mean rebuilding the whole <table> that often, undoing
+  // the batching fix that channel exists for in the first place.
+  function updateHoverHighlight() {
+    const hoveredHex = getHoveredHex();
+    for (const row of tableWrap.querySelectorAll('tr[data-hex]')) {
+      row.classList.toggle('mlpr-list-row-hover', row.dataset.hex === hoveredHex);
+    }
   }
 
   drawTable();
   const unsubscribeAircraft = onChange(drawTable);
   const unsubscribeSettings = onSettingsChange(drawTable);
+  const unsubscribeHover = onHoverChange(updateHoverHighlight);
   return () => {
     unsubscribeAircraft();
     unsubscribeSettings();
+    unsubscribeHover();
   };
 }

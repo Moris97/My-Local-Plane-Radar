@@ -572,6 +572,53 @@ photo fetch, and is the piece wired into `panels.js`.
   toggle on the map container (`updateLabelZoomVisibility`) rather than
   touching every marker on every zoom tick — dozens of overlapping labels at
   a zoomed-out view is pure noise, not useful.
+- **Selection and hover are visually distinct effects, on every axis, from
+  each other and from the plane-color modes.** Requested explicitly: with
+  many aircraft on screen, you need to keep track of "which one is this"
+  without it depending on color, since color is already spoken for by
+  `planeColorMode` (signal loss/altitude/speed).
+  - **Selected** (`.mlpr-plane-selected`, toggled in `app.js`'s
+    `setSelectionHighlight`, called from `selectAircraft`/
+    `deselectAircraft`): a soft, breathing, **achromatic** halo
+    (`.mlpr-plane-glow`, a background `div` sibling of `<svg>` placed
+    *before* it in `aircraft-icon.js`'s markup so it paints behind —
+    plain DOM order, no `z-index` needed) — white on the dark map theme,
+    black on light, via the same `#map.mlpr-map-theme-*` classes the
+    label uses. A background glow (not a filter on the icon) because
+    animating `opacity`/`transform` on a plain element is far more
+    reliably smooth across browsers than animating `filter` parameters,
+    which is what hover uses instead (see below) — deliberately a
+    *different technique*, not just a different color, so the two never
+    read as variations on one effect even when both apply to the same
+    aircraft at once (hovering the currently-selected one). Persistent
+    until explicitly moved/cleared, since markers persist across updates.
+  - **Hovered** (`.mlpr-plane-hover`): a crisp amber `drop-shadow` ring
+    traced on the `<svg>`'s own silhouette (not a bounding box), not
+    animated. Amber because it's not used anywhere else in the app's
+    palette (trail gradient, speed gradient, plane-color modes). **Two-way
+    cross-highlight** between the map and the List panel, each direction
+    using a deliberately different mechanism to avoid two different perf
+    pitfalls:
+    - *Map → List*: a marker's own `mouseenter`/`mouseleave` (added once,
+      alongside its `click` listener, when the marker is first created in
+      `applyAircraftUpdate`) call `radar-state.js`'s `setHoveredHex`/
+      broadcast it via a **separate** `onHoverChange` listener set, kept
+      deliberately apart from the main `notify()`/`onChange` channel
+      shared with aircraft-data updates. Routing hover through that
+      channel would mean every mouse movement across a cluster of
+      aircraft rebuilds `list.js`'s entire `<table>` — reintroducing the
+      exact redraw-storm problem the earlier `notifyAircraftChanged()`
+      batching fix (see below) exists to prevent, just triggered by mouse
+      movement instead of WS deltas. `list.js`'s `updateHoverHighlight()`
+      only toggles a class on already-rendered `<tr>` elements (matched
+      via a `data-hex` attribute set in `drawTable()`), never rebuilds.
+    - *List → Map*: a row's own `mouseenter`/`mouseleave` call
+      `requestHover(hex | null)`, a direct request/handler pair (same
+      shape as `setSelectRequestHandler`/`requestSelect`) rather than
+      routed through broadcast state — there's exactly one map, so one
+      global handler (registered once in `app.js`, tracking
+      `lastHoverRequestHex` to know what to clear) is simpler than making
+      this stateful just to immediately consume it.
 - **Trails are always on**, with `trailMode` (Settings → Map) choosing
   `click` (only the selected aircraft, default) or `all` (every aircraft's
   trail drawn simultaneously, colors included). There used to be a separate

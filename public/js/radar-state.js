@@ -65,6 +65,49 @@ export function getSelectedHex() {
   return selectedHex;
 }
 
+// Hover cross-highlighting between the map and the list (map icon <-> list
+// row), both directions, kept deliberately separate from the main
+// `listeners`/`notify()` channel above. That channel is shared with every
+// aircraft-data change (batched to ~once/sec, see the mutators' comment),
+// so routing hover through it would mean every mouseenter/mouseleave while
+// dragging the cursor across a cluster of aircraft triggers list.js's full
+// `drawTable()` rebuild -- reintroducing the exact redraw-storm problem
+// that batching fixed. `onHoverChange` lets list.js subscribe to only the
+// hover signal and do a cheap class-toggle on already-rendered rows
+// instead.
+const hoverListeners = new Set();
+let hoveredHex = null;
+
+export function setHoveredHex(hex) {
+  hoveredHex = hex;
+  for (const fn of hoverListeners) fn(hoveredHex);
+}
+
+export function getHoveredHex() {
+  return hoveredHex;
+}
+
+export function onHoverChange(fn) {
+  hoverListeners.add(fn);
+  return () => hoverListeners.delete(fn);
+}
+
+// The other direction (list row hover -> highlight the map icon) doesn't
+// need a broadcast state at all -- app.js is the only thing that acts on
+// it (there's exactly one map), so a direct request/handler pair (same
+// shape as setSelectRequestHandler/requestSelect above) is simpler than
+// routing it through state just to immediately consume it.
+let hoverRequestHandler = null;
+
+export function setHoverRequestHandler(fn) {
+  hoverRequestHandler = fn;
+}
+
+// hex is nullable -- null means "stop hovering."
+export function requestHover(hex) {
+  hoverRequestHandler?.(hex);
+}
+
 export function noteLiveStats(stats) {
   liveStats = stats;
   notify();

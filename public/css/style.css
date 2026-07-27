@@ -88,6 +88,63 @@ html, body {
   transform-origin: center center;
 }
 
+/* Selection indicator: a soft, breathing halo behind the icon, shown only
+   while .mlpr-plane-selected is toggled on the marker (app.js's
+   setSelectionHighlight). Deliberately achromatic (see aircraft-icon.js's
+   comment) and a background glow rather than an outline traced on the
+   icon's own silhouette -- structurally different from the hover ring
+   below (a drop-shadow filter on the <svg> itself), so the two read as
+   distinct effects, not variations on one. A background div sibling
+   (rather than an SVG filter) because animating opacity/transform on a
+   plain element is far more reliably smooth across browsers than
+   animating filter parameters. Placed before <svg> in iconSvg's markup,
+   and plain DOM order alone (no z-index needed) is enough for it to paint
+   behind the svg, which comes after it as a later sibling. */
+.mlpr-plane-glow {
+  position: absolute;
+  inset: -35%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.mlpr-plane-selected .mlpr-plane-glow {
+  animation: mlpr-selected-breathe 2s ease-in-out infinite;
+}
+
+@keyframes mlpr-selected-breathe {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.95;
+  }
+}
+
+#map.mlpr-map-theme-dark .mlpr-plane-glow {
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 72%);
+}
+
+#map.mlpr-map-theme-light .mlpr-plane-glow {
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 72%);
+}
+
+/* Hover indicator: a crisp, solid-ish amber ring traced on the icon's own
+   silhouette (drop-shadow follows the SVG's alpha channel, not a bounding
+   box), not animated, not achromatic -- deliberately the opposite of the
+   selection glow above on every axis (color, animation, technique) so
+   hovering and selecting one aircraft never look like the same thing even
+   when both apply to it at once. Same color/style used for both directions
+   of the cross-highlight (hovering the icon directly, or hovering its row
+   in the list -- see app.js/list.js), so the two read as one feature.
+   Amber specifically because it's not otherwise used by any plane-color
+   mode or the trail altitude gradient. */
+.mlpr-plane-hover svg {
+  filter: drop-shadow(0 0 1.5px #f2b807) drop-shadow(0 0 1.5px #f2b807) drop-shadow(0 0 4px rgba(242, 184, 7, 0.75));
+}
+
 /* Deliberately a sibling of <svg>, not inside it (see aircraft-icon.js) --
    plain HTML/CSS text renders far more cheaply than adding a MapLibre
    symbol layer per aircraft would, and stays perfectly upright regardless
@@ -447,6 +504,20 @@ html, body {
 .mlpr-list-row-selected:hover {
   background: rgba(61, 220, 132, 0.18);
   box-shadow: inset 2px 0 0 #3ddc84;
+}
+
+/* Set when the *map* marker is hovered (list.js's onHoverChange
+   subscription -- not this row's own :hover, which the browser already
+   handles natively for someone hovering the row directly). `outline`
+   rather than `box-shadow` deliberately -- a genuinely independent CSS
+   property, so this can never end up in a same-specificity fight with
+   .mlpr-list-row-selected's own box-shadow over which single declaration
+   wins; both can be visible on the same row at once (hovering the marker
+   of the aircraft that's also currently selected). Same amber as
+   .mlpr-plane-hover on the map side, so the two read as one feature. */
+.mlpr-list-row-hover {
+  outline: 1px solid rgba(242, 184, 7, 0.7);
+  outline-offset: -1px;
 }
 
 .mlpr-stats {
