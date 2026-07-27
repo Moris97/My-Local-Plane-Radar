@@ -142,10 +142,10 @@ const CORE_SPEC = [
   // is always broadcast (so it's the more reliable partner for the rarer
   // emergency field, rather than pairing with typeCode which may not exist
   // at all on installs without --db-file).
-  tile('flight', 'detailFlight', (a) => a.flight ?? null, 'p-identity'),
-  tile('squawk', 'detailSquawk', (a) => a.squawk ?? null, 'p-identity'),
   tile('registration', 'detailRegistration', (a) => a.registration ?? null, 'p-database'),
   tile('typeCode', 'detailType', (a) => a.typeCode ?? null, 'p-database'),
+  tile('flight', 'detailFlight', (a) => a.flight ?? null, 'p-identity'),
+  tile('squawk', 'detailSquawk', (a) => a.squawk ?? null, 'p-identity'),
   tile('category', 'detailCategory', (a) => (a.category ? (CATEGORY_LABELS[a.category] ?? a.category) : null), 'p-broadcast'),
   tile('emergency', 'detailEmergency', (a) => (a.emergency ? (EMERGENCY_LABELS[a.emergency] ?? a.emergency) : null), 'p-broadcast'),
   tile('altBaro', 'detailAltitude', (a, u) => altitudeValue(a, 'altBaro', u), 'p-altitude'),

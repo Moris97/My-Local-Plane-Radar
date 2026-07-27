@@ -141,6 +141,19 @@ test('registration and typeCode share a pairId (both require --db-file, so they 
   assert.notEqual(regTile.pairId, findTile(core, 'flight')?.pairId);
 });
 
+test('registration/type render above flight/squawk', () => {
+  const { core } = buildAircraftDetailTiles({
+    hex: 'abc',
+    registration: 'SP-TEST',
+    typeCode: 'B738',
+    flight: 'WZZ66',
+    squawk: '1000',
+  });
+  const keys = core.map((t) => t.key);
+  assert.ok(keys.indexOf('registration') < keys.indexOf('flight'));
+  assert.ok(keys.indexOf('typeCode') < keys.indexOf('squawk'));
+});
+
 test('an aircraft with almost no data still produces a valid (mostly empty) result', () => {
   const { core, extra } = buildAircraftDetailTiles({ hex: 'abc' });
   assert.equal(Array.isArray(core), true);
