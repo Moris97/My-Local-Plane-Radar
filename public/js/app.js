@@ -8,9 +8,10 @@ import {
   clearAircraft,
   noteLiveStats,
   setSelectRequestHandler,
+  setInspectedHex,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
-import './panels.js';
+import { openPanel } from './panels.js';
 
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
@@ -147,8 +148,13 @@ map.on('click', () => {
 
 document.addEventListener('click', (event) => {
   if (event.target?.id === 'mlpr-more-details') {
+    const hex = selectedHex;
     activePopup?.remove();
     activePopup = null;
+    if (hex) {
+      setInspectedHex(hex);
+      openPanel('aircraft');
+    }
   }
 });
 

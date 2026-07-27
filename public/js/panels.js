@@ -2,11 +2,15 @@ import { t } from './i18n.js';
 import { renderListPanel } from './list.js';
 import { renderStatsPanel } from './stats.js';
 import { renderSettingsPanel } from './settings.js';
+import { renderAircraftDetailsPanel, aircraftDetailsPanelTitle } from './aircraft-panel.js';
 
 const PANELS = {
   list: { title: () => t('list'), render: renderListPanel },
   stats: { title: () => t('stats'), render: renderStatsPanel },
   settings: { title: () => t('settings'), render: renderSettingsPanel },
+  // Not tied to a bottom-bar button -- opened contextually from the
+  // "show more details" button in an aircraft's popup (see app.js).
+  aircraft: { title: aircraftDetailsPanelTitle, render: renderAircraftDetailsPanel },
 };
 
 const barButtons = document.querySelectorAll('.mlpr-bar-btn');
@@ -21,7 +25,7 @@ let historyPushed = false;
 let disposeCurrent = null;
 let renderToken = 0;
 
-async function openPanel(name) {
+export async function openPanel(name) {
   const entry = PANELS[name];
   if (!entry) return;
 

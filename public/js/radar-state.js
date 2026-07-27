@@ -22,6 +22,20 @@ export function getLiveAircraft() {
   return Array.from(liveAircraft.values());
 }
 
+export function getAircraftByHex(hex) {
+  return liveAircraft.get(hex);
+}
+
+let inspectedHex = null;
+
+export function setInspectedHex(hex) {
+  inspectedHex = hex;
+}
+
+export function getInspectedHex() {
+  return inspectedHex;
+}
+
 export function noteLiveStats(stats) {
   liveStats = stats;
   notify();
