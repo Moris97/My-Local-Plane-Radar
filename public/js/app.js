@@ -1,4 +1,4 @@
-import { createPlaneElement, setPlaneHeading, setPlaneColor } from './aircraft-icon.js';
+import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind } from './aircraft-icon.js';
 import { applyBasemapMode, getBasemapLayerIds, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory } from './trail.js';
 import { t } from './i18n.js';
@@ -66,7 +66,7 @@ function ensureTrailLayer() {
     source: TRAIL_SOURCE_ID,
     paint: {
       'line-color': ['get', 'color'],
-      'line-width': 2.5,
+      'line-width': 3.5,
     },
   });
 }
@@ -311,7 +311,7 @@ function applyAircraftUpdate(aircraft) {
   const wasGone = state.goneAt !== null;
 
   if (!state.marker) {
-    state.marker = new maplibregl.Marker({ element: createPlaneElement() }).setLngLat(lngLat).addTo(map);
+    state.marker = new maplibregl.Marker({ element: createPlaneElement(aircraft) }).setLngLat(lngLat).addTo(map);
     state.marker.getElement().addEventListener('click', (event) => {
       event.stopPropagation();
       selectAircraft(aircraft.hex);
@@ -320,6 +320,7 @@ function applyAircraftUpdate(aircraft) {
     state.marker.setLngLat(lngLat);
   }
 
+  setPlaneKind(state.marker.getElement(), aircraft);
   setPlaneHeading(state.marker.getElement(), aircraft.track);
   setPlaneColor(state.marker.getElement(), colorForElapsed(0));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
