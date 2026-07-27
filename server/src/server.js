@@ -15,6 +15,8 @@ import { getStatsHistoryForRange } from './stats-query.js';
 import { rangeStartMs, bucketGranularityForRange } from './time-buckets.js';
 import { getTypeCounts, getAirlineCounts, getNewRegistrationsBuckets, getRegistrationsList } from './stats-registrations.js';
 import { getAirlines } from './airlines-data.js';
+import { isDaylight } from './daylight.js';
+import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 
 const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
 
@@ -114,6 +116,33 @@ export async function buildServer() {
 
     setManualHome(body.homeLat, body.homeLon);
     return settingsPayload();
+  });
+
+  // Deliberately NOT behind requireSettingsAuth: this is what the automatic
+  // map theme polls, so every browser needs it whether or not it's logged
+  // in to Settings. It exposes only a boolean, never the receiver's
+  // coordinates. `null` means "no home location known", which the client
+  // treats as "fall back to the OS light/dark preference".
+  app.get('/api/daylight', async () => {
+    const home = getEffectiveHome();
+    if (!home) return { isDaylight: null };
+    return { isDaylight: isDaylight(home.lat, home.lon) };
+  });
+
+  app.get('/api/server/port', { preHandler: requireSettingsAuth }, async () => {
+    const { port, source } = resolvePort();
+    return { port, source };
+  });
+
+  app.put('/api/server/port', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const result = validatePort(request.body?.port);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+
+    setConfiguredPort(result.port);
+    // Saved, but the running server keeps listening on its current port --
+    // see the comment in index.js on why we don't self-restart.
+    const { port, source } = resolvePort();
+    return { port, source, restartRequired: true };
   });
 
   app.get('/api/stats/history', async (request) => getStatsHistoryForRange(parseStatsRange(request)));

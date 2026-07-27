@@ -58,39 +58,6 @@ function buildOfflineLayers(theme) {
   ];
 }
 
-// Layer ids are identical across themes (only paint differs), so this is
-// theme-independent.
-const OFFLINE_LAYER_IDS = buildOfflineLayers('dark').map((layer) => layer.id);
-
-// Kept in sync by hand with the layer ids in public/mapstyles/online-*.json
-// (excluding 'background', which stays visible regardless of the basemap
-// toggle). Same ids in both the dark and light online style files.
-const ONLINE_LAYER_IDS = [
-  'water',
-  'landcover-wood',
-  'landcover-grass',
-  'park',
-  'landuse-residential',
-  'waterway',
-  'road-minor',
-  'road-secondary-tertiary',
-  'road-trunk-primary',
-  'road-motorway',
-  'road-major-rail',
-  'aeroway-fill',
-  'aeroway-taxiway',
-  'aeroway-runway',
-  'boundary-locality',
-  'boundary-region',
-  'boundary-country',
-  'airport-label',
-  'label-village',
-  'label-town',
-  'label-city',
-  'label-state',
-  'label-country',
-];
-
 function onlineStyleUrl(theme) {
   return theme === 'light' ? '/mapstyles/online-light.json' : '/mapstyles/online-dark.json';
 }
@@ -127,10 +94,6 @@ export function addOfflineLayers(map, theme) {
       paint: layer.paint,
     });
   }
-}
-
-export function getBasemapLayerIds(mode) {
-  return mode === 'online' ? ONLINE_LAYER_IDS : OFFLINE_LAYER_IDS;
 }
 
 // Set once per page load the first time the online basemap fails (preflight

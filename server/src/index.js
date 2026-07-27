@@ -13,8 +13,8 @@ import { recordSighting, flushDirtyRegistrations } from './stats-registrations.j
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
 import { distanceKm } from './range.js';
+import { resolvePort } from './server-config.js';
 
-const PORT = Number(process.env.MLPR_PORT ?? 1090);
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
 const POLL_INTERVAL_MS = 1000;
 const STATS_POLL_INTERVAL_MS = 15000;
@@ -170,7 +170,13 @@ async function main() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  await app.listen({ port: PORT, host: HOST });
+  // Resolved once at startup (env override > stored config > 1090).
+  // Changing the port in Settings persists it but does not rebind a running
+  // server -- the systemd unit is Restart=on-failure, so exiting to pick up
+  // a new port would just stop the service. The UI says a manual restart is
+  // required instead.
+  const { port } = resolvePort();
+  await app.listen({ port, host: HOST });
 }
 
 main().catch((err) => {

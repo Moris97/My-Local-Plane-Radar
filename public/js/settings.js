@@ -75,23 +75,20 @@ function renderSettingsForm(container) {
       <button type="button" class="mlpr-settings-tab-btn" data-tab="map">${t('tabMap')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="aircraft">${t('tabAircraft')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="notifications">${t('tabNotifications')}</button>
+      <button type="button" class="mlpr-settings-tab-btn" data-tab="server">${t('tabServer')}</button>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="general">
+      <p class="mlpr-scope-note">${t('scopeLocal')}</p>
       <fieldset class="mlpr-settings-group">
         <legend>${t('units')}</legend>
         <label><input type="radio" name="mlpr-units" value="imperial" ${settings.units === 'imperial' ? 'checked' : ''}> ${t('imperial')}</label>
         <label><input type="radio" name="mlpr-units" value="metric" ${settings.units === 'metric' ? 'checked' : ''}> ${t('metric')}</label>
       </fieldset>
-
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('security')}</legend>
-        <p id="mlpr-security-status" class="mlpr-home-status">…</p>
-        <div id="mlpr-security-form"></div>
-      </fieldset>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="map" style="display:none">
+      <p class="mlpr-scope-note">${t('scopeLocal')}</p>
       <fieldset class="mlpr-settings-group">
         <legend>${t('basemap')}</legend>
         <label><input type="radio" name="mlpr-basemap-mode" value="online" ${settings.basemapMode === 'online' ? 'checked' : ''}> ${t('basemapOnline')}</label>
@@ -101,22 +98,22 @@ function renderSettingsForm(container) {
             ? `<p class="mlpr-home-status">${t('basemapFallbackNotice')}</p>`
             : ''
         }
-        <label><input type="checkbox" id="mlpr-layer-basemap" ${settings.layers.basemap ? 'checked' : ''}> ${t('showBasemap')}</label>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
         <legend>${t('mapAppearance')}</legend>
-        <label><input type="radio" name="mlpr-map-theme" value="dark" ${settings.mapTheme === 'dark' ? 'checked' : ''}> ${t('mapThemeDark')}</label>
         <label><input type="radio" name="mlpr-map-theme" value="light" ${settings.mapTheme === 'light' ? 'checked' : ''}> ${t('mapThemeLight')}</label>
+        <label><input type="radio" name="mlpr-map-theme" value="dark" ${settings.mapTheme === 'dark' ? 'checked' : ''}> ${t('mapThemeDark')}</label>
+        <div class="mlpr-checkbox-row">
+          <label><input type="radio" name="mlpr-map-theme" value="auto" ${settings.mapTheme === 'auto' ? 'checked' : ''}> ${t('mapThemeAuto')}</label>
+          <span class="mlpr-info-icon" tabindex="0">i<span class="mlpr-tooltip">${t('mapThemeAutoHint')}</span></span>
+        </div>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
         <legend>${t('trails')}</legend>
-        <label><input type="checkbox" id="mlpr-trails-enabled" ${settings.trailsEnabled ? 'checked' : ''}> ${t('showTrails')}</label>
-        <div id="mlpr-trail-mode-group" style="${settings.trailsEnabled ? '' : 'display:none'}">
-          <label><input type="radio" name="mlpr-trail-mode" value="click" ${settings.trailMode === 'click' ? 'checked' : ''}> ${t('trailModeClick')}</label>
-          <label><input type="radio" name="mlpr-trail-mode" value="all" ${settings.trailMode === 'all' ? 'checked' : ''}> ${t('trailModeAll')}</label>
-        </div>
+        <label><input type="radio" name="mlpr-trail-mode" value="click" ${settings.trailMode === 'click' ? 'checked' : ''}> ${t('trailModeClick')}</label>
+        <label><input type="radio" name="mlpr-trail-mode" value="all" ${settings.trailMode === 'all' ? 'checked' : ''}> ${t('trailModeAll')}</label>
         <div class="mlpr-checkbox-row">
           <label><input type="checkbox" id="mlpr-shorter-trails" ${settings.shorterTrails ? 'checked' : ''}> ${t('shorterTrails')}</label>
           <span class="mlpr-info-icon" tabindex="0">i<span class="mlpr-tooltip">${t('shorterTrailsHint')}</span></span>
@@ -125,6 +122,7 @@ function renderSettingsForm(container) {
 
       <fieldset class="mlpr-settings-group">
         <legend>${t('homeLocation')}</legend>
+        <p class="mlpr-scope-note mlpr-scope-note-inline">${t('scopeGlobal')}</p>
         <p id="mlpr-home-status" class="mlpr-home-status">…</p>
         <label>Lat <input type="number" id="mlpr-home-lat" step="0.0001"></label>
         <label>Lon <input type="number" id="mlpr-home-lon" step="0.0001"></label>
@@ -136,6 +134,7 @@ function renderSettingsForm(container) {
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="aircraft" style="display:none">
+      <p class="mlpr-scope-note">${t('scopeLocal')}</p>
       <fieldset class="mlpr-settings-group">
         <legend>${t('appearance')}</legend>
         <label class="mlpr-slider-label">
@@ -155,6 +154,27 @@ function renderSettingsForm(container) {
         <legend>${t('altitudeFilter')}</legend>
         <label>${t('hideBelow')} <input type="number" id="mlpr-alt-min" value="${settings.altitudeFilterMin ?? ''}" step="500"> ft</label>
         <label>${t('hideAbove')} <input type="number" id="mlpr-alt-max" value="${settings.altitudeFilterMax ?? ''}" step="500"> ft</label>
+      </fieldset>
+
+    </div>
+
+    <div class="mlpr-settings-tab-panel" data-tab-panel="notifications" style="display:none">
+      <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('notifications')}</legend>
+        <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
+        <div class="mlpr-notif-squawk-codes">
+          <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
+          <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
+          <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
+        </div>
+        <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
+        <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
+        <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
+        <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
+        <div class="mlpr-home-actions">
+          <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
+        </div>
       </fieldset>
 
       <fieldset class="mlpr-settings-group">
@@ -182,22 +202,23 @@ function renderSettingsForm(container) {
       </fieldset>
     </div>
 
-    <div class="mlpr-settings-tab-panel" data-tab-panel="notifications" style="display:none">
+    <div class="mlpr-settings-tab-panel" data-tab-panel="server" style="display:none">
+      <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
       <fieldset class="mlpr-settings-group">
-        <legend>${t('notifications')}</legend>
-        <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
-        <div class="mlpr-notif-squawk-codes">
-          <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
-          <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
-          <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
-        </div>
-        <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
-        <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
-        <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
-        <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
+        <legend>${t('security')}</legend>
+        <p id="mlpr-security-status" class="mlpr-home-status">…</p>
+        <div id="mlpr-security-form"></div>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('serverPort')}</legend>
+        <p class="mlpr-home-status">${t('serverPortHint')}</p>
+        <label>${t('port')} <input type="number" id="mlpr-server-port" min="1024" max="65535" step="1"></label>
         <div class="mlpr-home-actions">
-          <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
+          <button type="button" id="mlpr-server-port-save">${t('save')}</button>
         </div>
+        <p id="mlpr-server-port-status" class="mlpr-home-status"></p>
+        <p id="mlpr-server-port-error" class="mlpr-gate-error"></p>
       </fieldset>
     </div>
   `;
@@ -207,6 +228,7 @@ function renderSettingsForm(container) {
   wireHomeLocation(container);
   wireNotificationSettings(container);
   wireWatchlist(container);
+  wireServerPort(container);
   renderSecuritySection(container);
 
   return undefined;
@@ -251,10 +273,6 @@ function wireDisplaySettings(container) {
     input.addEventListener('change', (event) => updateSettings({ planeColorMode: event.target.value }));
   }
 
-  container.querySelector('#mlpr-layer-basemap').addEventListener('change', (event) => {
-    updateSettings({ layers: { ...getSettings().layers, basemap: event.target.checked } });
-  });
-
   for (const input of container.querySelectorAll('input[name="mlpr-basemap-mode"]')) {
     input.addEventListener('change', (event) => updateSettings({ basemapMode: event.target.value }));
   }
@@ -263,12 +281,6 @@ function wireDisplaySettings(container) {
     input.addEventListener('change', (event) => updateSettings({ mapTheme: event.target.value }));
   }
 
-  const trailsEnabledEl = container.querySelector('#mlpr-trails-enabled');
-  const trailModeGroup = container.querySelector('#mlpr-trail-mode-group');
-  trailsEnabledEl.addEventListener('change', (event) => {
-    updateSettings({ trailsEnabled: event.target.checked });
-    trailModeGroup.style.display = event.target.checked ? '' : 'none';
-  });
   for (const input of container.querySelectorAll('input[name="mlpr-trail-mode"]')) {
     input.addEventListener('change', (event) => updateSettings({ trailMode: event.target.value }));
   }
@@ -276,6 +288,44 @@ function wireDisplaySettings(container) {
   container.querySelector('#mlpr-shorter-trails').addEventListener('change', (event) => {
     updateSettings({ shorterTrails: event.target.checked });
   });
+}
+
+function wireServerPort(container) {
+  const portInput = container.querySelector('#mlpr-server-port');
+  const statusEl = container.querySelector('#mlpr-server-port-status');
+  const errorEl = container.querySelector('#mlpr-server-port-error');
+  const saveBtn = container.querySelector('#mlpr-server-port-save');
+
+  async function loadPort() {
+    const response = await authedFetch(container, '/api/server/port');
+    if (!response) return;
+    const data = await response.json();
+    portInput.value = data.port;
+    // An MLPR_PORT env var beats the stored setting, so say so explicitly
+    // rather than letting the field look like it's in charge when it isn't.
+    statusEl.textContent = data.source === 'env' ? t('portEnvOverride') : '';
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    errorEl.textContent = '';
+    statusEl.textContent = '';
+
+    const response = await authedFetch(container, '/api/server/port', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ port: Number(portInput.value) }),
+    });
+    if (!response) return;
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      errorEl.textContent = data.error ?? t('somethingWentWrong');
+      return;
+    }
+    statusEl.textContent = t('portRestartRequired');
+  });
+
+  loadPort();
 }
 
 function wireHomeLocation(container) {

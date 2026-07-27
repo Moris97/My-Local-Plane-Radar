@@ -1,5 +1,5 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind } from './aircraft-icon.js';
-import { applyBasemapMode, getBasemapLayerIds, BLANK_STYLE } from './basemap.js';
+import { applyBasemapMode, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails, colorForAltitude } from './trail.js';
 import { colorForElapsed, colorForSpeed } from './aircraft-color.js';
 import { t } from './i18n.js';
@@ -23,6 +23,7 @@ const FADE_END_MS = 10000;
 const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
+const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
 
 const TRAIL_SOURCE_ID = 'mlpr-trail';
 const TRAIL_GAP_LAYER_ID = 'mlpr-trail-gap';
@@ -127,11 +128,39 @@ function updateAttributionVisibility(mode) {
 function onBasemapEffectiveModeReady(effective) {
   effectiveBasemapMode = effective;
   ensureTrailLayer();
-  applyLayerVisibility();
   renderTrail();
   updateAttributionVisibility(effective);
 }
 
+// mapTheme 'auto' follows sunrise/sunset at the receiver. The daylight
+// decision is made server-side (server/src/daylight.js) so the receiver's
+// coordinates never have to be handed to the browser -- /api/daylight
+// answers with just a boolean. `null` means no home location is configured,
+// in which case there's nothing to compute from and the OS light/dark
+// preference is the best available answer.
+let cachedIsDaylight = null;
+
+async function refreshDaylight() {
+  try {
+    const response = await fetch('/api/daylight');
+    if (!response.ok) return;
+    cachedIsDaylight = (await response.json()).isDaylight;
+  } catch {
+    // Offline/unreachable -- keep the last known value rather than flapping.
+  }
+}
+
+function resolveMapTheme(mapTheme) {
+  if (mapTheme !== 'auto') return mapTheme;
+  if (cachedIsDaylight === null) {
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return cachedIsDaylight ? 'light' : 'dark';
+}
+
+// `theme` here is always a concrete 'light'/'dark' -- 'auto' is resolved by
+// the caller, and lastRequestedMapTheme tracks the *resolved* value so an
+// automatic sunset flip is correctly detected as a change.
 async function switchBasemap(mode, theme) {
   lastRequestedBasemapMode = mode;
   lastRequestedMapTheme = theme;
@@ -155,7 +184,8 @@ map.on('load', async () => {
   const initialSettings = getSettings();
   setShorterTrails(initialSettings.shorterTrails);
   applyIconSize(initialSettings.aircraftIconSize);
-  await switchBasemap(initialSettings.basemapMode, initialSettings.mapTheme);
+  if (initialSettings.mapTheme === 'auto') await refreshDaylight();
+  await switchBasemap(initialSettings.basemapMode, resolveMapTheme(initialSettings.mapTheme));
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
@@ -163,13 +193,16 @@ map.on('load', async () => {
   refreshTrailForSettings();
 });
 
-function applyLayerVisibility() {
-  const { layers } = getSettings();
-  const basemapVisibility = layers.basemap ? 'visible' : 'none';
-  for (const id of getBasemapLayerIds(effectiveBasemapMode)) {
-    if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', basemapVisibility);
-  }
-}
+// Re-check daylight periodically so an open tab flips itself at sunset/
+// sunrise without needing a reload. 10 minutes is plenty of precision for a
+// day/night switch and costs one tiny request per tab.
+setInterval(async () => {
+  const { mapTheme, basemapMode } = getSettings();
+  if (mapTheme !== 'auto') return;
+  await refreshDaylight();
+  const resolved = resolveMapTheme(mapTheme);
+  if (resolved !== lastRequestedMapTheme) switchBasemap(basemapMode, resolved);
+}, DAYLIGHT_POLL_INTERVAL_MS);
 
 function passesAltitudeFilter(aircraft) {
   if (aircraft.onGround) return true;
@@ -185,10 +218,18 @@ onSettingsChange(() => {
   const { basemapMode, mapTheme, shorterTrails, aircraftIconSize } = getSettings();
   setShorterTrails(shorterTrails);
   applyIconSize(aircraftIconSize);
-  if (basemapMode !== lastRequestedBasemapMode || mapTheme !== lastRequestedMapTheme) {
-    switchBasemap(basemapMode, mapTheme);
+  if (mapTheme === 'auto' && cachedIsDaylight === null) {
+    // Just switched to auto and we've never asked -- fetch, then re-run this
+    // same handler's theme check via updateSettings-free direct call.
+    refreshDaylight().then(() => {
+      const resolved = resolveMapTheme('auto');
+      if (resolved !== lastRequestedMapTheme) switchBasemap(getSettings().basemapMode, resolved);
+    });
   }
-  applyLayerVisibility();
+  const resolvedTheme = resolveMapTheme(mapTheme);
+  if (basemapMode !== lastRequestedBasemapMode || resolvedTheme !== lastRequestedMapTheme) {
+    switchBasemap(basemapMode, resolvedTheme);
+  }
   for (const state of aircraftState.values()) {
     if (state.marker && state.lastAircraft) {
       state.marker.getElement().style.display = passesAltitudeFilter(state.lastAircraft) ? '' : 'none';
@@ -233,18 +274,16 @@ function renderTrail() {
   const source = map.getSource(TRAIL_SOURCE_ID);
   if (!source) return;
 
-  const { trailsEnabled, trailMode } = getSettings();
+  const { trailMode } = getSettings();
   let features = [];
 
-  if (trailsEnabled) {
-    if (trailMode === 'all') {
-      for (const hex of aircraftState.keys()) {
-        if (!isCurrentlyTracked(hex)) continue;
-        features = features.concat(trailFeaturesFor(hex));
-      }
-    } else if (selectedHex && isCurrentlyTracked(selectedHex)) {
-      features = trailFeaturesFor(selectedHex);
+  if (trailMode === 'all') {
+    for (const hex of aircraftState.keys()) {
+      if (!isCurrentlyTracked(hex)) continue;
+      features = features.concat(trailFeaturesFor(hex));
     }
+  } else if (selectedHex && isCurrentlyTracked(selectedHex)) {
+    features = trailFeaturesFor(selectedHex);
   }
 
   source.setData({ type: 'FeatureCollection', features });
@@ -274,10 +313,10 @@ async function loadAllTrails() {
 }
 
 async function refreshTrailForSettings() {
-  const { trailsEnabled, trailMode } = getSettings();
-  if (trailsEnabled && trailMode === 'all') {
+  const { trailMode } = getSettings();
+  if (trailMode === 'all') {
     await loadAllTrails();
-  } else if (trailsEnabled && trailMode === 'click' && selectedHex) {
+  } else if (trailMode === 'click' && selectedHex) {
     await loadTrailForHex(selectedHex);
   }
   renderTrail();
@@ -322,8 +361,7 @@ function showInfoPopup(hex) {
 
 async function selectAircraft(hex) {
   selectedHex = hex;
-  const { trailsEnabled, trailMode } = getSettings();
-  if (trailsEnabled && trailMode === 'click') {
+  if (getSettings().trailMode === 'click') {
     await loadTrailForHex(hex);
   }
   renderTrail();
@@ -408,13 +446,10 @@ function applyAircraftUpdate(aircraft) {
   state.lastAircraft = aircraft;
   state.goneAt = null;
 
-  const { trailsEnabled, trailMode } = getSettings();
-  const shouldTrackTrail = trailsEnabled && (trailMode === 'all' || aircraft.hex === selectedHex);
-  if (shouldTrackTrail) {
+  const { trailMode } = getSettings();
+  if (trailMode === 'all' || aircraft.hex === selectedHex) {
     recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone);
-    if (trailMode === 'all' || aircraft.hex === selectedHex) {
-      renderTrail();
-    }
+    renderTrail();
   }
 
   noteAircraft(aircraft.hex, aircraft);

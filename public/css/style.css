@@ -514,6 +514,25 @@ html, body {
   margin: 0;
 }
 
+/* Makes the local-vs-global split visible rather than something the user has
+   to infer: per-browser tabs say so, and the two shared tabs (plus the
+   receiver location, which sits on an otherwise per-browser tab) are marked
+   as affecting everyone. */
+.mlpr-scope-note {
+  margin: 0 0 10px;
+  padding: 5px 9px;
+  border-left: 2px solid #245c3c;
+  background: rgba(18, 52, 35, 0.35);
+  border-radius: 0 4px 4px 0;
+  color: #8fb3a2;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.mlpr-scope-note-inline {
+  margin-bottom: 8px;
+}
+
 .mlpr-slider-label {
   display: flex;
   justify-content: space-between;

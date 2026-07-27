@@ -231,9 +231,28 @@ example/test data.
   - **Offline**: Natural Earth 1:10m GeoJSON (coastlines, borders, rivers,
     major cities), ~20 MB, public domain. Fetched by
     `scripts/fetch-mapdata.sh` at install time — **never committed**.
-  - **Map theme** (`mapTheme`, also in `settings-state.js`, default `dark`):
-    independent of `basemapMode` — dark/light applies to *both* online and
-    offline modes, four combinations total. This is a **map-only** theme, not
+  - **Map theme** (`mapTheme`, also in `settings-state.js`, default
+    `light`, values `light` | `dark` | `auto`): independent of
+    `basemapMode` — dark/light applies to *both* online and offline modes,
+    four combinations total. `auto` follows sunrise/sunset **at the
+    receiver**: `app.js`'s `resolveMapTheme` turns it into a concrete
+    light/dark before anything else sees it, and `lastRequestedMapTheme`
+    tracks the *resolved* value so an automatic sunset flip registers as a
+    change. The daylight decision is made server-side
+    (`server/src/daylight.js`, a standard sunrise-equation implementation,
+    no dependency) and exposed as `GET /api/daylight` → `{ isDaylight }` —
+    deliberately a bare boolean and deliberately **not** behind
+    `requireSettingsAuth`, since every browser needs it whether or not it's
+    logged in to Settings, and handing out the receiver's coordinates
+    instead would leak the user's home location. `isDaylight: null` means no
+    home location is configured, in which case the client falls back to the
+    OS `prefers-color-scheme`. An open tab re-checks every 10 minutes so it
+    flips itself at dusk without a reload. Watch the longitude sign if you
+    ever touch `daylight.js`: `lon` is east-positive here, so solar noon is
+    `n - lon/360`; textbook statements of the equation use west-positive
+    longitude and read `+ l_w/360`, and getting it backwards shifts results
+    by twice the offset (caught by the solstice tests, which check against
+    published almanac times). This is a **map-only** theme, not
     the app's own UI theme (bottom bar/panels/settings stay dark always —
     deliberately, per explicit request, since this is meant to be a
     night-readable radar display regardless of the map underneath). Online
@@ -455,9 +474,13 @@ photo fetch, and is the piece wired into `panels.js`.
   deliberately identical in both map themes). After 5 minutes with no
   update, give up on it returning.
 - Type + callsign label appears at appropriate zoom levels.
-- **Trails are opt-in per Settings → Map**: `trailsEnabled` (on/off) +
-  `trailMode` (`click` — only the selected aircraft, default; `all` — every
-  aircraft's trail drawn simultaneously, colors included). The grey
+- **Trails are always on**, with `trailMode` (Settings → Map) choosing
+  `click` (only the selected aircraft, default) or `all` (every aircraft's
+  trail drawn simultaneously, colors included). There used to be a separate
+  `trailsEnabled` on/off checkbox above the mode; it was removed on request
+  as redundant UI, so there is deliberately **no** way to turn trails off
+  entirely any more — if that's ever wanted back, it should be a third
+  `trailMode` value (`off`), not a second setting to keep in sync. The grey
   signal-loss segment and the altitude-colored segments are the *same*
   per-hex feature list (`public/js/trail.js`, entries carry an `isGap` flag)
   rendered into one shared `mlpr-trail` GeoJSON source. That single source
@@ -490,9 +513,47 @@ photo fetch, and is the piece wired into `panels.js`.
 - Right-click-drag map rotate/tilt is disabled
   (`map.dragRotate.disable()` / `map.touchZoomRotate.disableRotation()`) —
   the radar stays permanently north-up and flat, per explicit request.
-- Settings panel is organized into four tabs: General (units, password
-  protection), Map (basemap layer, trails, home location), Aircraft (altitude
-  filter, watch list), Notifications.
+
+### Settings scope: per-browser vs. shared (load-bearing)
+
+The Settings panel has five tabs, and **which tab something lives on encodes
+where it is stored**. Don't add a setting to a tab without checking it lands
+on the right side of this line:
+
+| Tab | Contents | Stored |
+|---|---|---|
+| General | units | `localStorage` |
+| Map | basemap mode, map theme, trails, *receiver location* | `localStorage` (except receiver location) |
+| Aircraft | marker color mode, icon size, altitude filter | `localStorage` |
+| Notifications | notification rules, ntfy topic, watch list | SQLite (shared) |
+| Server | Settings password, server port | SQLite (shared) |
+
+- **Per-browser** settings live in `public/js/settings-state.js`
+  (`localStorage`), so each person/device gets their own units, map look and
+  aircraft display without affecting anyone else on the LAN.
+- **Shared** settings live server-side in SQLite and are reached over
+  `/api/*`. Notification rules, the watch list, and the Settings password
+  were already server-side; the Server tab's port joined them.
+- **The receiver location is the one deliberate exception**: it sits on the
+  Map tab (per-browser by the rule above) but is stored server-side and
+  shared, because it describes one physical antenna — there is no sensible
+  per-browser answer to "where is the receiver". Settings renders an
+  explicit "shared by everyone" note on that one fieldset for exactly this
+  reason (`.mlpr-scope-note-inline`), while each tab carries a
+  `.mlpr-scope-note` banner saying which kind it is. Keep those notes
+  accurate if anything moves.
+
+**Server port** (`server/src/server-config.js`): resolution order is
+`MLPR_PORT` env > stored config > 1090, and `GET /api/server/port` reports
+which of the three is in effect so the UI can say "currently overridden by
+MLPR_PORT" instead of showing a field that silently does nothing. Changing
+it persists the value but **does not rebind the running server** — the
+systemd unit is `Restart=on-failure`, so exiting to pick up a new port would
+just stop the service rather than restart it; the UI tells the user to
+restart manually. `validatePort` rejects anything below 1024 (would need
+root, which MLPR never runs as), readsb's own ports, and 8080/8085 — a UI
+that could bind over readsb's ports would break the very receiver MLPR reads
+from.
 
 ## Notification engine
 
