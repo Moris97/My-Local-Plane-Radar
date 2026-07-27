@@ -1,6 +1,7 @@
 import { t } from './i18n.js';
 import { getInspectedHex, getAircraftByHex, onChange } from './radar-state.js';
-import { buildAircraftDetailTiles, FLAG_VALUE_MARKER } from './aircraft-details.js';
+import { getSettings, onSettingsChange } from './settings-state.js';
+import { buildAircraftDetailTiles, FLAG_VALUE_MARKER, GROUND_MARKER } from './aircraft-details.js';
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -62,10 +63,11 @@ function renderItemHtml(item) {
   if (item.value === FLAG_VALUE_MARKER) {
     return `<div class="mlpr-detail-tile mlpr-detail-flag${fullWidthClass}">${escapeHtml(t(item.labelKey))}</div>`;
   }
+  const displayValue = item.value === GROUND_MARKER ? t('onGround') : item.value;
   return `
     <div class="mlpr-detail-tile${fullWidthClass}">
       <div class="mlpr-detail-tile-label">${escapeHtml(t(item.labelKey))}</div>
-      <div class="mlpr-detail-tile-value">${escapeHtml(item.value)}</div>
+      <div class="mlpr-detail-tile-value">${escapeHtml(displayValue)}</div>
     </div>`;
 }
 
@@ -117,7 +119,7 @@ export function renderAircraftDetailsPanel(container) {
       return;
     }
 
-    const { core, extra } = buildAircraftDetailTiles(aircraft);
+    const { core, extra } = buildAircraftDetailTiles(aircraft, getSettings().units);
     let html = renderGroupHtml(core);
     if (extra.length > 0) {
       html += `
@@ -137,7 +139,12 @@ export function renderAircraftDetailsPanel(container) {
   drawTiles();
   loadPhoto(hex, photoEl);
 
-  return onChange(drawTiles);
+  const unsubscribeAircraft = onChange(drawTiles);
+  const unsubscribeSettings = onSettingsChange(drawTiles);
+  return () => {
+    unsubscribeAircraft();
+    unsubscribeSettings();
+  };
 }
 
 export function aircraftDetailsPanelTitle() {
