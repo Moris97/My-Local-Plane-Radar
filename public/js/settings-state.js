@@ -10,6 +10,8 @@ const defaults = {
   trailsEnabled: true,
   trailMode: 'click', // 'click' | 'all'
   shorterTrails: false, // performance option: cap client-side trail length lower than the server default
+  aircraftIconSize: 40, // px, side of the .mlpr-plane marker
+  planeColorMode: 'signalLoss', // 'signalLoss' | 'altitude' | 'speed'
 };
 
 function load() {

@@ -137,6 +137,21 @@ function renderSettingsForm(container) {
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="aircraft" style="display:none">
       <fieldset class="mlpr-settings-group">
+        <legend>${t('appearance')}</legend>
+        <label class="mlpr-slider-label">
+          ${t('iconSize')}
+          <span id="mlpr-icon-size-value">${settings.aircraftIconSize}px</span>
+        </label>
+        <input type="range" id="mlpr-icon-size" min="24" max="64" step="2" value="${settings.aircraftIconSize}">
+        <div class="mlpr-radio-group">
+          <span class="mlpr-radio-group-label">${t('planeColorMode')}</span>
+          <label><input type="radio" name="mlpr-plane-color-mode" value="signalLoss" ${settings.planeColorMode === 'signalLoss' ? 'checked' : ''}> ${t('planeColorModeSignalLoss')}</label>
+          <label><input type="radio" name="mlpr-plane-color-mode" value="altitude" ${settings.planeColorMode === 'altitude' ? 'checked' : ''}> ${t('planeColorModeAltitude')}</label>
+          <label><input type="radio" name="mlpr-plane-color-mode" value="speed" ${settings.planeColorMode === 'speed' ? 'checked' : ''}> ${t('planeColorModeSpeed')}</label>
+        </div>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
         <legend>${t('altitudeFilter')}</legend>
         <label>${t('hideBelow')} <input type="number" id="mlpr-alt-min" value="${settings.altitudeFilterMin ?? ''}" step="500"> ft</label>
         <label>${t('hideAbove')} <input type="number" id="mlpr-alt-max" value="${settings.altitudeFilterMax ?? ''}" step="500"> ft</label>
@@ -222,6 +237,19 @@ function wireDisplaySettings(container) {
   container.querySelector('#mlpr-alt-max').addEventListener('change', (event) => {
     updateSettings({ altitudeFilterMax: event.target.value === '' ? null : Number(event.target.value) });
   });
+
+  const iconSizeInput = container.querySelector('#mlpr-icon-size');
+  const iconSizeValue = container.querySelector('#mlpr-icon-size-value');
+  iconSizeInput.addEventListener('input', (event) => {
+    // 'input' (not just 'change') so the live px label and the map marker
+    // size both track the slider while dragging, not only on release.
+    iconSizeValue.textContent = `${event.target.value}px`;
+    updateSettings({ aircraftIconSize: Number(event.target.value) });
+  });
+
+  for (const input of container.querySelectorAll('input[name="mlpr-plane-color-mode"]')) {
+    input.addEventListener('change', (event) => updateSettings({ planeColorMode: event.target.value }));
+  }
 
   container.querySelector('#mlpr-layer-basemap').addEventListener('change', (event) => {
     updateSettings({ layers: { ...getSettings().layers, basemap: event.target.checked } });

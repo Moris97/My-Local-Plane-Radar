@@ -15,6 +15,8 @@ export function setShorterTrails(enabled) {
   maxHistoryPoints = enabled ? SHORT_MAX_HISTORY_POINTS : DEFAULT_MAX_HISTORY_POINTS;
 }
 
+import { colorFromStops } from './color-gradient.js';
+
 const ALTITUDE_STOPS = [
   // 0-10,000 ft used to be two identical greens (a flat, uninformative
   // band) -- most locally-tracked traffic (circuit, approach, departure)
@@ -23,8 +25,8 @@ const ALTITUDE_STOPS = [
   // via lerpSpace 'hsl' (a pure hue sweep, not a lightness one, so it stays
   // exactly as vivid as the rest of the scale rather than looking dim/muddy
   // at ground level).
-  { ft: 0, color: [210, 196, 30] }, // golden green (ground)
-  { ft: 10000, color: [61, 220, 132], lerpSpace: 'hsl' }, // green
+  { at: 0, color: [210, 196, 30] }, // golden green (ground)
+  { at: 10000, color: [61, 220, 132], lerpSpace: 'hsl' }, // green
   // Green and this blue share the exact same saturation/lightness (only the
   // hue differs, ~147deg -> ~210deg) -- a straight per-channel RGB lerp
   // between them doesn't preserve that, so the perceived color barely
@@ -33,7 +35,7 @@ const ALTITUDE_STOPS = [
   // so the shift away from green is visible early in the band, not just at
   // the top (reported: a plane at ~4900 m/16,000 ft still looked pure
   // green, only became visibly non-green around 6,000 m/20,000 ft).
-  { ft: 17500, color: [61, 140, 220], lerpSpace: 'hsl' }, // blue
+  { at: 17500, color: [61, 140, 220], lerpSpace: 'hsl' }, // blue
   // Same problem as the leg above, and worse: an RGB lerp straight from
   // this blue to the dark red below passes through desaturated mud -- e.g.
   // at the old 35,000 ft stop it produced rgb(92,57,83), a washed-out
@@ -47,96 +49,15 @@ const ALTITUDE_STOPS = [
   // gradually-darkening red tail from there to 40,000 ft -- the altitude
   // band most cruise traffic actually sits in -- rather than everything
   // above ~30k being one indistinguishable dark red.
-  { ft: 30250, color: [224, 49, 49], lerpSpace: 'hsl' }, // red
+  { at: 30250, color: [224, 49, 49], lerpSpace: 'hsl' }, // red
   // Red -> dark red is a pure lightness change at the same hue, so a plain
   // RGB lerp is correct (and an HSL one would be identical anyway).
-  { ft: 40000, color: [107, 15, 15] }, // dark red
+  { at: 40000, color: [107, 15, 15] }, // dark red
 ];
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function lerpColor(c1, c2, t) {
-  return [
-    Math.round(lerp(c1[0], c2[0], t)),
-    Math.round(lerp(c1[1], c2[1], t)),
-    Math.round(lerp(c1[2], c2[2], t)),
-  ];
-}
-
-function rgbToHsl([r, g, b]) {
-  const rf = r / 255;
-  const gf = g / 255;
-  const bf = b / 255;
-  const max = Math.max(rf, gf, bf);
-  const min = Math.min(rf, gf, bf);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  let h;
-  if (max === rf) h = (gf - bf) / d + (gf < bf ? 6 : 0);
-  else if (max === gf) h = (bf - rf) / d + 2;
-  else h = (rf - gf) / d + 4;
-  return [h * 60, s, l];
-}
-
-function hslToRgb([h, s, l]) {
-  if (s === 0) {
-    const v = Math.round(l * 255);
-    return [v, v, v];
-  }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const hk = (((h % 360) + 360) % 360) / 360;
-  const channel = (shift) => {
-    let x = hk + shift;
-    if (x < 0) x += 1;
-    if (x > 1) x -= 1;
-    if (x < 1 / 6) return p + (q - p) * 6 * x;
-    if (x < 1 / 2) return q;
-    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
-    return p;
-  };
-  return [channel(1 / 3), channel(0), channel(-1 / 3)].map((v) => Math.round(v * 255));
-}
-
-// Shortest-arc hue interpolation (e.g. 350deg -> 10deg goes forward through
-// 360/0, not backward through 180) so a hue-space lerp never takes an
-// unnecessarily long way around the color wheel.
-function lerpHue(h1, h2, t) {
-  let diff = h2 - h1;
-  if (diff > 180) diff -= 360;
-  if (diff < -180) diff += 360;
-  return ((h1 + diff * t + 360) % 360);
-}
-
-function lerpColorHsl(c1, c2, t) {
-  const [h1, s1, l1] = rgbToHsl(c1);
-  const [h2, s2, l2] = rgbToHsl(c2);
-  return hslToRgb([lerpHue(h1, h2, t), lerp(s1, s2, t), lerp(l1, l2, t)]);
-}
 
 export function colorForAltitude(altitudeFt) {
   const alt = typeof altitudeFt === 'number' ? altitudeFt : 0;
-
-  if (alt <= ALTITUDE_STOPS[0].ft) {
-    return `rgb(${ALTITUDE_STOPS[0].color.join(',')})`;
-  }
-
-  for (let i = 0; i < ALTITUDE_STOPS.length - 1; i += 1) {
-    const a = ALTITUDE_STOPS[i];
-    const b = ALTITUDE_STOPS[i + 1];
-    if (alt <= b.ft) {
-      const t = (alt - a.ft) / (b.ft - a.ft);
-      const color = b.lerpSpace === 'hsl' ? lerpColorHsl(a.color, b.color, t) : lerpColor(a.color, b.color, t);
-      return `rgb(${color.join(',')})`;
-    }
-  }
-
-  const last = ALTITUDE_STOPS[ALTITUDE_STOPS.length - 1];
-  return `rgb(${last.color.join(',')})`;
+  return colorFromStops(ALTITUDE_STOPS, alt);
 }
 
 export function seedHistory(hex, serverPoints) {

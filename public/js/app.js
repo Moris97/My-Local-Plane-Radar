@@ -1,6 +1,7 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind } from './aircraft-icon.js';
 import { applyBasemapMode, getBasemapLayerIds, BLANK_STYLE } from './basemap.js';
-import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails } from './trail.js';
+import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails, colorForAltitude } from './trail.js';
+import { colorForElapsed, colorForSpeed } from './aircraft-color.js';
 import { t } from './i18n.js';
 import {
   noteAircraft,
@@ -22,9 +23,6 @@ const FADE_END_MS = 10000;
 const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
-
-const FRESH_COLOR = [61, 220, 132]; // #3ddc84
-const STALE_COLOR = [224, 49, 49]; // #e03131
 
 const TRAIL_SOURCE_ID = 'mlpr-trail';
 const TRAIL_GAP_LAYER_ID = 'mlpr-trail-gap';
@@ -149,9 +147,14 @@ async function switchBasemap(mode, theme) {
   );
 }
 
+function applyIconSize(sizePx) {
+  document.documentElement.style.setProperty('--mlpr-plane-size', `${sizePx}px`);
+}
+
 map.on('load', async () => {
   const initialSettings = getSettings();
   setShorterTrails(initialSettings.shorterTrails);
+  applyIconSize(initialSettings.aircraftIconSize);
   await switchBasemap(initialSettings.basemapMode, initialSettings.mapTheme);
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
@@ -179,8 +182,9 @@ function passesAltitudeFilter(aircraft) {
 }
 
 onSettingsChange(() => {
-  const { basemapMode, mapTheme, shorterTrails } = getSettings();
+  const { basemapMode, mapTheme, shorterTrails, aircraftIconSize } = getSettings();
   setShorterTrails(shorterTrails);
+  applyIconSize(aircraftIconSize);
   if (basemapMode !== lastRequestedBasemapMode || mapTheme !== lastRequestedMapTheme) {
     switchBasemap(basemapMode, mapTheme);
   }
@@ -188,6 +192,11 @@ onSettingsChange(() => {
   for (const state of aircraftState.values()) {
     if (state.marker && state.lastAircraft) {
       state.marker.getElement().style.display = passesAltitudeFilter(state.lastAircraft) ? '' : 'none';
+      // Recolor immediately rather than waiting for this aircraft's next
+      // update (or the next signalLoss-mode tick, which won't fire at all
+      // for the other two modes) -- switching the mode in Settings should
+      // repaint every currently-visible marker right away.
+      setPlaneColor(state.marker.getElement(), colorForAircraft(state.lastAircraft, Date.now() - state.lastUpdateAt));
     }
   }
   refreshTrailForSettings();
@@ -296,10 +305,13 @@ function showInfoPopup(hex) {
   activePopup?.remove();
   // Default offset is 0, so the popup's tip sits exactly on the aircraft's
   // coordinate -- since the marker (.mlpr-plane) is centered on that same
-  // point and is ~50px across, the box ends up covering half the icon.
-  // A flat pixel offset pushes it clear of the marker on whichever side
-  // MapLibre auto-picks, reading as "floating just above the plane".
-  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 32 })
+  // point, the box would end up covering half the icon. A flat pixel offset
+  // pushes it clear of the marker on whichever side MapLibre auto-picks,
+  // reading as "floating just above the plane". Derived from the
+  // user-adjustable icon size (not a fixed constant) so it still clears the
+  // marker at any size setting.
+  const popupOffset = Math.round(getSettings().aircraftIconSize / 2) + 7;
+  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: popupOffset })
     .setLngLat(state.lastLngLat)
     .setHTML(
       `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
@@ -335,19 +347,19 @@ function deselectAircraft() {
   activePopup = null;
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function colorForElapsed(elapsedMs) {
-  if (elapsedMs <= FADE_START_MS) {
-    return `rgb(${FRESH_COLOR.join(',')})`;
-  }
-  const t = Math.min(1, (elapsedMs - FADE_START_MS) / (FADE_END_MS - FADE_START_MS));
-  const r = Math.round(lerp(FRESH_COLOR[0], STALE_COLOR[0], t));
-  const g = Math.round(lerp(FRESH_COLOR[1], STALE_COLOR[1], t));
-  const b = Math.round(lerp(FRESH_COLOR[2], STALE_COLOR[2], t));
-  return `rgb(${r},${g},${b})`;
+// Three mutually-exclusive plane color modes (Settings -> Aircraft):
+// 'signalLoss' (default) reflects data freshness, fading toward red the
+// longer an aircraft goes without an update -- this is the only mode tied
+// to elapsed time rather than a flight parameter, and the periodic tick
+// below only recolors for staleness when this mode is active. The other
+// two are static per-update snapshots of a flight parameter and reuse the
+// same gradients already built for trails/elsewhere rather than inventing
+// a third palette.
+function colorForAircraft(aircraft, elapsedMs) {
+  const { planeColorMode } = getSettings();
+  if (planeColorMode === 'altitude') return colorForAltitude(aircraft.onGround ? 0 : aircraft.altBaro);
+  if (planeColorMode === 'speed') return colorForSpeed(aircraft.gs);
+  return colorForElapsed(elapsedMs, FADE_START_MS, FADE_END_MS);
 }
 
 function resetAll() {
@@ -388,7 +400,7 @@ function applyAircraftUpdate(aircraft) {
 
   setPlaneKind(state.marker.getElement(), aircraft);
   setPlaneHeading(state.marker.getElement(), aircraft.track);
-  setPlaneColor(state.marker.getElement(), colorForElapsed(0));
+  setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
 
   state.lastUpdateAt = now;
@@ -439,6 +451,7 @@ function handleSnapshot(snapshot) {
 setInterval(() => {
   const now = Date.now();
   let trailNeedsRefresh = false;
+  const { planeColorMode } = getSettings();
 
   for (const [hex, state] of aircraftState) {
     if (state.goneAt !== null) {
@@ -464,8 +477,12 @@ setInterval(() => {
       continue;
     }
 
-    if (state.marker) {
-      setPlaneColor(state.marker.getElement(), colorForElapsed(elapsed));
+    // Only the 'signalLoss' mode depends on elapsed time -- the other modes
+    // are static snapshots of a flight parameter already set at update time
+    // (see colorForAircraft), so skip the recolor entirely rather than
+    // writing the same color to the DOM on every tick for no reason.
+    if (state.marker && planeColorMode !== 'altitude' && planeColorMode !== 'speed') {
+      setPlaneColor(state.marker.getElement(), colorForAircraft(state.lastAircraft, elapsed));
     }
   }
 

@@ -280,6 +280,21 @@ example/test data.
     explicit request, not a license obligation. Offline mode (Natural Earth,
     public domain) needs no data attribution, hence only the MapLibre half
     shows.
+  - **Position**: pinned to the true bottom-right corner (`bottom: 6px`) only
+    on screens `>=720px` wide (`public/css/style.css`, reusing the
+    breakpoint the bottom-sheet/side-panel split already uses) — below that
+    it stays raised above the bottom bar's height
+    (`calc(var(--bottom-bar-height) + 4px)`), the old default for every
+    width. Below ~420px wide, a full-length credit pinned to the literal
+    corner collides with the Settings pill button, since the bottom bar's
+    buttons are centered and leave little room beside a right-anchored
+    corner element (measured empirically, not guessed — see the git history
+    for this line). This was **not** an issue before the bottom bar was
+    redesigned as floating pills (see below): the old opaque full-width bar
+    was the reason for the raised position everywhere, and simply hadn't
+    been revisited when that redesign made the bar transparent, which is
+    what the raised position on wide screens looked like a bug (floating in
+    empty space above the actual corner) rather than a deliberate choice.
 - Icons: inline SVG only, authored in-repo. No icon libraries, icon fonts, or
   CDNs — everything must work fully offline.
 
@@ -326,7 +341,39 @@ example/test data.
   below) — reuses the same bottom-sheet/side-panel mechanism as List/Settings
   (`public/js/panels.js`'s `PANELS.aircraft`), just not tied to a bottom-bar
   button — opened contextually via `openPanel('aircraft')` after
-  `setInspectedHex(hex)` (`radar-state.js`).
+  `setInspectedHex(hex)` (`radar-state.js`). The info popup (`showInfoPopup`
+  in `app.js`) is offset away from the marker (`Math.round(aircraftIconSize
+  / 2) + 7`, not a fixed constant) — MapLibre's default popup offset is 0,
+  which anchors the popup's tip exactly on the aircraft's coordinate, and
+  since the marker is centered on that same point, an unoffset popup covers
+  half the icon.
+- **Icon size is user-adjustable** (`aircraftIconSize` in `settings-state.js`,
+  default 40px, a Settings → Aircraft slider, range 24–64px) — applied via a
+  single CSS custom property (`--mlpr-plane-size`, set on `documentElement`
+  by `app.js`'s `applyIconSize`) rather than touching every marker element
+  individually, so every currently-rendered marker resizes live as the
+  slider moves. The popup offset above is derived from this setting, not
+  hardcoded, so it keeps clearing the marker at any size.
+- **Marker color has three mutually-exclusive modes** (`planeColorMode` in
+  `settings-state.js`, Settings → Aircraft, default `signalLoss`):
+  `signalLoss` fades an aircraft from fresh green to stale red the longer it
+  goes without an update (the only mode tied to elapsed time — the periodic
+  redraw tick in `app.js` only recolors for staleness in this mode, since
+  the other two are static per-update snapshots of a flight parameter and
+  don't need it); `altitude` reuses trail.js's `colorForAltitude` directly
+  (same gradient as trails, exported for this purpose); `speed` is a new
+  green→yellow→orange→red gradient over ground speed in knots
+  (`colorForSpeed` in `aircraft-color.js`), deliberately never touching
+  blue/violet so it doesn't read as a variant of the altitude scale even
+  though the two are never shown at once. `colorForElapsed` and
+  `colorForSpeed` live in `public/js/aircraft-color.js`, not `app.js` —
+  `app.js` instantiates `maplibregl.Map` at module scope and can't be
+  loaded under plain `node --test`, so this pure color logic was pulled out
+  specifically to keep it unit-testable (`aircraft-color.test.js`), the same
+  reasoning as `aircraft-details.js` below. The HSL gradient math itself
+  (`colorFromStops` and friends) lives in `public/js/color-gradient.js`,
+  shared by both `trail.js`'s altitude gradient and `aircraft-color.js`'s
+  speed gradient rather than duplicated a third time.
 
 ### Aircraft details panel (`public/js/aircraft-details.js` + `aircraft-panel.js`)
 

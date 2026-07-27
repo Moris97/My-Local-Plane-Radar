@@ -14,8 +14,11 @@ html, body {
 }
 
 .mlpr-plane {
-  width: 50px;
-  height: 50px;
+  /* Set live from settings-state.js's aircraftIconSize via app.js
+     (document.documentElement.style.setProperty) -- the fallback here only
+     matters before that first runs. */
+  width: var(--mlpr-plane-size, 40px);
+  height: var(--mlpr-plane-size, 40px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -47,6 +50,15 @@ html, body {
 #mlpr-attribution {
   position: fixed;
   right: 6px;
+  /* Reserving the full bottom-bar-height above the bar made sense back when
+     the bar had a solid opaque background occupying that whole strip -- now
+     that it's transparent floating pills (see #bottom-bar) this is only
+     kept as the phone default, where the centered button row leaves too
+     little horizontal room beside a full-length attribution credit
+     (measured: the Settings button and "MapLibre · OSM contributors" start
+     colliding under ~420px wide). Desktop/tablet gets the actual corner
+     below, matching the >=720px breakpoint already used for bottom-sheet
+     vs. side-panel layout. */
   bottom: calc(var(--bottom-bar-height) + 4px);
   z-index: 25;
   font: 10px/1.4 system-ui, sans-serif;
@@ -64,6 +76,12 @@ html, body {
 
 #mlpr-attribution a:hover {
   color: #bcd7e8;
+}
+
+@media (min-width: 720px) {
+  #mlpr-attribution {
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
 }
 
 #mlpr-osm-attribution.hidden {
@@ -494,6 +512,36 @@ html, body {
 
 .mlpr-checkbox-row label {
   margin: 0;
+}
+
+.mlpr-slider-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 6px 0 4px;
+  font-size: 13px;
+}
+
+.mlpr-slider-label span {
+  color: #7fd8a8;
+  font: 600 12px ui-monospace, monospace;
+}
+
+.mlpr-settings-group input[type='range'] {
+  width: 100%;
+  margin: 0 0 10px;
+  accent-color: #3ddc84;
+}
+
+.mlpr-radio-group {
+  margin-top: 8px;
+}
+
+.mlpr-radio-group-label {
+  display: block;
+  color: #7fa3b3;
+  font-size: 12px;
+  margin-bottom: 4px;
 }
 
 .mlpr-info-icon {
