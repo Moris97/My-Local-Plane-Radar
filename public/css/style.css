@@ -70,6 +70,16 @@ html, body {
   display: none;
 }
 
+.mlpr-chart-attribution {
+  margin-top: 4px;
+  font-size: 10px;
+  color: #6f93ab;
+}
+
+.mlpr-chart-attribution a {
+  color: inherit;
+}
+
 #bottom-bar {
   position: fixed;
   left: 0;
@@ -311,6 +321,85 @@ html, body {
   display: block;
   background: #0e161c;
   border-radius: 6px;
+}
+
+.mlpr-stats-range {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 16px 0;
+}
+
+.mlpr-range-btn {
+  background: rgba(127, 216, 168, 0.06);
+  border: 1px solid rgba(127, 216, 168, 0.12);
+  color: #7fd8a8;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.mlpr-range-btn:hover {
+  background: rgba(127, 216, 168, 0.12);
+}
+
+.mlpr-range-btn.active {
+  color: #3ddc84;
+  background: rgba(61, 220, 132, 0.16);
+  border-color: rgba(61, 220, 132, 0.35);
+}
+
+.mlpr-stat-chart {
+  margin: 0 0 20px;
+}
+
+.mlpr-chart {
+  width: 100%;
+  height: 160px;
+  display: block;
+  background: #0e161c;
+  border-radius: 6px;
+}
+
+.mlpr-stat-chart-doughnut {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.mlpr-stat-chart-doughnut .mlpr-chart-label {
+  width: 100%;
+}
+
+.mlpr-doughnut {
+  width: 140px;
+  height: 140px;
+  flex-shrink: 0;
+}
+
+.mlpr-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #9fb7c4;
+}
+
+.mlpr-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mlpr-chart-legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  display: inline-block;
 }
 
 .mlpr-settings-tabs {
