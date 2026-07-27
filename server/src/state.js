@@ -2,10 +2,21 @@ import { normalizeAircraft } from './normalize.js';
 
 const EVICTION_MS = 5 * 60 * 1000;
 
+// Fields whose change forces an immediate resend to the browser. Anything
+// not listed here (receiver/signal quality metrics, computed secondary
+// stats) is "volatile" -- still stored and sent whenever a tracked field
+// also changes, just not enough on its own to trigger a resend. Arrays
+// (e.g. navModes) can't safely go here: normalizeAircraft allocates a new
+// array every poll, so a reference-equality check would always see them as
+// "changed" and force a resend every tick.
 const CHANGE_FIELDS = [
   'lat', 'lon', 'altBaro', 'altGeom', 'gs', 'track', 'baroRate',
   'onGround', 'squawk', 'flight', 'category', 'registration',
-  'typeCode', 'desc', 'military',
+  'typeCode', 'desc', 'military', 'interesting', 'pia', 'ladd',
+  'ias', 'tas', 'mach', 'geomRate', 'trackRate', 'roll',
+  'magHeading', 'trueHeading', 'navQnh', 'navAltitudeMcp',
+  'navAltitudeFms', 'navHeading', 'emergency', 'alert', 'spi',
+  'version', 'sourceType',
 ];
 
 const tracked = new Map(); // hex -> { aircraft, lastPolledAt }

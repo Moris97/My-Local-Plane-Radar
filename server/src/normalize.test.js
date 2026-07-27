@@ -45,6 +45,53 @@ test('military flag reads bit 1 of dbFlags', () => {
   assert.equal(normalizeAircraft({ hex: 'abc' }).military, false);
 });
 
+test('interesting/pia/ladd flags read their respective dbFlags bits', () => {
+  const a = normalizeAircraft({ hex: 'abc', dbFlags: 2 });
+  assert.equal(a.interesting, true);
+  assert.equal(a.pia, false);
+  assert.equal(a.ladd, false);
+
+  const b = normalizeAircraft({ hex: 'abc', dbFlags: 4 | 8 });
+  assert.equal(b.interesting, false);
+  assert.equal(b.pia, true);
+  assert.equal(b.ladd, true);
+});
+
+test('speed/nav fields pass through as numbers, missing ones stay undefined', () => {
+  const a = normalizeAircraft({ hex: 'abc', ias: 280, tas: 310, mach: 0.78, nav_altitude_mcp: 36000 });
+  assert.equal(a.ias, 280);
+  assert.equal(a.tas, 310);
+  assert.equal(a.mach, 0.78);
+  assert.equal(a.navAltitudeMcp, 36000);
+  assert.equal(a.navAltitudeFms, undefined);
+});
+
+test('nav_modes is passed through only when it is an array of strings', () => {
+  const a = normalizeAircraft({ hex: 'abc', nav_modes: ['autopilot', 'althold'] });
+  assert.deepEqual(a.navModes, ['autopilot', 'althold']);
+
+  const b = normalizeAircraft({ hex: 'abc', nav_modes: 'autopilot' });
+  assert.equal(b.navModes, undefined);
+});
+
+test('alert and spi are read as booleans from 0/1, undefined when absent', () => {
+  const a = normalizeAircraft({ hex: 'abc', alert: 1, spi: 0 });
+  assert.equal(a.alert, true);
+  assert.equal(a.spi, false);
+
+  const b = normalizeAircraft({ hex: 'abc' });
+  assert.equal(b.alert, undefined);
+  assert.equal(b.spi, undefined);
+});
+
+test('emergency "none" is treated the same as absent; a real value passes through', () => {
+  const a = normalizeAircraft({ hex: 'abc', emergency: 'none' });
+  assert.equal(a.emergency, undefined);
+
+  const b = normalizeAircraft({ hex: 'abc', emergency: 'downed' });
+  assert.equal(b.emergency, 'downed');
+});
+
 test('registration, type code and description are trimmed', () => {
   const a = normalizeAircraft({ hex: 'abc', r: ' SP-TEST ', t: ' B738 ', desc: ' BOEING 737 ' });
   assert.equal(a.registration, 'SP-TEST');

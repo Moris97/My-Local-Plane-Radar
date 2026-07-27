@@ -44,6 +44,26 @@ test('volatile fields (rssi/messages/seen/seen_pos) alone do not trigger a resen
   assert.equal(second.length, 0);
 });
 
+test('a changed speed/nav field (e.g. ias) also causes a resend', () => {
+  applyRawSnapshot({ aircraft: [aircraftFixture({ ias: 280 })] });
+  const second = applyRawSnapshot({ aircraft: [aircraftFixture({ ias: 285 })] });
+  assert.equal(second.length, 1);
+});
+
+test('data-quality fields (nic/rc/nac_p/gva) alone do not trigger a resend', () => {
+  applyRawSnapshot({ aircraft: [aircraftFixture({ nic: 8, rc: 100, nac_p: 9, gva: 2 })] });
+  const second = applyRawSnapshot({
+    aircraft: [aircraftFixture({ nic: 6, rc: 200, nac_p: 7, gva: 1 })],
+  });
+  assert.equal(second.length, 0);
+});
+
+test('nav_modes alone does not trigger a resend (array identity, not compared)', () => {
+  applyRawSnapshot({ aircraft: [aircraftFixture({ nav_modes: ['autopilot'] })] });
+  const second = applyRawSnapshot({ aircraft: [aircraftFixture({ nav_modes: ['autopilot', 'althold'] })] });
+  assert.equal(second.length, 0);
+});
+
 test('getTrackedAircraft reflects the latest snapshot even when unchanged', () => {
   applyRawSnapshot({ aircraft: [aircraftFixture()] });
   applyRawSnapshot({ aircraft: [aircraftFixture()] });
