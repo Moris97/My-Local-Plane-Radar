@@ -298,20 +298,35 @@ example/test data.
 - One URL, one responsive interface — no separate mobile build. Works well on
   phone (portrait), laptop, and a wall-mounted big screen.
 - Auto-detects browser/system language; ships Polish + English at launch.
-- Full-screen map, bottom bar with three icon buttons (own inline SVG): List
-  (sortable, clickable, click centers map), Stats (counts, msgs/sec, max
-  range, time chart), Settings (theme, units, altitude filter, layer
-  visibility).
-- Panels are bottom sheets on phones, can be a side panel on large screens;
-  closable via X or Android/iOS back-gesture. Map stays visible on desktop.
+- Full-screen map, bottom bar with three small labeled icon buttons (own
+  inline SVG, translated label under each via `t()`, semi-transparent pill
+  background, hover/press feedback): List (sortable, clickable, click
+  centers map), Stats, Settings (theme, units, altitude filter, layer
+  visibility). Deliberately compact/centered, not stretched across the bar.
+- List and Settings are bottom sheets on phones, a side panel on large
+  screens; closable via X or Android/iOS back-gesture. Map stays visible on
+  desktop. **Stats is a full-screen view instead** (`#fullscreen-modal` in
+  `index.html`, `FULLSCREEN_MODALS` registry in `panels.js`, separate from
+  `PANELS`) — deliberately more screen real estate for the growing set of
+  stats options, but still leaves the bottom bar reachable (`z-index` below
+  the bar, same as the bottom-sheet/side panel) so switching directly to
+  List/Settings doesn't require closing it first. `panels.js` treats "a
+  history entry is pushed" and "something is open" as the same fact shared
+  across *both* mechanisms — switching directly between them (e.g. List ->
+  Stats) must not push/pop history, only actually opening from closed or
+  closing to nothing should. Getting this wrong (each mechanism managing its
+  own history push/pop independently) causes a newly-opened view to
+  self-close immediately, because closing the other one first triggers an
+  async `history.back()` that then fires *after* the new one has already
+  pushed its own entry.
 - **Dark theme is the default** — this is a radar display, must be readable
   at night without glare. Color theme: green, blue, black.
 - Plane icon rotates to heading. Click shows trail + basic info with a "show
   more details" button that opens the full aircraft details panel (see
-  below) — reuses the same bottom-sheet/side-panel mechanism as
-  List/Stats/Settings (`public/js/panels.js`'s `PANELS.aircraft`), just not
-  tied to a bottom-bar button — opened contextually via `openPanel('aircraft')`
-  after `setInspectedHex(hex)` (`radar-state.js`).
+  below) — reuses the same bottom-sheet/side-panel mechanism as List/Settings
+  (`public/js/panels.js`'s `PANELS.aircraft`), just not tied to a bottom-bar
+  button — opened contextually via `openPanel('aircraft')` after
+  `setInspectedHex(hex)` (`radar-state.js`).
 
 ### Aircraft details panel (`public/js/aircraft-details.js` + `aircraft-panel.js`)
 

@@ -45,6 +45,19 @@
   <div id="panel-content"></div>
 </section>
 
+<section id="fullscreen-modal" class="hidden" aria-hidden="true">
+  <header id="fullscreen-modal-header">
+    <h2 id="fullscreen-modal-title"></h2>
+    <button type="button" id="fullscreen-modal-close" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <line x1="5" y1="5" x2="19" y2="19"/>
+        <line x1="19" y1="5" x2="5" y2="19"/>
+      </svg>
+    </button>
+  </header>
+  <div id="fullscreen-modal-content"></div>
+</section>
+
 <nav id="bottom-bar">
   <button type="button" class="mlpr-bar-btn" data-panel="list" aria-label="List">
     <svg viewBox="0 0 24 24" fill="currentColor">
@@ -52,6 +65,7 @@
       <rect x="4" y="10.9" width="16" height="2.2" rx="1"/>
       <rect x="4" y="16.8" width="16" height="2.2" rx="1"/>
     </svg>
+    <span class="mlpr-bar-btn-label"></span>
   </button>
   <button type="button" class="mlpr-bar-btn" data-panel="stats" aria-label="Stats">
     <svg viewBox="0 0 24 24" fill="currentColor">
@@ -59,6 +73,7 @@
       <rect x="10" y="7" width="4" height="13"/>
       <rect x="16" y="3" width="4" height="17"/>
     </svg>
+    <span class="mlpr-bar-btn-label"></span>
   </button>
   <button type="button" class="mlpr-bar-btn" data-panel="settings" aria-label="Settings">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
@@ -69,6 +84,7 @@
       <line x1="18" y1="4" x2="18" y2="20"/>
       <circle cx="18" cy="7" r="2.3" fill="#05070a"/>
     </svg>
+    <span class="mlpr-bar-btn-label"></span>
   </button>
 </nav>
 
