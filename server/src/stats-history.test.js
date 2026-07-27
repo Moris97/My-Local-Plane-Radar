@@ -9,6 +9,8 @@ import {
   recordRangeSample,
   getRangeSummary,
   getTodaysRangeSamples,
+  snapshotForPersistence,
+  restoreFromSnapshot,
 } from './stats-history.js';
 
 beforeEach(() => {
@@ -154,4 +156,43 @@ test('getTodaysRangeSamples exposes each per-minute best reading with its minute
     { km: 100, t: T0 },
     { km: 200, t: T0 + MINUTE },
   ]);
+});
+
+test('a snapshot restored the same day brings back history, the accumulator, and range samples', () => {
+  ingestStats(statsFixture({ aircraft_with_pos: 3, aircraft_without_pos: 1, last1min: { end: T0 / 1000, messages: 300 } }), T0);
+  recordRangeSample(150, T0);
+  recordRangeSample(300, T0 + MINUTE);
+
+  const snapshot = snapshotForPersistence();
+  resetStatsHistory();
+  assert.equal(getHistory().length, 0, 'sanity check: reset actually cleared it');
+  assert.equal(getRangeSummary().maxRangeKm, 0);
+
+  // Restored "the same day" -- pass a `now` a few minutes after the
+  // snapshot's own timestamp, still within the same calendar day.
+  restoreFromSnapshot(snapshot, T0 + 5 * MINUTE);
+
+  assert.equal(getHistory().length, 1);
+  assert.equal(getDailyAccumulator().sampleCount, 1);
+  assert.equal(getDailyAccumulator().maxAircraft, 4);
+  assert.equal(getRangeSummary().maxRangeKm, 300);
+});
+
+test('a snapshot from a previous day is not restored -- today starts fresh instead of inheriting stale numbers', () => {
+  ingestStats(statsFixture({ aircraft_with_pos: 9, last1min: { end: T0 / 1000, messages: 999 } }), T0);
+  recordRangeSample(500, T0);
+  const staleSnapshot = snapshotForPersistence();
+  resetStatsHistory();
+
+  const nextDay = T0 + 24 * 60 * MINUTE;
+  restoreFromSnapshot(staleSnapshot, nextDay);
+
+  assert.equal(getHistory().length, 0);
+  assert.equal(getDailyAccumulator().sampleCount, 0);
+  assert.equal(getRangeSummary().maxRangeKm, 0);
+});
+
+test('restoreFromSnapshot is a safe no-op when there is nothing stored yet (fresh install)', () => {
+  restoreFromSnapshot(null, T0);
+  assert.equal(getHistory().length, 0);
 });

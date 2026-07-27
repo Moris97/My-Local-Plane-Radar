@@ -3,8 +3,16 @@ import { createSource } from './sources/index.js';
 import { applyRawSnapshot, getTrackedAircraft } from './state.js';
 import { toWireAircraftList } from './wire.js';
 import { setAutoDetectedHome, getEffectiveHome } from './home.js';
-import { ingestStats, getDailyAccumulator, getLatestStatsValues, recordRangeSample, getRangeSummary } from './stats-history.js';
-import { upsertDailyStats } from './db.js';
+import {
+  ingestStats,
+  getDailyAccumulator,
+  getLatestStatsValues,
+  recordRangeSample,
+  getRangeSummary,
+  snapshotForPersistence,
+  restoreFromSnapshot,
+} from './stats-history.js';
+import { upsertDailyStats, getConfigJSON, setConfigJSON } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { pruneTokens } from './settings-auth.js';
@@ -20,6 +28,15 @@ const POLL_INTERVAL_MS = 1000;
 const STATS_POLL_INTERVAL_MS = 15000;
 const STATS_BROADCAST_INTERVAL_MS = 5000;
 const DAILY_STATS_FLUSH_INTERVAL_MS = 45000;
+// Deliberately much less frequent than the small daily_stats row flush
+// above: this snapshot carries the full in-progress 24h history (up to
+// 1440 samples), a far bigger blob, and SD wear matters (hard rule: batch
+// writes, minimize SD wear). Hourly by default, per explicit request --
+// still always also written on graceful shutdown, so a routine
+// systemctl restart/reboot loses at most this interval's worth of the
+// current in-progress minute, not the whole day.
+const STATS_HISTORY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
+const STATS_HISTORY_SNAPSHOT_CONFIG_KEY = 'statsHistorySnapshot';
 const COOLDOWN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const TRAIL_EVICTION_INTERVAL_MS = 60 * 1000;
 
@@ -126,8 +143,24 @@ function flushDailyStats() {
   flushDirtyRegistrations();
 }
 
+function flushStatsHistorySnapshot() {
+  setConfigJSON(STATS_HISTORY_SNAPSHOT_CONFIG_KEY, snapshotForPersistence());
+}
+
 async function main() {
   const { app, broadcast } = await buildServer();
+
+  // Bridges the exact gap reported live: the 24h charts (aircraft
+  // seen/with-position/range) read from in-memory state that's otherwise
+  // lost on every restart, and re-flushing the daily_stats row after a
+  // same-day restart with a freshly-reset (i.e. much smaller) in-memory
+  // accumulator was silently overwriting that day's already-recorded
+  // totals. Restoring before the poll loops below start means the first
+  // client to connect after a restart already sees today's real numbers
+  // instead of a reset chart. No-ops (leaves the fresh in-memory state
+  // alone) if the stored snapshot isn't from today -- see
+  // restoreFromSnapshot's own guard in stats-history.js.
+  restoreFromSnapshot(getConfigJSON(STATS_HISTORY_SNAPSHOT_CONFIG_KEY, null));
 
   const receiverInfo = await source.fetchReceiverInfo();
   setAutoDetectedHome(receiverInfo);
@@ -150,6 +183,14 @@ async function main() {
     }
   }, DAILY_STATS_FLUSH_INTERVAL_MS);
 
+  setInterval(() => {
+    try {
+      flushStatsHistorySnapshot();
+    } catch (err) {
+      app.log.error(err, 'stats history snapshot flush failed');
+    }
+  }, STATS_HISTORY_SNAPSHOT_INTERVAL_MS);
+
   setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => pruneTokens(), COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {
@@ -162,6 +203,11 @@ async function main() {
       flushDailyStats();
     } catch (err) {
       app.log.error(err, 'daily stats flush on shutdown failed');
+    }
+    try {
+      flushStatsHistorySnapshot();
+    } catch (err) {
+      app.log.error(err, 'stats history snapshot flush on shutdown failed');
     }
     await app.close();
     process.exit(0);

@@ -900,12 +900,49 @@ This is configuring readsb via its own documented `EnvironmentFile`
 mechanism, not modifying readsb itself — doesn't cross the GPL boundary
 described earlier.
 
-`index.js` handles `SIGTERM`/`SIGINT` (what `systemctl stop`/`restart` send):
-flushes the in-memory daily-stats accumulator to SQLite before exiting, so a
-routine restart doesn't lose up to 45s of that day's aggregate. This is the
-one piece of "current state" worth saving on shutdown — live aircraft state
-staying RAM-only and getting dropped on restart (hard rule 6) is still fine
-and unchanged.
+`index.js` handles `SIGTERM`/`SIGINT` (what `systemctl stop`/`restart`, and a
+normal `sudo reboot`'s shutdown sequence, all send): flushes the in-memory
+daily-stats accumulator to SQLite before exiting, so a routine restart
+doesn't lose up to 45s of that day's aggregate. This is the one piece of
+"current state" worth saving on shutdown — live aircraft state staying
+RAM-only and getting dropped on restart (hard rule 6) is still fine and
+unchanged.
+
+### Stats history snapshot (`snapshotForPersistence`/`restoreFromSnapshot`
+in `stats-history.js`)
+
+The 24h charts (aircraft seen, with/without position, antenna range) read
+from `stats-history.js`'s in-memory `history` array and range-sampling
+state, which — unlike the small `daily_stats` row above — were **not**
+persisted at all until this was added, so every restart reset them to
+empty; a user would see today's 24h charts blank out and slowly rebuild
+over the following hours. Worse, a *same-day* restart also silently
+regressed `daily_stats`: the in-memory `dailyAccumulator` reset to zero on
+startup, and the next periodic flush would upsert today's row with only
+the since-restart numbers, discarding whatever had accumulated before the
+restart even though it had already been written once. Both were reported
+live as "all my statistics disappear on reboot" (2026-07-27) — diagnosed by
+actually testing the existing SIGTERM-flush-then-restart path first (it
+does work, proving the *daily_stats* row mechanism itself was sound) before
+looking for what it didn't cover.
+
+Fix: `snapshotForPersistence()` captures everything needed to resume
+exactly where today left off (`history`, the full `dailyAccumulator`,
+`todaysRangeSamples`, and the in-progress-minute range state);
+`restoreFromSnapshot()` restores it **only if the snapshot's date is
+today** (a snapshot from yesterday, e.g. the Pi was off overnight, must
+never be restored — `rolloverIfNewDay` already handles a day boundary
+crossed while running, this is the equivalent guard for the one-time
+startup restore). `index.js` persists this via `setConfigJSON`/
+`getConfigJSON` (the `config` table, same JSON-blob pattern as the watch
+list) on its own **hourly** interval (`STATS_HISTORY_SNAPSHOT_INTERVAL_MS`)
+— deliberately much less frequent than the 45s `daily_stats` flush, since
+this blob (up to 1440 samples) is far bigger and repeated full-blob
+rewrites matter for SD wear (hard rule: batch writes, minimize SD wear).
+Also written on the same graceful-shutdown path as the `daily_stats` flush,
+so a routine restart loses at most the current in-progress interval, not
+the whole day. Restored once at startup, before the poll loops start, so
+the first client to connect after a restart already sees the real numbers.
 
 ## How we work
 

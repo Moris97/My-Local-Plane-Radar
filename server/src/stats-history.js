@@ -167,3 +167,41 @@ export function resetStatsHistory() {
   lastSampleEnd = null;
   resetDailyAccumulator(todayDateString());
 }
+
+// Everything needed to resume today's in-progress stats exactly where they
+// left off: the fine-grained per-minute `history` (feeds the 24h charts),
+// the running `dailyAccumulator` (what eventually gets upserted into
+// daily_stats), and the range-sampling state. All of this otherwise lives
+// only in RAM and is lost on restart -- index.js persists this via
+// GET/setConfigJSON on a slower cadence than the small daily_stats row
+// (hourly by default, see index.js), since this blob is far bigger and SD
+// wear matters (hard rule: batch writes, minimize SD wear).
+export function snapshotForPersistence() {
+  return {
+    date: dailyAccumulator.date,
+    history: history.slice(),
+    dailyAccumulator: { ...dailyAccumulator },
+    todaysRangeSamples: todaysRangeSamples.slice(),
+    currentMinuteKey,
+    currentMinuteBestKm,
+  };
+}
+
+// Restores in place, but only when the snapshot is from *today* -- one from
+// yesterday (or older, e.g. the service was off overnight) would corrupt
+// today's fresh numbers with a stale day's data instead of gap-filling like
+// it's meant to. rolloverIfNewDay's own date check already handles a day
+// boundary crossed while running; this is the equivalent guard for the
+// one-time restore-at-startup path.
+export function restoreFromSnapshot(snapshot, now = Date.now()) {
+  if (!snapshot || snapshot.date !== todayDateString(now)) return;
+
+  history.length = 0;
+  history.push(...snapshot.history);
+
+  Object.assign(dailyAccumulator, snapshot.dailyAccumulator);
+
+  todaysRangeSamples = snapshot.todaysRangeSamples.slice();
+  currentMinuteKey = snapshot.currentMinuteKey;
+  currentMinuteBestKm = snapshot.currentMinuteBestKm;
+}
