@@ -138,16 +138,28 @@ export function renderStatsPanel(container) {
     }
   }
 
+  // Shared empty state for every chart type: an empty bucket array (a
+  // fresh install with no daily_stats rows yet, or a range with no data in
+  // it) gets a plain "no data yet" message instead of a silently blank box.
+  function emptyChartMessage(el) {
+    el.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+  }
+
   function drawAircraftCountChart(history) {
     const el = container.querySelector('#mlpr-chart-aircraft-count');
     const legendEl = container.querySelector('#mlpr-legend-aircraft-count');
+    if (history.length === 0) {
+      emptyChartMessage(el);
+      legendEl.innerHTML = '';
+      return;
+    }
     const series = [
       { key: 'avgAircraft', color: '#3d8bdc' },
       { key: 'maxAircraft', color: '#3ddc84' },
     ];
     el.innerHTML = renderLineChartSvg(history, series);
-    const lastAvg = history.length ? Math.round(history[history.length - 1].avgAircraft) : null;
-    const lastMax = history.length ? history[history.length - 1].maxAircraft : null;
+    const lastAvg = Math.round(history[history.length - 1].avgAircraft);
+    const lastMax = history[history.length - 1].maxAircraft;
     legendEl.innerHTML =
       legendItemHtml('#3d8bdc', t('chartAircraftCountAvg'), lastAvg) + legendItemHtml('#3ddc84', t('chartAircraftCountMax'), lastMax);
   }
@@ -155,6 +167,11 @@ export function renderStatsPanel(container) {
   function drawPositionChart(history) {
     const el = container.querySelector('#mlpr-chart-position');
     const legendEl = container.querySelector('#mlpr-legend-position');
+    if (history.length === 0) {
+      emptyChartMessage(el);
+      legendEl.innerHTML = '';
+      return;
+    }
     const series = [
       { key: 'avgWithPos', color: '#3ddc84' },
       { key: 'avgWithoutPos', color: '#e03131' },
@@ -167,6 +184,11 @@ export function renderStatsPanel(container) {
     const { units } = getSettings();
     const el = container.querySelector('#mlpr-chart-range');
     const legendEl = container.querySelector('#mlpr-legend-range');
+    if (history.length === 0) {
+      emptyChartMessage(el);
+      legendEl.innerHTML = '';
+      return;
+    }
     const series = [
       { key: 'maxRangeKm', color: '#3ddc84' },
       { key: 'rangeTopAvgKm', color: '#3d8bdc' },
@@ -174,12 +196,16 @@ export function renderStatsPanel(container) {
     el.innerHTML = renderBarChartSvg(history, series, { formatValue: (v) => formatDistance(v, units) });
     const last = history[history.length - 1];
     legendEl.innerHTML =
-      legendItemHtml('#3ddc84', t('chartRangeMax'), last ? formatDistance(last.maxRangeKm, units) : null) +
-      legendItemHtml('#3d8bdc', t('chartRangeTopAvg'), last ? formatDistance(last.rangeTopAvgKm, units) : null);
+      legendItemHtml('#3ddc84', t('chartRangeMax'), formatDistance(last.maxRangeKm, units)) +
+      legendItemHtml('#3d8bdc', t('chartRangeTopAvg'), formatDistance(last.rangeTopAvgKm, units));
   }
 
   function drawNewRegistrationsChart(buckets) {
     const el = container.querySelector('#mlpr-chart-new-registrations');
+    if (buckets.length === 0) {
+      emptyChartMessage(el);
+      return;
+    }
     el.innerHTML = renderBarChartSvg(buckets, [{ key: 'count', color: '#3ddc84' }]);
   }
 
@@ -188,7 +214,7 @@ export function renderStatsPanel(container) {
     const legendEl = container.querySelector(legendId);
     if (items.length === 0) {
       el.innerHTML = '';
-      legendEl.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+      emptyChartMessage(legendEl);
       return;
     }
     const labeledItems = items.map((i) => ({ label: labelFor(i.key), value: i.count }));
