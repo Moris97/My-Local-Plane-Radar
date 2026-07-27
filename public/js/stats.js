@@ -65,41 +65,43 @@ export function renderStatsPanel(container) {
 
     <div class="mlpr-stats-range" id="mlpr-stats-range"></div>
 
-    <section class="mlpr-stat-chart">
-      <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
-      <div id="mlpr-chart-aircraft-count"></div>
-      <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
-    </section>
+    <div class="mlpr-stats-grid">
+      <section class="mlpr-stat-chart">
+        <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
+        <div id="mlpr-chart-aircraft-count"></div>
+        <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
+      </section>
 
-    <section class="mlpr-stat-chart">
-      <p class="mlpr-chart-label">${t('chartPosition')}</p>
-      <div id="mlpr-chart-position"></div>
-      <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
-    </section>
+      <section class="mlpr-stat-chart">
+        <p class="mlpr-chart-label">${t('chartPosition')}</p>
+        <div id="mlpr-chart-position"></div>
+        <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
+      </section>
 
-    <section class="mlpr-stat-chart">
-      <p class="mlpr-chart-label">${t('chartRange')}</p>
-      <div id="mlpr-chart-range"></div>
-      <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
-    </section>
+      <section class="mlpr-stat-chart">
+        <p class="mlpr-chart-label">${t('chartRange')}</p>
+        <div id="mlpr-chart-range"></div>
+        <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
+      </section>
 
-    <section class="mlpr-stat-chart">
-      <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
-      <div id="mlpr-chart-new-registrations"></div>
-    </section>
+      <section class="mlpr-stat-chart">
+        <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
+        <div id="mlpr-chart-new-registrations"></div>
+      </section>
 
-    <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-      <p class="mlpr-chart-label">${t('chartTopType')}</p>
-      <div id="mlpr-chart-top-type"></div>
-      <div class="mlpr-chart-legend" id="mlpr-legend-top-type"></div>
-    </section>
+      <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
+        <p class="mlpr-chart-label">${t('chartTopType')}</p>
+        <div id="mlpr-chart-top-type"></div>
+        <div class="mlpr-chart-legend" id="mlpr-legend-top-type"></div>
+      </section>
 
-    <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-      <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
-      <div id="mlpr-chart-top-airline"></div>
-      <div class="mlpr-chart-legend" id="mlpr-legend-top-airline"></div>
-      <p class="mlpr-chart-attribution">Airline data: <a href="https://openflights.org/data.php" target="_blank" rel="noopener">OpenFlights</a> (ODbL)</p>
-    </section>
+      <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
+        <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
+        <div id="mlpr-chart-top-airline"></div>
+        <div class="mlpr-chart-legend" id="mlpr-legend-top-airline"></div>
+        <p class="mlpr-chart-attribution">Airline data: <a href="https://openflights.org/data.php" target="_blank" rel="noopener">OpenFlights</a> (ODbL)</p>
+      </section>
+    </div>
 
     <section class="mlpr-stat-chart">
       <button type="button" id="mlpr-load-registrations" class="mlpr-detail-expand">${t('showRegistrations')}</button>
@@ -169,7 +171,7 @@ export function renderStatsPanel(container) {
       { key: 'maxRangeKm', color: '#3ddc84' },
       { key: 'rangeTopAvgKm', color: '#3d8bdc' },
     ];
-    el.innerHTML = renderBarChartSvg(history, series);
+    el.innerHTML = renderBarChartSvg(history, series, { formatValue: (v) => formatDistance(v, units) });
     const last = history[history.length - 1];
     legendEl.innerHTML =
       legendItemHtml('#3ddc84', t('chartRangeMax'), last ? formatDistance(last.maxRangeKm, units) : null) +

@@ -7,6 +7,7 @@ import {
   renderDoughnutSvg,
   doughnutSlices,
   renderSparklineSvg,
+  formatBucketLabel,
 } from './chart.js';
 
 function countOccurrences(text, needle) {
@@ -106,4 +107,60 @@ test('renderDoughnutSvg returns an empty svg for no items', () => {
 test('renderSparklineSvg (pre-existing) still works unchanged', () => {
   const svg = renderSparklineSvg([1, 2, 3]);
   assert.ok(svg.includes('<polyline'));
+});
+
+test('formatBucketLabel formats an hour bucket key as day.month hour:00', () => {
+  assert.equal(formatBucketLabel('2026-07-27T14'), '27.07 14:00');
+});
+
+test('formatBucketLabel formats a day bucket key as day.month.year', () => {
+  assert.equal(formatBucketLabel('2026-07-27'), '27.07.2026');
+});
+
+test('formatBucketLabel leaves an ISO week bucket key as-is', () => {
+  assert.equal(formatBucketLabel('2026-W30'), '2026-W30');
+});
+
+test('formatBucketLabel formats a month bucket key as month.year', () => {
+  assert.equal(formatBucketLabel('2026-07'), '07.2026');
+});
+
+test('formatBucketLabel returns an empty string for a missing/non-string key', () => {
+  assert.equal(formatBucketLabel(undefined), '');
+});
+
+test('renderLineChartSvg preserves the SVG aspect ratio via preserveAspectRatio="none" so it fills its container width instead of letterboxing', () => {
+  const svg = renderLineChartSvg([{ v: 1 }, { v: 2 }], [{ key: 'v', color: '#fff' }]);
+  assert.ok(svg.includes('preserveAspectRatio="none"'));
+});
+
+test('renderLineChartSvg labels the Y axis with max/mid/zero values, unit-formatted via formatValue', () => {
+  const buckets = [{ v: 100 }, { v: 200 }];
+  const svg = renderLineChartSvg(buckets, [{ key: 'v', color: '#fff' }], { formatValue: (v) => `${Math.round(v)} km` });
+  assert.ok(svg.includes('>200 km<'));
+  assert.ok(svg.includes('>100 km<'));
+  assert.ok(svg.includes('>0 km<'));
+});
+
+test('renderLineChartSvg labels the X axis with the first and last bucket, formatted as a time scale', () => {
+  const buckets = [{ v: 1, bucket: '2026-07-25' }, { v: 2, bucket: '2026-07-26' }, { v: 3, bucket: '2026-07-27' }];
+  const svg = renderLineChartSvg(buckets, [{ key: 'v', color: '#fff' }]);
+  assert.ok(svg.includes('>25.07.2026<'));
+  assert.ok(svg.includes('>27.07.2026<'));
+  assert.ok(!svg.includes('>26.07.2026<')); // only start/end are labeled, not the middle
+});
+
+test('renderBarChartSvg also carries Y-axis units and X-axis time labels', () => {
+  const buckets = [{ a: 150, bucket: '2026-07-26' }, { a: 180, bucket: '2026-07-27' }];
+  const svg = renderBarChartSvg(buckets, [{ key: 'a', color: '#3ddc84' }], { formatValue: (v) => `${Math.round(v)} km` });
+  assert.ok(svg.includes('>180 km<'));
+  assert.ok(svg.includes('>26.07.2026<'));
+  assert.ok(svg.includes('>27.07.2026<'));
+});
+
+test('renderAreaChartSvg also carries Y-axis units and X-axis time labels', () => {
+  const buckets = [{ a: 5, b: 5, bucket: '2026-07-26' }, { a: 10, b: 10, bucket: '2026-07-27' }];
+  const svg = renderAreaChartSvg(buckets, [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }]);
+  assert.ok(svg.includes('>26.07.2026<'));
+  assert.ok(svg.includes('>27.07.2026<'));
 });

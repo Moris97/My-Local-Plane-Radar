@@ -1,35 +1,100 @@
 export const DOUGHNUT_COLORS = ['#3ddc84', '#3d8bdc', '#dc9d3d', '#a83ddc', '#dc3d5e', '#3ddcc4', '#8a8a8a'];
 
+const PAD_TOP = 16;
+const PAD_RIGHT = 10;
+const PAD_BOTTOM = 18;
+const PAD_LEFT = 46;
+
 function emptyChartSvg(width, height) {
-  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-chart"></svg>`;
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart"></svg>`;
 }
 
-function plotX(i, count, padding, plotWidth) {
-  return padding + (count <= 1 ? plotWidth / 2 : (i / (count - 1)) * plotWidth);
+function defaultFormatValue(value) {
+  return String(Math.round(value));
 }
 
-function gridLinesSvg(padding, plotWidth, plotHeight) {
+// Bucket keys come straight from server/src/time-buckets.js's bucketKey():
+// "YYYY-MM-DDTHH" (hour), "YYYY-MM-DD" (day), "YYYY-Www" (ISO week), or
+// "YYYY-MM" (month). Used for the chart's X-axis start/end labels.
+export function formatBucketLabel(key) {
+  if (typeof key !== 'string') return '';
+  const hourMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(key);
+  if (hourMatch) {
+    const [, , month, day, hour] = hourMatch;
+    return `${day}.${month} ${hour}:00`;
+  }
+  const dayMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
+  if (dayMatch) {
+    const [, year, month, day] = dayMatch;
+    return `${day}.${month}.${year}`;
+  }
+  if (/^\d{4}-W\d{2}$/.test(key)) return key;
+  const monthMatch = /^(\d{4})-(\d{2})$/.exec(key);
+  if (monthMatch) {
+    const [, year, month] = monthMatch;
+    return `${month}.${year}`;
+  }
+  return key;
+}
+
+function plotX(i, count, left, plotWidth) {
+  return left + (count <= 1 ? plotWidth / 2 : (i / (count - 1)) * plotWidth);
+}
+
+function gridLinesSvg(left, top, plotWidth, plotHeight) {
   return [0, 0.5, 1]
     .map((f) => {
-      const y = (padding + plotHeight * f).toFixed(1);
-      return `<line x1="${padding}" x2="${padding + plotWidth}" y1="${y}" y2="${y}" stroke="#14212b" stroke-width="1" />`;
+      const y = (top + plotHeight * f).toFixed(1);
+      return `<line x1="${left}" x2="${left + plotWidth}" y1="${y}" y2="${y}" stroke="#14212b" stroke-width="1" />`;
     })
     .join('');
 }
 
+// Three labeled gridlines (max / mid / zero) so a chart always carries its
+// own scale instead of relying on the legend alone -- formatValue lets the
+// caller attach units (e.g. "205 km") rather than a bare number.
+function yAxisLabelsSvg(left, top, plotHeight, maxValue, formatValue) {
+  return [0, 0.5, 1]
+    .map((f) => {
+      const y = top + plotHeight * f;
+      const value = maxValue * (1 - f);
+      return `<text x="${(left - 6).toFixed(1)}" y="${(y + 3).toFixed(1)}" fill="#7fa3b3" font-size="9" text-anchor="end">${formatValue(value)}</text>`;
+    })
+    .join('');
+}
+
+// Start/end bucket labels below the plot, giving the chart a time scale --
+// otherwise there's no way to tell what span of time is even being shown.
+function xAxisLabelsSvg(buckets, left, plotWidth, y, formatBucket) {
+  if (buckets.length === 0) return '';
+  if (buckets.length === 1) {
+    return `<text x="${(left + plotWidth / 2).toFixed(1)}" y="${y}" fill="#5c7885" font-size="9" text-anchor="middle">${formatBucket(buckets[0].bucket)}</text>`;
+  }
+  return (
+    `<text x="${left.toFixed(1)}" y="${y}" fill="#5c7885" font-size="9" text-anchor="start">${formatBucket(buckets[0].bucket)}</text>` +
+    `<text x="${(left + plotWidth).toFixed(1)}" y="${y}" fill="#5c7885" font-size="9" text-anchor="end">${formatBucket(buckets[buckets.length - 1].bucket)}</text>`
+  );
+}
+
 // series: [{ key, color }], each bucket in `buckets` is read via bucket[key].
-export function renderLineChartSvg(buckets, series, { width = 560, height = 160, padding = 24 } = {}) {
+export function renderLineChartSvg(
+  buckets,
+  series,
+  { width = 560, height = 170, formatValue = defaultFormatValue, formatBucket = formatBucketLabel } = {},
+) {
   if (buckets.length === 0) return emptyChartSvg(width, height);
 
-  const plotWidth = width - padding * 2;
-  const plotHeight = height - padding * 2;
+  const left = PAD_LEFT;
+  const top = PAD_TOP;
+  const plotWidth = width - left - PAD_RIGHT;
+  const plotHeight = height - top - PAD_BOTTOM;
   const maxValue = Math.max(1, ...buckets.flatMap((b) => series.map((s) => b[s.key] ?? 0)));
 
   const polylines = series
     .map((s) => {
       const coords = buckets.map((b, i) => [
-        plotX(i, buckets.length, padding, plotWidth),
-        padding + plotHeight - ((b[s.key] ?? 0) / maxValue) * plotHeight,
+        plotX(i, buckets.length, left, plotWidth),
+        top + plotHeight - ((b[s.key] ?? 0) / maxValue) * plotHeight,
       ]);
       const points = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
       // A single point produces an invisible polyline (needs >=2 points to
@@ -44,24 +109,31 @@ export function renderLineChartSvg(buckets, series, { width = 560, height = 160,
     })
     .join('');
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-chart">
-    ${gridLinesSvg(padding, plotWidth, plotHeight)}
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart">
+    ${gridLinesSvg(left, top, plotWidth, plotHeight)}
     ${polylines}
-    <text x="${padding}" y="${padding - 6}" fill="#7fa3b3" font-size="10">${Math.round(maxValue)}</text>
+    ${yAxisLabelsSvg(left, top, plotHeight, maxValue, formatValue)}
+    ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
   </svg>`;
 }
 
 // Stacked area: series drawn bottom-to-top in the order given, each bucket's
 // series values summed for the total stack height.
-export function renderAreaChartSvg(buckets, series, { width = 560, height = 160, padding = 24 } = {}) {
+export function renderAreaChartSvg(
+  buckets,
+  series,
+  { width = 560, height = 170, formatValue = defaultFormatValue, formatBucket = formatBucketLabel } = {},
+) {
   if (buckets.length === 0) return emptyChartSvg(width, height);
 
-  const plotWidth = width - padding * 2;
-  const plotHeight = height - padding * 2;
+  const left = PAD_LEFT;
+  const top = PAD_TOP;
+  const plotWidth = width - left - PAD_RIGHT;
+  const plotHeight = height - top - PAD_BOTTOM;
   const totals = buckets.map((b) => series.reduce((sum, s) => sum + (b[s.key] ?? 0), 0));
   const maxTotal = Math.max(1, ...totals);
 
-  const toY = (v) => padding + plotHeight - (v / maxTotal) * plotHeight;
+  const toY = (v) => top + plotHeight - (v / maxTotal) * plotHeight;
 
   // A single bucket produces a zero-width polygon (there's no "area" with
   // only one x position) -- draw a bar-like column per layer instead of
@@ -69,7 +141,7 @@ export function renderAreaChartSvg(buckets, series, { width = 560, height = 160,
   // fresh install with only today's data.
   const singleBucket = buckets.length === 1;
   const barWidth = plotWidth * 0.3;
-  const barX = padding + plotWidth / 2 - barWidth / 2;
+  const barX = left + plotWidth / 2 - barWidth / 2;
 
   let cumulative = buckets.map(() => 0);
   const layers = series.map((s) => {
@@ -83,42 +155,58 @@ export function renderAreaChartSvg(buckets, series, { width = 560, height = 160,
       return rect;
     }
 
-    const topPoints = buckets.map((b, i) => `${plotX(i, buckets.length, padding, plotWidth).toFixed(1)},${toY(nextCumulative[i]).toFixed(1)}`);
+    const topPoints = buckets.map((b, i) => `${plotX(i, buckets.length, left, plotWidth).toFixed(1)},${toY(nextCumulative[i]).toFixed(1)}`);
     const bottomPoints = buckets
-      .map((b, i) => `${plotX(i, buckets.length, padding, plotWidth).toFixed(1)},${toY(cumulative[i]).toFixed(1)}`)
+      .map((b, i) => `${plotX(i, buckets.length, left, plotWidth).toFixed(1)},${toY(cumulative[i]).toFixed(1)}`)
       .reverse();
     const polygon = `<polygon points="${[...topPoints, ...bottomPoints].join(' ')}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1" />`;
     cumulative = nextCumulative;
     return polygon;
   });
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-chart">${gridLinesSvg(padding, plotWidth, plotHeight)}${layers.join('')}</svg>`;
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart">
+    ${gridLinesSvg(left, top, plotWidth, plotHeight)}
+    ${layers.join('')}
+    ${yAxisLabelsSvg(left, top, plotHeight, maxTotal, formatValue)}
+    ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
+  </svg>`;
 }
 
 // Grouped bars: each bucket gets one bar per series, side by side.
-export function renderBarChartSvg(buckets, series, { width = 560, height = 160, padding = 24 } = {}) {
+export function renderBarChartSvg(
+  buckets,
+  series,
+  { width = 560, height = 170, formatValue = defaultFormatValue, formatBucket = formatBucketLabel } = {},
+) {
   if (buckets.length === 0) return emptyChartSvg(width, height);
 
-  const plotWidth = width - padding * 2;
-  const plotHeight = height - padding * 2;
+  const left = PAD_LEFT;
+  const top = PAD_TOP;
+  const plotWidth = width - left - PAD_RIGHT;
+  const plotHeight = height - top - PAD_BOTTOM;
   const maxValue = Math.max(1, ...buckets.flatMap((b) => series.map((s) => b[s.key] ?? 0)));
   const groupWidth = plotWidth / buckets.length;
   const barWidth = (groupWidth * 0.7) / series.length;
 
   const bars = buckets
     .flatMap((b, i) => {
-      const groupX = padding + i * groupWidth + groupWidth * 0.15;
+      const groupX = left + i * groupWidth + groupWidth * 0.15;
       return series.map((s, si) => {
         const value = b[s.key] ?? 0;
         const barHeight = (value / maxValue) * plotHeight;
         const bx = groupX + si * barWidth;
-        const by = padding + plotHeight - barHeight;
+        const by = top + plotHeight - barHeight;
         return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barWidth * 0.85).toFixed(1)}" height="${Math.max(0, barHeight).toFixed(1)}" fill="${s.color}" rx="1.5" />`;
       });
     })
     .join('');
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-chart">${gridLinesSvg(padding, plotWidth, plotHeight)}${bars}</svg>`;
+  return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart">
+    ${gridLinesSvg(left, top, plotWidth, plotHeight)}
+    ${bars}
+    ${yAxisLabelsSvg(left, top, plotHeight, maxValue, formatValue)}
+    ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
+  </svg>`;
 }
 
 // items: [{ label, value }]. Slices beyond maxSlices are folded into a
