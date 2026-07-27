@@ -4,11 +4,13 @@ import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
 
-async function authedFetch(container, url, options) {
+// Used only within the Server tab (see renderServerTab) -- everything else
+// no longer requires a token, so nothing else needs to react to a 401.
+async function authedFetch(url, options, onUnauthorized) {
   const response = await authorizedFetch(url, options);
   if (response.status === 401) {
     clearStoredToken();
-    renderSettingsPanel(container);
+    onUnauthorized();
     return null;
   }
   return response;
@@ -51,18 +53,6 @@ function renderGate(container, onUnlocked) {
 }
 
 export async function renderSettingsPanel(container) {
-  let status;
-  try {
-    status = await fetch('/api/settings-auth/status').then((res) => res.json());
-  } catch {
-    status = { passwordSet: false };
-  }
-
-  if (status.passwordSet && !getStoredToken()) {
-    renderGate(container, () => renderSettingsPanel(container));
-    return undefined;
-  }
-
   return renderSettingsForm(container);
 }
 
@@ -120,17 +110,6 @@ function renderSettingsForm(container) {
         </div>
       </fieldset>
 
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('homeLocation')}</legend>
-        <p class="mlpr-scope-note mlpr-scope-note-inline">${t('scopeGlobal')}</p>
-        <p id="mlpr-home-status" class="mlpr-home-status">…</p>
-        <label>Lat <input type="number" id="mlpr-home-lat" step="0.0001"></label>
-        <label>Lon <input type="number" id="mlpr-home-lon" step="0.0001"></label>
-        <div class="mlpr-home-actions">
-          <button type="button" id="mlpr-home-save">${t('save')}</button>
-          <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
-        </div>
-      </fieldset>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="aircraft" style="display:none">
@@ -204,34 +183,73 @@ function renderSettingsForm(container) {
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="server" style="display:none">
       <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('security')}</legend>
-        <p id="mlpr-security-status" class="mlpr-home-status">…</p>
-        <div id="mlpr-security-form"></div>
-      </fieldset>
-
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('serverPort')}</legend>
-        <p class="mlpr-home-status">${t('serverPortHint')}</p>
-        <label>${t('port')} <input type="number" id="mlpr-server-port" min="1024" max="65535" step="1"></label>
-        <div class="mlpr-home-actions">
-          <button type="button" id="mlpr-server-port-save">${t('save')}</button>
-        </div>
-        <p id="mlpr-server-port-status" class="mlpr-home-status"></p>
-        <p id="mlpr-server-port-error" class="mlpr-gate-error"></p>
-      </fieldset>
+      <div id="mlpr-server-tab-root">…</div>
     </div>
   `;
 
   wireTabs(container);
   wireDisplaySettings(container);
-  wireHomeLocation(container);
   wireNotificationSettings(container);
   wireWatchlist(container);
-  wireServerPort(container);
-  renderSecuritySection(container);
+  renderServerTab(container.querySelector('#mlpr-server-tab-root'));
 
   return undefined;
+}
+
+// Settings password gates this tab's content specifically (server port,
+// receiver location, and the password form itself) -- not the whole Settings
+// panel, unlike the earlier design. Everything else (units, map, aircraft
+// display, notification rules, watch list) is per-browser or harmless to
+// read/change without a login, so gating the entire panel just made routine
+// use annoying for no security benefit; the only things actually worth
+// hiding from an unauthorized LAN user are the server-level controls here.
+async function renderServerTab(root) {
+  let status;
+  try {
+    status = await fetch('/api/settings-auth/status').then((res) => res.json());
+  } catch {
+    status = { passwordSet: false };
+  }
+
+  if (status.passwordSet && !getStoredToken()) {
+    renderGate(root, () => renderServerTab(root));
+    return;
+  }
+
+  root.innerHTML = `
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('security')}</legend>
+      <p id="mlpr-security-status" class="mlpr-home-status">…</p>
+      <div id="mlpr-security-form"></div>
+    </fieldset>
+
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('serverPort')}</legend>
+      <p class="mlpr-home-status">${t('serverPortHint')}</p>
+      <label>${t('port')} <input type="number" id="mlpr-server-port" min="1024" max="65535" step="1"></label>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-server-port-save">${t('save')}</button>
+      </div>
+      <p id="mlpr-server-port-status" class="mlpr-home-status"></p>
+      <p id="mlpr-server-port-error" class="mlpr-gate-error"></p>
+    </fieldset>
+
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('homeLocation')}</legend>
+      <p id="mlpr-home-status" class="mlpr-home-status">…</p>
+      <label>Lat <input type="number" id="mlpr-home-lat" step="0.0001"></label>
+      <label>Lon <input type="number" id="mlpr-home-lon" step="0.0001"></label>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-home-save">${t('save')}</button>
+        <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
+      </div>
+    </fieldset>
+  `;
+
+  const onUnauthorized = () => renderServerTab(root);
+  wireServerPort(root, onUnauthorized);
+  wireHomeLocation(root, onUnauthorized);
+  renderSecuritySection(root);
 }
 
 function wireTabs(container) {
@@ -290,14 +308,14 @@ function wireDisplaySettings(container) {
   });
 }
 
-function wireServerPort(container) {
+function wireServerPort(container, onUnauthorized) {
   const portInput = container.querySelector('#mlpr-server-port');
   const statusEl = container.querySelector('#mlpr-server-port-status');
   const errorEl = container.querySelector('#mlpr-server-port-error');
   const saveBtn = container.querySelector('#mlpr-server-port-save');
 
   async function loadPort() {
-    const response = await authedFetch(container, '/api/server/port');
+    const response = await authedFetch('/api/server/port', undefined, onUnauthorized);
     if (!response) return;
     const data = await response.json();
     portInput.value = data.port;
@@ -310,11 +328,15 @@ function wireServerPort(container) {
     errorEl.textContent = '';
     statusEl.textContent = '';
 
-    const response = await authedFetch(container, '/api/server/port', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ port: Number(portInput.value) }),
-    });
+    const response = await authedFetch(
+      '/api/server/port',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: Number(portInput.value) }),
+      },
+      onUnauthorized,
+    );
     if (!response) return;
 
     const data = await response.json().catch(() => ({}));
@@ -328,7 +350,7 @@ function wireServerPort(container) {
   loadPort();
 }
 
-function wireHomeLocation(container) {
+function wireHomeLocation(container, onUnauthorized) {
   const homeLatInput = container.querySelector('#mlpr-home-lat');
   const homeLonInput = container.querySelector('#mlpr-home-lon');
   const homeStatusEl = container.querySelector('#mlpr-home-status');
@@ -336,7 +358,7 @@ function wireHomeLocation(container) {
   const homeSaveBtn = container.querySelector('#mlpr-home-save');
 
   async function loadHome() {
-    const response = await authedFetch(container, '/api/settings');
+    const response = await authedFetch('/api/settings', undefined, onUnauthorized);
     if (!response) return;
     const data = await response.json();
     homeLatInput.value = data.homeLat ?? '';
@@ -355,21 +377,29 @@ function wireHomeLocation(container) {
     const homeLon = Number(homeLonInput.value);
     if (!Number.isFinite(homeLat) || !Number.isFinite(homeLon)) return;
 
-    const response = await authedFetch(container, '/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeLat, homeLon }),
-    });
+    const response = await authedFetch(
+      '/api/settings',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ homeLat, homeLon }),
+      },
+      onUnauthorized,
+    );
     if (!response) return;
     await loadHome();
   });
 
   homeResetBtn.addEventListener('click', async () => {
-    const response = await authedFetch(container, '/api/settings', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ homeLat: null, homeLon: null }),
-    });
+    const response = await authedFetch(
+      '/api/settings',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ homeLat: null, homeLon: null }),
+      },
+      onUnauthorized,
+    );
     if (!response) return;
     await loadHome();
   });
@@ -388,7 +418,7 @@ function wireNotificationSettings(container) {
   const ntfyRegenerateBtn = container.querySelector('#mlpr-ntfy-regenerate');
 
   async function loadNotificationSettings() {
-    const response = await authedFetch(container, '/api/notifications/settings');
+    const response = await fetch('/api/notifications/settings');
     if (!response) return;
     const data = await response.json();
     notifSquawkEl.checked = data.squawkEnabled;
@@ -400,7 +430,7 @@ function wireNotificationSettings(container) {
   }
 
   async function putNotificationSettings(patch) {
-    await authedFetch(container, '/api/notifications/settings', {
+    await fetch('/api/notifications/settings', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
@@ -419,14 +449,14 @@ function wireNotificationSettings(container) {
   );
 
   async function loadNtfyTopic() {
-    const response = await authedFetch(container, '/api/notifications/ntfy-topic');
+    const response = await fetch('/api/notifications/ntfy-topic');
     if (!response) return;
     const data = await response.json();
     ntfyTopicEl.textContent = data.topic;
   }
 
   ntfyRegenerateBtn.addEventListener('click', async () => {
-    const response = await authedFetch(container, '/api/notifications/ntfy-topic/regenerate', { method: 'POST' });
+    const response = await fetch('/api/notifications/ntfy-topic/regenerate', { method: 'POST' });
     if (!response) return;
     const data = await response.json();
     ntfyTopicEl.textContent = data.topic;
@@ -469,7 +499,7 @@ function wireWatchlist(container) {
   });
 
   async function loadWatchlist() {
-    const response = await authedFetch(container, '/api/notifications/watchlist');
+    const response = await fetch('/api/notifications/watchlist');
     if (!response) return;
     const entries = await response.json();
 
@@ -483,7 +513,7 @@ function wireWatchlist(container) {
       removeBtn.type = 'button';
       removeBtn.textContent = t('remove');
       removeBtn.addEventListener('click', async () => {
-        const deleteResponse = await authedFetch(container, `/api/notifications/watchlist/${entry.id}`, {
+        const deleteResponse = await fetch(`/api/notifications/watchlist/${entry.id}`, {
           method: 'DELETE',
         });
         if (!deleteResponse) return;
@@ -503,12 +533,11 @@ function wireWatchlist(container) {
       altitudeValue: altOpSelect.value ? Number(altValueInput.value) : null,
     };
 
-    const response = await authedFetch(container, '/api/notifications/watchlist', {
+    const response = await fetch('/api/notifications/watchlist', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!response) return;
 
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));

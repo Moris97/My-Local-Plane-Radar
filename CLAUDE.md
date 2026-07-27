@@ -523,25 +523,24 @@ on the right side of this line:
 | Tab | Contents | Stored |
 |---|---|---|
 | General | units | `localStorage` |
-| Map | basemap mode, map theme, trails, *receiver location* | `localStorage` (except receiver location) |
+| Map | basemap mode, map theme, trails | `localStorage` |
 | Aircraft | marker color mode, icon size, altitude filter | `localStorage` |
 | Notifications | notification rules, ntfy topic, watch list | SQLite (shared) |
-| Server | Settings password, server port | SQLite (shared) |
+| Server | Settings password, server port, *receiver location* | SQLite (shared) |
 
 - **Per-browser** settings live in `public/js/settings-state.js`
   (`localStorage`), so each person/device gets their own units, map look and
   aircraft display without affecting anyone else on the LAN.
 - **Shared** settings live server-side in SQLite and are reached over
-  `/api/*`. Notification rules, the watch list, and the Settings password
-  were already server-side; the Server tab's port joined them.
-- **The receiver location is the one deliberate exception**: it sits on the
-  Map tab (per-browser by the rule above) but is stored server-side and
-  shared, because it describes one physical antenna — there is no sensible
-  per-browser answer to "where is the receiver". Settings renders an
-  explicit "shared by everyone" note on that one fieldset for exactly this
-  reason (`.mlpr-scope-note-inline`), while each tab carries a
-  `.mlpr-scope-note` banner saying which kind it is. Keep those notes
-  accurate if anything moves.
+  `/api/*`. Notification rules and the watch list were already server-side;
+  the Server tab's password, port, and receiver location join them there.
+- **The receiver location lives on the Server tab, not Map**, even though it
+  feels map-related — it describes one physical antenna (no sensible
+  per-browser answer to "where is the receiver"), and moving it in with the
+  other server-level, password-gated controls (see "Settings access
+  control" below) meant it no longer needed a one-off exception note on the
+  Map tab. Each tab still carries a `.mlpr-scope-note` banner saying whether
+  it's per-browser or shared — keep that accurate if anything moves again.
 
 **Server port** (`server/src/server-config.js`): resolution order is
 `MLPR_PORT` env > stored config > 1090, and `GET /api/server/port` reports
@@ -732,23 +731,41 @@ blank), not by the original tests, which only checked for absence of
 
 ## Settings access control (`server/src/settings-auth.js`)
 
-Off by default (local LAN app, most people don't need this) — a button at the
-bottom of Settings ("secure settings access with a password") opts in.
+Off by default (local LAN app, most people don't need this) — a button in
+Settings → Server ("secure this section with a password") opts in.
 `node:crypto`'s `scryptSync` for password hashing (random salt per password,
 no new dependency), `timingSafeEqual` for comparison. Sessions are random
 tokens issued on login, held **in memory only** (`Map<token, expiresAt>`,
 24h TTL, pruned hourly) — lost on restart, which just means logging in again,
 consistent with hard rule 6.
 
+**Gates the Server tab only, not the whole Settings panel** — this was a
+deliberate narrowing (originally the password gated the entire panel before
+opening it at all). Everything on the other four tabs is either per-browser
+`localStorage` or shared state with no real reason to hide it from anyone
+who already has LAN access to the app (notification rules, the watch list);
+the only things worth an access-control boundary are server-level controls:
+the password itself, the receiver's home location, and the listening port.
 Protected via a `requireSettingsAuth` Fastify `preHandler` applied per-route
-to `/api/settings*` and `/api/notifications/*` — **not** applied to
-`/api/settings-auth/*` itself (login/status/password-management need to work
-*without* being logged in yet) or to `/api/stats/history` (general app data,
-not a setting). The preHandler is a no-op whenever no password is set, so the
-default-open behavior is unchanged until someone opts in. Frontend
-(`public/js/settings-auth.js`) holds the token in `sessionStorage` and
-attaches it via the `X-MLPR-Settings-Token` header; a 401 anywhere clears the
-stored token and re-renders the login gate rather than failing silently.
+to `/api/settings*` (home location) and `/api/server/port*` — **not**
+applied to `/api/notifications/*` (moved out when the gate was narrowed),
+`/api/settings-auth/*` itself (login/status/password-management need to
+work *without* being logged in yet), `/api/daylight`, or `/api/stats/history`
+(general app data, not a setting). The preHandler is a no-op whenever no
+password is set, so the default-open behavior is unchanged until someone
+opts in.
+
+Frontend-side, this means `public/js/settings.js`'s `renderSettingsForm`
+always renders all five tabs immediately — there is no longer a top-level
+gate blocking the panel from opening. Only the Server tab's own root element
+(`renderServerTab`) checks `passwordSet && !getStoredToken()` and swaps in
+the login form (`renderGate`, reused from before) instead of the real
+fieldsets when locked; `authedFetch` takes an explicit `onUnauthorized`
+callback per call site now (previously it always re-rendered the whole
+panel) so a 401 only resets the Server tab's own content, not General/Map/
+Aircraft/Notifications underneath it. The token itself still lives in
+`sessionStorage` (`public/js/settings-auth.js`) and is attached via the
+`X-MLPR-Settings-Token` header.
 
 Setting/changing/removing the password itself is **not** behind the token
 preHandler — changing it requires the *current* password (checked inside the

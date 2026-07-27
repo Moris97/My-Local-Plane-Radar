@@ -831,7 +831,10 @@ html, body {
     left: auto;
     top: 0;
     bottom: var(--bottom-bar-height);
-    width: 360px;
+    /* Wide enough that the Settings tab row (5 tabs, worst-case Polish
+       labels measure ~374px unwrapped) fits without the horizontal
+       scrollbar .mlpr-settings-tabs falls back to on narrower widths. */
+    width: 440px;
     max-height: none;
     border-radius: 0;
     border-left: 1px solid #1c2e3a;

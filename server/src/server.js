@@ -173,9 +173,9 @@ export async function buildServer() {
 
   app.get('/api/trails/:hex', async (request) => getTrail(request.params.hex));
 
-  app.get('/api/notifications/settings', { preHandler: requireSettingsAuth }, async () => getNotificationSettings());
+  app.get('/api/notifications/settings', async () => getNotificationSettings());
 
-  app.put('/api/notifications/settings', { preHandler: requireSettingsAuth }, async (request, reply) => {
+  app.put('/api/notifications/settings', async (request, reply) => {
     const body = request.body ?? {};
     const patch = {};
 
@@ -203,17 +203,13 @@ export async function buildServer() {
     return updateNotificationSettings(patch);
   });
 
-  app.get('/api/notifications/ntfy-topic', { preHandler: requireSettingsAuth }, async () => ({ topic: getNtfyTopic() }));
+  app.get('/api/notifications/ntfy-topic', async () => ({ topic: getNtfyTopic() }));
 
-  app.post(
-    '/api/notifications/ntfy-topic/regenerate',
-    { preHandler: requireSettingsAuth },
-    async () => ({ topic: regenerateNtfyTopic() }),
-  );
+  app.post('/api/notifications/ntfy-topic/regenerate', async () => ({ topic: regenerateNtfyTopic() }));
 
-  app.get('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async () => getWatchList());
+  app.get('/api/notifications/watchlist', async () => getWatchList());
 
-  app.post('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async (request, reply) => {
+  app.post('/api/notifications/watchlist', async (request, reply) => {
     const body = request.body ?? {};
     const error = validateWatchEntryInput(body);
     if (error) {
@@ -222,7 +218,7 @@ export async function buildServer() {
     return addWatchEntry(body);
   });
 
-  app.delete('/api/notifications/watchlist/:id', { preHandler: requireSettingsAuth }, async (request, reply) => {
+  app.delete('/api/notifications/watchlist/:id', async (request, reply) => {
     const removed = removeWatchEntry(request.params.id);
     if (!removed) {
       return reply.code(404).send({ error: 'No watch entry with that id' });
