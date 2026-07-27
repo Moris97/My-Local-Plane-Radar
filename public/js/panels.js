@@ -1,4 +1,4 @@
-import { t } from './i18n.js';
+import { t, getLanguage } from './i18n.js';
 import { renderListPanel } from './list.js';
 import { renderStatsPanel } from './stats.js';
 import { renderSettingsPanel } from './settings.js';
@@ -33,10 +33,25 @@ const modalTitleEl = document.getElementById('fullscreen-modal-title');
 const modalContentEl = document.getElementById('fullscreen-modal-content');
 const modalCloseBtn = document.getElementById('fullscreen-modal-close');
 
+// This module (imported by app.js, evaluated before app.js's own top-level
+// code including the WebGL-dependent `new maplibregl.Map(...)`) is the
+// first reliable place to touch the DOM regardless of whether the map
+// itself ever comes up -- <html lang> and the close buttons' aria-label
+// both need to be set unconditionally, not tucked behind map init.
+document.documentElement.lang = getLanguage();
+closeBtn.setAttribute('aria-label', t('close'));
+modalCloseBtn.setAttribute('aria-label', t('close'));
+
 for (const btn of barButtons) {
   const entry = PANELS[btn.dataset.panel] ?? FULLSCREEN_MODALS[btn.dataset.panel];
   const label = btn.querySelector('.mlpr-bar-btn-label');
-  if (entry && label) label.textContent = entry.title();
+  if (entry && label) {
+    label.textContent = entry.title();
+    // Was previously a hardcoded English aria-label in index.html, which
+    // never matched the Polish UI -- now driven by the same translated
+    // title as the visible label, so it can't drift out of sync.
+    btn.setAttribute('aria-label', entry.title());
+  }
 }
 
 let currentPanel = null;
@@ -50,11 +65,46 @@ let currentModal = null;
 let historyPushed = false;
 let disposeCurrent = null;
 let renderToken = 0;
+// Whatever had focus right before a panel/modal opened -- typically the
+// bottom-bar button, or the "show more details" button for the contextual
+// aircraft panel -- so closing can hand focus back rather than stranding it
+// on a now-hidden (display:none, so unfocusable) element.
+let lastFocusedElement = null;
 
 function setActiveBarButton(name) {
   for (const btn of barButtons) {
     btn.classList.toggle('active', btn.dataset.panel === name);
   }
+}
+
+const FOCUSABLE_SELECTOR =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// Keeps Tab/Shift+Tab cycling within the open panel/modal instead of
+// leaking focus out to the map or bottom bar underneath -- standard modal
+// dialog behavior. Attached once to each container below; a `keydown` on a
+// `display:none` container (i.e. while closed) never fires in the first
+// place, so no open/closed guard is needed here.
+function trapFocus(containerEl, event) {
+  if (event.key !== 'Tab') return;
+  const focusable = containerEl.querySelectorAll(FOCUSABLE_SELECTOR);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function restoreFocus() {
+  if (lastFocusedElement && document.body.contains(lastFocusedElement)) {
+    lastFocusedElement.focus();
+  }
+  lastFocusedElement = null;
 }
 
 function hidePanelUI() {
@@ -74,6 +124,16 @@ export async function openPanel(name) {
   const entry = PANELS[name];
   if (!entry) return;
 
+  // Only capture on a closed -> open transition, not a direct switch
+  // between panel and modal (e.g. List -> Stats) -- otherwise this would
+  // capture focus already inside the panel being switched *away* from,
+  // and restoring to that later (once everything is closed) would try to
+  // focus an element inside now-hidden, about-to-be-replaced content
+  // instead of wherever the user actually started.
+  if (!currentPanel && !currentModal) {
+    lastFocusedElement = document.activeElement;
+  }
+
   hideModalUI();
 
   renderToken += 1;
@@ -89,6 +149,11 @@ export async function openPanel(name) {
   panelEl.setAttribute('aria-hidden', 'false');
   overlayEl.classList.remove('hidden');
   setActiveBarButton(name);
+  // Moves focus into the dialog immediately (not gated on the render below,
+  // which can be async) -- standard modal-open behavior, and means a
+  // keyboard/screen-reader user always lands somewhere inside it rather
+  // than on whatever was focused on the page underneath.
+  closeBtn.focus();
 
   if (!historyPushed) {
     history.pushState({ mlprPanel: true }, '');
@@ -111,6 +176,7 @@ function closePanel({ fromPopstate = false } = {}) {
   disposeCurrent = null;
   hidePanelUI();
   setActiveBarButton(null);
+  restoreFocus();
 
   if (historyPushed) {
     historyPushed = false;
@@ -121,6 +187,12 @@ function closePanel({ fromPopstate = false } = {}) {
 async function openFullscreenModal(name) {
   const entry = FULLSCREEN_MODALS[name];
   if (!entry) return;
+
+  // See the matching comment in openPanel -- same "only on a genuinely
+  // closed -> open transition" reasoning.
+  if (!currentPanel && !currentModal) {
+    lastFocusedElement = document.activeElement;
+  }
 
   hidePanelUI();
 
@@ -136,6 +208,7 @@ async function openFullscreenModal(name) {
   modalEl.classList.remove('hidden');
   modalEl.setAttribute('aria-hidden', 'false');
   setActiveBarButton(name);
+  modalCloseBtn.focus();
 
   if (!historyPushed) {
     history.pushState({ mlprPanel: true }, '');
@@ -158,6 +231,7 @@ function closeFullscreenModal({ fromPopstate = false } = {}) {
   disposeCurrent = null;
   hideModalUI();
   setActiveBarButton(null);
+  restoreFocus();
 
   if (historyPushed) {
     historyPushed = false;
@@ -183,6 +257,8 @@ for (const btn of barButtons) {
 closeBtn.addEventListener('click', () => closePanel());
 overlayEl.addEventListener('click', () => closePanel());
 modalCloseBtn.addEventListener('click', () => closeFullscreenModal());
+panelEl.addEventListener('keydown', (event) => trapFocus(panelEl, event));
+modalEl.addEventListener('keydown', (event) => trapFocus(modalEl, event));
 window.addEventListener('popstate', () => {
   closePanel({ fromPopstate: true });
   closeFullscreenModal({ fromPopstate: true });

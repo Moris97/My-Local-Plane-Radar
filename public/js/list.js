@@ -26,6 +26,36 @@ function formatCell(aircraft, key, units) {
   return aircraft[key] ?? '—';
 }
 
+// Sorting used to compare formatCell's *display* strings (e.g. "1200 ft"),
+// which put "On ground"/"Na ziemi" wherever it happened to collate
+// alphabetically against numbers with units attached, instead of where it
+// actually belongs -- the bottom of the altitude range. This compares the
+// real underlying values instead; formatCell stays display-only.
+function sortValue(aircraft, key) {
+  if (key === 'flight') return (aircraft.flight || '').trim() || aircraft.hex;
+  if (key === 'altBaro') {
+    if (aircraft.onGround) return -1; // below any real positive altitude, on purpose
+    return typeof aircraft.altBaro === 'number' ? aircraft.altBaro : null;
+  }
+  if (key === 'gs') return typeof aircraft.gs === 'number' ? aircraft.gs : null;
+  return aircraft[key] ?? null;
+}
+
+// Missing data (null) always sorts last regardless of direction -- it
+// shouldn't interleave with real values in either a "smallest first" or
+// "largest first" reading, just sit out of the way at the end.
+function compareValues(a, b, asc) {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  if (typeof a === 'number' && typeof b === 'number') {
+    const cmp = a - b;
+    return asc ? cmp : -cmp;
+  }
+  const cmp = String(a).localeCompare(String(b), undefined, { numeric: true });
+  return asc ? cmp : -cmp;
+}
+
 function matchesSearch(aircraft, query) {
   if (!query) return true;
   const needle = query.trim().toLowerCase();
@@ -33,14 +63,9 @@ function matchesSearch(aircraft, query) {
   return SEARCH_FIELDS.some((field) => String(aircraft[field] ?? '').toLowerCase().includes(needle));
 }
 
-function visibleAircraft(units) {
+function visibleAircraft() {
   const rows = getLiveAircraft().filter((aircraft) => matchesSearch(aircraft, searchQuery));
-  rows.sort((a, b) => {
-    const cmp = String(formatCell(a, sortKey, units)).localeCompare(String(formatCell(b, sortKey, units)), undefined, {
-      numeric: true,
-    });
-    return sortAsc ? cmp : -cmp;
-  });
+  rows.sort((a, b) => compareValues(sortValue(a, sortKey), sortValue(b, sortKey), sortAsc));
   return rows;
 }
 
@@ -72,7 +97,7 @@ export function renderListPanel(container) {
     const total = getLiveAircraft().length;
     totalEl.textContent = `${t('listTotal')}: ${total}`;
 
-    const rows = visibleAircraft(units);
+    const rows = visibleAircraft();
     const selectedHex = getSelectedHex();
     tableWrap.innerHTML = '';
 
@@ -91,7 +116,7 @@ export function renderListPanel(container) {
     const headRow = document.createElement('tr');
     for (const col of COLUMNS) {
       const th = document.createElement('th');
-      th.textContent = col.label();
+      th.textContent = col.label() + (sortKey === col.key ? (sortAsc ? ' ▲' : ' ▼') : '');
       th.addEventListener('click', () => {
         if (sortKey === col.key) {
           sortAsc = !sortAsc;

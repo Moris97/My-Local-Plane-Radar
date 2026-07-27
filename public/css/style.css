@@ -745,6 +745,17 @@ html, body {
 }
 
 .mlpr-info-icon {
+  /* A <button> (not a <span tabindex="0">) specifically so tap-to-focus is
+     reliable everywhere -- some mobile browsers don't consistently focus a
+     plain focusable span on tap, but a real button always is. Everything
+     below down to `flex: none` resets the browser's default button chrome
+     back to the same look the span had. */
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
   position: relative;
   display: inline-flex;
   align-items: center;

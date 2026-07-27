@@ -96,7 +96,7 @@ function renderSettingsForm(container) {
         <label><input type="radio" name="mlpr-map-theme" value="dark" ${settings.mapTheme === 'dark' ? 'checked' : ''}> ${t('mapThemeDark')}</label>
         <div class="mlpr-checkbox-row">
           <label><input type="radio" name="mlpr-map-theme" value="auto" ${settings.mapTheme === 'auto' ? 'checked' : ''}> ${t('mapThemeAuto')}</label>
-          <span class="mlpr-info-icon" tabindex="0">i<span class="mlpr-tooltip">${t('mapThemeAutoHint')}</span></span>
+          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('mapThemeAutoHint')}</span></button>
         </div>
       </fieldset>
 
@@ -106,7 +106,7 @@ function renderSettingsForm(container) {
         <label><input type="radio" name="mlpr-trail-mode" value="all" ${settings.trailMode === 'all' ? 'checked' : ''}> ${t('trailModeAll')}</label>
         <div class="mlpr-checkbox-row">
           <label><input type="checkbox" id="mlpr-shorter-trails" ${settings.shorterTrails ? 'checked' : ''}> ${t('shorterTrails')}</label>
-          <span class="mlpr-info-icon" tabindex="0">i<span class="mlpr-tooltip">${t('shorterTrailsHint')}</span></span>
+          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('shorterTrailsHint')}</span></button>
         </div>
       </fieldset>
 
@@ -358,12 +358,23 @@ function wireServerPort(container, onUnauthorized) {
     errorEl.textContent = '';
     statusEl.textContent = '';
 
+    const newPort = Number(portInput.value);
+    // location.hostname is exactly the host the user is *already* reaching
+    // this page on -- only the port segment is about to change, so this is
+    // the precise new address, not a vague "somewhere else" warning. Easy
+    // to lock yourself out of a headless Pi by mistyping a port and then
+    // not remembering what you changed it to, so this is a confirm(), not
+    // just an inline note.
+    const newUrl = `${location.protocol}//${location.hostname}:${newPort}`;
+    const confirmed = window.confirm(`${t('portChangeConfirmPrefix')}\n\n${newUrl}\n\n${t('portChangeConfirmSuffix')}`);
+    if (!confirmed) return;
+
     const response = await authedFetch(
       '/api/server/port',
       {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ port: Number(portInput.value) }),
+        body: JSON.stringify({ port: newPort }),
       },
       onUnauthorized,
     );

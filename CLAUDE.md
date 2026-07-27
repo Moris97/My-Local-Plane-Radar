@@ -367,7 +367,14 @@ not a special case that bypasses it.
   registration, and — like the Stats registrations table's search box —
   lives outside the subtree `drawTable()` rebuilds on every redraw
   (roughly once a second with live traffic, per `radar-state.js`'s
-  batching), so typing in it doesn't lose focus every redraw.
+  batching), so typing in it doesn't lose focus every redraw. Sorting
+  compares `sortValue()`'s raw underlying values (a real number, or `-1`
+  for on-ground so it always sorts as the lowest altitude, or `null` for
+  genuinely missing data which always sorts last regardless of direction),
+  **not** `formatCell()`'s display strings — sorting `"1200 ft"` against
+  `"On ground"` as text put "on ground" wherever it happened to collate
+  alphabetically against numbers-with-units, not at the bottom of the
+  altitude range where it belongs.
 - List and Settings are bottom sheets on phones, a side panel on large
   screens; closable via X, Android/iOS back-gesture, click on the overlay,
   or **Escape** (`panels.js`'s top-level `keydown` listener — closes
@@ -389,6 +396,30 @@ not a special case that bypasses it.
   self-close immediately, because closing the other one first triggers an
   async `history.back()` that then fires *after* the new one has already
   pushed its own entry.
+- **Accessibility basics, `panels.js`**: `<html lang>` and every close/
+  bottom-bar button's `aria-label` used to be hardcoded English in
+  `index.html`, never matching the Polish UI — `panels.js` is imported by
+  `app.js` and evaluated (including its own top-level code) *before*
+  `app.js`'s own top-level `new maplibregl.Map(...)`, so it's a reliable
+  place to set both regardless of whether the map itself ever comes up;
+  `document.documentElement.lang = getLanguage()` and each button's
+  `aria-label` are set from the same `t()`/title source as its visible
+  label, so they can't drift out of sync again. Opening a panel/modal also
+  moves focus onto its close button immediately (not gated on the
+  render, which can be async) and traps Tab/Shift+Tab within it
+  (`trapFocus`, standard modal dialog behavior — a `keydown` on a
+  `display:none` container never fires, so no open/closed guard is
+  needed), and closing restores focus to whatever had it before —
+  `lastFocusedElement`, captured only on a genuinely closed → open
+  transition, **not** on a direct switch between panel and modal (e.g.
+  List → Stats), which would otherwise capture focus already inside the
+  panel being switched *away* from.
+- **`.mlpr-info-icon` tooltips are real `<button>`s, not
+  `<span tabindex="0">`** — some mobile browsers don't reliably move focus
+  to a plain focusable span on tap (which is what the CSS `:hover`/`:focus`
+  tooltip reveal depends on), but a native button always is. `style.css`
+  resets the browser's default button chrome back to the same look the
+  span had.
 - **Dark theme is the default** — this is a radar display, must be readable
   at night without glare. Color theme: green, blue, black.
 - Plane icon rotates to heading. Click shows trail + basic info with a "show
@@ -619,7 +650,12 @@ just stop the service rather than restart it; the UI tells the user to
 restart manually. `validatePort` rejects anything below 1024 (would need
 root, which MLPR never runs as), readsb's own ports, and 8080/8085 — a UI
 that could bind over readsb's ports would break the very receiver MLPR reads
-from.
+from. Saving asks for confirmation first (`window.confirm`, this codebase's
+only use of it — a deliberately heavier gate than the inline status
+messages everywhere else, since mistyping a port on a headless Pi is an
+easy way to lock yourself out): the message states the *exact* new address
+(`location.protocol`/`location.hostname` — the host the browser is already
+on, unchanged — plus the new port), not a vague "somewhere else" warning.
 
 ## Notification engine
 
