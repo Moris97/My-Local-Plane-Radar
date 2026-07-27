@@ -296,10 +296,10 @@ function showInfoPopup(hex) {
   activePopup?.remove();
   // Default offset is 0, so the popup's tip sits exactly on the aircraft's
   // coordinate -- since the marker (.mlpr-plane) is centered on that same
-  // point and is ~33px across, the box ends up covering half the icon.
+  // point and is ~50px across, the box ends up covering half the icon.
   // A flat pixel offset pushes it clear of the marker on whichever side
   // MapLibre auto-picks, reading as "floating just above the plane".
-  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 22 })
+  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: 32 })
     .setLngLat(state.lastLngLat)
     .setHTML(
       `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
