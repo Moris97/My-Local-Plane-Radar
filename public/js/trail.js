@@ -16,8 +16,15 @@ export function setShorterTrails(enabled) {
 }
 
 const ALTITUDE_STOPS = [
-  { ft: 0, color: [61, 220, 132] }, // green
-  { ft: 10000, color: [61, 220, 132] },
+  // 0-10,000 ft used to be two identical greens (a flat, uninformative
+  // band) -- most locally-tracked traffic (circuit, approach, departure)
+  // spends its whole visible life in exactly this range, so it's the band
+  // that most needs a gradient. Shifted into a golden-green at ground level
+  // via lerpSpace 'hsl' (a pure hue sweep, not a lightness one, so it stays
+  // exactly as vivid as the rest of the scale rather than looking dim/muddy
+  // at ground level).
+  { ft: 0, color: [210, 196, 30] }, // golden green (ground)
+  { ft: 10000, color: [61, 220, 132], lerpSpace: 'hsl' }, // green
   // Green and this blue share the exact same saturation/lightness (only the
   // hue differs, ~147deg -> ~210deg) -- a straight per-channel RGB lerp
   // between them doesn't preserve that, so the perceived color barely
@@ -26,17 +33,21 @@ const ALTITUDE_STOPS = [
   // so the shift away from green is visible early in the band, not just at
   // the top (reported: a plane at ~4900 m/16,000 ft still looked pure
   // green, only became visibly non-green around 6,000 m/20,000 ft).
-  { ft: 25000, color: [61, 140, 220], lerpSpace: 'hsl' }, // blue
+  { ft: 17500, color: [61, 140, 220], lerpSpace: 'hsl' }, // blue
   // Same problem as the leg above, and worse: an RGB lerp straight from
-  // this blue to the dark red below passes through desaturated mud -- at
-  // 35,000 ft it produced rgb(92,57,83), a washed-out grey-maroon. That is
-  // exactly typical cruise altitude, so most airliner trails came out in a
-  // muddy near-grey that was hard to tell apart from the grey no-contact
-  // colour (reported as "the grey goes slightly red on the dark map").
-  // Rotating hue in HSL instead keeps saturation up the whole way, so the
-  // band sweeps blue -> violet -> magenta -> red and every few thousand
-  // feet is a visibly different colour.
-  { ft: 36000, color: [224, 49, 49], lerpSpace: 'hsl' }, // red
+  // this blue to the dark red below passes through desaturated mud -- e.g.
+  // at the old 35,000 ft stop it produced rgb(92,57,83), a washed-out
+  // grey-maroon, right around typical cruise altitude, so most airliner
+  // trails came out in a muddy near-grey that was hard to tell apart from
+  // the grey no-contact colour (reported as "the grey goes slightly red on
+  // the dark map"). Rotating hue in HSL instead keeps saturation up the
+  // whole way, so the band sweeps blue -> violet -> magenta -> red and
+  // every few thousand feet is a visibly different colour. Pure red lands
+  // at 30,250 ft (not right after blue) deliberately, so there's a long,
+  // gradually-darkening red tail from there to 40,000 ft -- the altitude
+  // band most cruise traffic actually sits in -- rather than everything
+  // above ~30k being one indistinguishable dark red.
+  { ft: 30250, color: [224, 49, 49], lerpSpace: 'hsl' }, // red
   // Red -> dark red is a pure lightness change at the same hue, so a plain
   // RGB lerp is correct (and an HSL one would be identical anyway).
   { ft: 40000, color: [107, 15, 15] }, // dark red

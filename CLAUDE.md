@@ -374,18 +374,31 @@ photo fetch, and is the piece wired into `panels.js`.
   `list.js`'s existing pattern, imprecise but consistent with the rest of
   the app), but the photo is fetched exactly once per panel open — rebuilding
   it on every redraw would flicker/reload the image constantly.
-- Trail color follows altitude, smooth gradient: green below 10,000 ft, blue
-  by 25,000 ft, then violet/magenta to red at 36,000 ft and dark red at
-  40,000 ft. **Both** the green→blue and blue→red legs interpolate in HSL
-  (`lerpSpace: 'hsl'` in `ALTITUDE_STOPS`), deliberately: a plain RGB lerp
-  between two colors of different hue *and* lightness passes through
-  desaturated mud. That produced `rgb(92,57,83)` at 35,000 ft — typical
-  cruise altitude, so most trails — a grey-maroon barely distinguishable
-  from the grey no-contact color. Every altitude now stays above ~65%
-  saturation while the gap grey sits at ~3%, which is what keeps "changed
-  altitude" and "lost contact" visually separable. Regression tests in
-  `trail.test.js` assert both the saturation floor and that a 3,000 ft step
-  is a visibly different color — don't switch these legs back to RGB.
+- Trail color follows altitude, smooth gradient: golden green at ground
+  level, pure green by 10,000 ft, blue by 17,500 ft, then violet/magenta to
+  red at 30,250 ft and dark red at 40,000 ft. Every leg (`ALTITUDE_STOPS` in
+  `trail.js`) interpolates in HSL (`lerpSpace: 'hsl'`), deliberately: a
+  plain RGB lerp between two colors of different hue *and* lightness passes
+  through desaturated mud. That produced `rgb(92,57,83)` at a since-removed
+  35,000 ft stop — typical cruise altitude, so most trails — a grey-maroon
+  barely distinguishable from the grey no-contact color. Every altitude now
+  stays above ~65% saturation while the gap grey sits at ~3%, which is what
+  keeps "changed altitude" and "lost contact" visually separable. The
+  0–10,000 ft leg exists specifically because that band used to be two
+  identical greens (flat, no gradient at all) despite being where most
+  locally-tracked traffic (circuit/approach/departure) spends its whole
+  visible life — golden green at ground level is a **hue-only** shift (same
+  lightness/saturation as the rest of the scale), not a darkened/muddy
+  ground color. Pure red sits well above the blue stop (30,250 ft, not
+  right after 17,500) on purpose, so cruise-altitude traffic (which is
+  mostly 30–40k) gets a long, gradually-darkening red tail instead of
+  collapsing into one indistinguishable dark red above ~30k. These exact
+  stop values came from the user picking between several rendered
+  side-by-side gradient comparisons — if asked to retune this again,
+  generate comparison images the same way rather than guessing numbers.
+  Regression tests in `trail.test.js` assert both the saturation floor and
+  that a 3,000 ft step is a visibly different color — don't switch any leg
+  back to plain RGB.
 - Signal loss handling: no update for 3s → aircraft starts fading toward red;
   fully red by 10s, **stays fully red for another 10s** (found via real use —
   it was disappearing too abruptly), actually removed at 20s

@@ -2,26 +2,33 @@ import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { colorForAltitude, recordPosition, clearHistory, trailFeaturesFor } from './trail.js';
 
-test('colorForAltitude is pure green at and below 10,000 ft', () => {
-  assert.equal(colorForAltitude(0), 'rgb(61,220,132)');
-  assert.equal(colorForAltitude(5000), 'rgb(61,220,132)');
+test('colorForAltitude is golden-green at ground level, pure green by 10,000 ft', () => {
+  // 0-10,000 ft used to be a flat, identical green -- the band most
+  // locally-tracked traffic actually spends its time in, so it's the one
+  // that most needed a gradient. Ground level is now a distinct golden
+  // green rather than a copy of the 10,000 ft color.
+  assert.equal(colorForAltitude(0), 'rgb(210,196,30)');
   assert.equal(colorForAltitude(10000), 'rgb(61,220,132)');
+  assert.notEqual(colorForAltitude(0), colorForAltitude(10000));
 });
 
 test('colorForAltitude is already clearly non-green partway through the green-to-blue band', () => {
   // Regression test: a straight RGB-channel lerp between these two stops
   // barely shifts the perceived color until near the very top of the
-  // 10,000-25,000 ft band (green and blue share identical saturation/
+  // 10,000-17,500 ft band (green and blue share identical saturation/
   // lightness -- only hue differs -- so an RGB lerp doesn't sweep hue
-  // evenly). Reported live: a plane at ~4,900 m (16,000 ft) still looked
-  // pure green. At the midpoint the green channel must have visibly
-  // dropped from its full 220 value.
-  const [, , b] = colorForAltitude(17500).match(/rgb\((\d+),(\d+),(\d+)\)/).slice(1).map(Number);
-  assert.ok(b > 132 + 40, `expected the blue channel to have risen well past pure green's 132 by the midpoint, got ${b}`);
+  // evenly). At the midpoint the blue channel must have visibly risen from
+  // pure green's 132.
+  const [, , b] = colorForAltitude(13750).match(/rgb\((\d+),(\d+),(\d+)\)/).slice(1).map(Number);
+  assert.ok(b > 132 + 20, `expected the blue channel to have risen well past pure green's 132 by the midpoint, got ${b}`);
 });
 
-test('colorForAltitude reaches exactly blue at 25,000 ft', () => {
-  assert.equal(colorForAltitude(25000), 'rgb(61,140,220)');
+test('colorForAltitude reaches exactly blue at 17,500 ft', () => {
+  assert.equal(colorForAltitude(17500), 'rgb(61,140,220)');
+});
+
+test('colorForAltitude reaches exactly red at 30,250 ft', () => {
+  assert.equal(colorForAltitude(30250), 'rgb(224,49,49)');
 });
 
 test('colorForAltitude reaches exactly dark red at 40,000 ft and beyond', () => {
@@ -40,10 +47,10 @@ function saturationOf(rgbString) {
 }
 
 test('no altitude produces a washed-out near-grey that could be mistaken for the no-contact colour', () => {
-  // Regression test: the 25,000-40,000 ft leg used to be a plain RGB lerp
-  // from blue to dark red, which passes through desaturated mud -- at
-  // 35,000 ft (typical cruise, so most trails) it produced rgb(92,57,83),
-  // a grey-maroon barely distinguishable from the grey gap colour.
+  // Regression test: the blue-to-dark-red leg used to be a plain RGB lerp,
+  // which passes through desaturated mud -- at the old 35,000 ft stop
+  // (typical cruise, so most trails) it produced rgb(92,57,83), a
+  // grey-maroon barely distinguishable from the grey gap colour.
   for (let ft = 0; ft <= 40000; ft += 1000) {
     const saturation = saturationOf(colorForAltitude(ft));
     assert.ok(
@@ -67,15 +74,15 @@ test('altitude changes of a few thousand feet are visibly different colours', ()
     return Math.hypot(r1 - r2, g1 - g2, b1 - b2);
   };
 
-  for (let ft = 12000; ft < 40000; ft += 3000) {
+  for (let ft = 12000; ft + 3000 <= 40000; ft += 3000) {
     const delta = distance(colorForAltitude(ft), colorForAltitude(ft + 3000));
     assert.ok(delta > 30, `${ft} ft -> ${ft + 3000} ft barely changes colour (distance ${delta.toFixed(0)})`);
   }
 });
 
-test('colorForAltitude treats a missing/non-number altitude as ground level (pure green)', () => {
-  assert.equal(colorForAltitude(undefined), 'rgb(61,220,132)');
-  assert.equal(colorForAltitude('ground'), 'rgb(61,220,132)');
+test('colorForAltitude treats a missing/non-number altitude as ground level', () => {
+  assert.equal(colorForAltitude(undefined), colorForAltitude(0));
+  assert.equal(colorForAltitude('ground'), colorForAltitude(0));
 });
 
 const HEX = 'abc123';
