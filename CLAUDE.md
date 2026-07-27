@@ -472,6 +472,118 @@ aircraft currently in range will fire a "first seen" notification. Not fixed
 — mention it if the user is surprised by a notification burst right after
 first setup.
 
+## Advanced statistics (Stage 7)
+
+The Stats view (`public/js/stats.js`) has six charts plus a lazily-loaded
+table of every registration ever seen, each chart re-fetched against a
+shared range selector (24h / 7d / 31d / 1y / all, default **all**) rendered
+above the charts. `server/src/stats-query.js`'s `getStatsHistoryForRange`
+picks the source and bucket granularity per range: 24h reads the existing
+in-memory `history` array (minute-level already) plus today's in-progress
+range samples; everything else reads `daily_stats` rows. Bucket granularity
+(`server/src/time-buckets.js`): 24h → hourly, 7d/31d → daily, 1y → weekly
+(ISO 8601 week numbering — a week belongs to whichever year owns its
+Thursday, so e.g. 2025-12-29 buckets into `2026-W01`), all → monthly. This
+keeps every chart at roughly 12–60 points regardless of how long the install
+has been running, rather than one point per day forever.
+
+### Range/position sampling (`server/src/stats-history.js`, `range.js`)
+
+`daily_stats` gained `avg_aircraft`, `avg_with_pos`/`max_with_pos`,
+`avg_without_pos`/`max_without_pos`, and `range_top_avg_km` alongside the
+existing `max_aircraft`/`total_messages`/`max_range_km`. The averages come
+from the same daily accumulator pattern already in use (sum + sample count,
+divided at flush time).
+
+`range_top_avg_km` is a **deliberate, narrow exception** to "readsb already
+computes max range, don't reimplement distance math" (that note is about the
+*existing* all-time-max-range notification feature, which is untouched and
+still reads `stats.json`'s `total.max_distance` directly). `stats.json` only
+exposes a single running maximum, never a distribution — there's no way to
+show "how good was reception typically" from it alone. So `server/src/
+range.js` adds a pure Haversine `distanceKm()`, called once per poll tick
+per aircraft-with-position against the effective home location, keeping only
+the best distance *per minute* in memory (~1440 floats/day — an ephemeral
+rolling aggregate, same category as the existing daily accumulator, not
+"raw position history" under hard rule 4). At day rollover this reduces to
+two numbers written to `daily_stats`: `max_range_km` (unchanged, still from
+readsb) and `range_top_avg_km` — the **mean of the top `ceil(n × 10%)`**
+per-minute best samples (not a percentile cutoff value — the user asked for
+"an average of the best few%," which is a different statistic and was
+briefly implemented wrong as a percentile before being caught and renamed).
+This makes the number robust against a single lucky MLAT spike inflating an
+otherwise-ordinary day. `getRangeSummary()` in `stats-history.js` always
+includes the current in-progress minute so a read is never more than ~60s
+stale.
+
+### Registration visit-tracking (`server/src/stats-registrations.js`)
+
+Separate from the existing hex-keyed `seen_aircraft` table (first-seen
+notifications) — this is registration-keyed and tracks *visits*, not just
+"ever seen." In-memory `Map`, same lazy-load-then-periodic-flush shape as
+`trail-history.js`: `recordSighting(registration, {typeCode, airlineIcao},
+now)` is called from `index.js`'s poll loop for every currently-tracked
+aircraft with a registration (not just this tick's delta — every tick,
+across the whole tracked set, so a "seen again after 20 minutes" transition
+is caught even if the aircraft itself sent no new message in between).
+**15-minute visit-gap rule**: if the gap since `lastSeenAt` is `>= 15 min`,
+`timesSeen` increments (a new visit); otherwise only `lastSeenAt` advances.
+`typeCode`/`airlineIcao` update whenever a later sighting provides them but
+are never cleared by a sighting that lacks them. Dirty entries flush to the
+`registrations` table (`registration` PK, `type_code`, `airline_icao`,
+`first_seen_at`, `last_seen_at`, `times_seen`) on the existing 45s
+`DAILY_STATS_FLUSH_INTERVAL_MS` tick — no new interval added.
+
+"Most popular type/airline" and "new registrations" are all derived from
+this one table by filtering on `lastSeenAt`/`firstSeenAt` against the
+range's cutoff — no separate per-day count tables. "Most popular" counts
+**distinct registrations**, not raw sighting frequency, so one aircraft
+passing overhead daily doesn't dominate the chart.
+
+### Airline identification (`server/src/airline-lookup.js`)
+
+`identifyOperator(aircraft, airlines)` classifies each aircraft's callsign:
+`dbFlags` bit 1 (military) → no airline; callsign (trimmed, uppercased)
+equal to the registration with dashes stripped → private/GA, no airline;
+else matched against `^([A-Z]{3})([0-9][0-9A-Z]{0,3})$` (3-letter ICAO
+prefix, digit immediately after — this also naturally excludes tactical
+military-style callsigns like "DUKE21", which have no digit in that
+position) and looked up in the loaded airline map. Data source is
+OpenFlights' `airlines.dat` — **ODbL-licensed data only, never their AGPL
+code** — fetched by `scripts/fetch-airlines.mjs` (hand-written CSV parser,
+no new dependency, same pattern as `fetch-mapdata.sh`) into
+`data/airlines.json` (`{icao: {name, country}}`, filtered to active airlines
+with a non-empty ICAO code), called from `install.sh` alongside the basemap
+fetch, best-effort, **never committed** (`data/` already in `.gitignore`).
+Served to the browser via `GET /api/airlines`
+(`server/src/airlines-data.js` loads it once at startup, empty-Map fallback
+if the file doesn't exist yet — e.g. offline install before the fetch
+script has run). **Never commit airline logos** — trademark risk, and not
+needed since the doughnut charts use plain color swatches + text, not logos.
+Logging unmatched 3-letter prefixes for future review was discussed as a
+nice-to-have but not implemented — see `TODO.md`.
+
+### Chart rendering (`public/js/chart.js`)
+
+Extends the existing hand-rolled `renderSparklineSvg` pattern — no charting
+library added (every shape here is a small, well-known SVG technique; a
+library buys interactivity nobody asked for at the cost of a new
+dependency). All renderers are pure string-building functions, zero DOM
+dependency, fully testable under plain `node --test`
+(`public/js/chart.test.js`): `renderLineChartSvg` (multi-series + max
+label), `renderAreaChartSvg` (stacked, bottom-to-top in series order),
+`renderBarChartSvg` (grouped bars), `renderDoughnutSvg`/`doughnutSlices`
+(stroke-dasharray technique, slices beyond `maxSlices` folded into one
+"Other" entry so a long tail doesn't turn the chart into confetti).
+**Single-bucket edge case** (common for "all time" on a fresh install, or
+any narrow range with sparse data): a `<polyline>`/`<polygon>` needs ≥2
+points to draw anything visible, so with exactly one bucket
+`renderLineChartSvg` draws a `<circle>` dot and `renderAreaChartSvg` draws
+`<rect>` bar-like columns instead — both caught via a live screenshot during
+development (the legend showed real numbers while the chart area itself was
+blank), not by the original tests, which only checked for absence of
+`NaN`. Regression tests were added for both.
+
 ## Settings access control (`server/src/settings-auth.js`)
 
 Off by default (local LAN app, most people don't need this) — a button at the

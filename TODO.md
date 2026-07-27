@@ -19,3 +19,9 @@ Added to as they come up; picked up in a later stage when relevant.
   missing. Idea: delay the first-seen notification slightly (a poll tick or
   two) to have a better chance of catching a more complete record. User said
   to add it here and revisit later, not now (2026-07-27).
+- **Log unmatched 3-letter airline callsign prefixes** — when
+  `airline-lookup.js` sees a well-formed airline-style callsign whose prefix
+  isn't in the OpenFlights `airlines.dat` map (`kind: 'airline_unknown'`),
+  it's silently ignored rather than logged anywhere. Explicitly called out
+  by the user as optional/nice-to-have, not required, when the advanced
+  stats feature was specced (2026-07-27) — not implemented.
