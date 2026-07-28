@@ -84,6 +84,10 @@ let selectedHex = null;
 // element to clear it from.
 let lastHoverRequestHex = null;
 let activePopup = null;
+// Which hex activePopup is currently showing -- lets showInfoPopup tell "the
+// selected aircraft's position just updated, refresh the existing popup in
+// place" apart from "a different aircraft got selected, need a new popup".
+let activePopupHex = null;
 const pendingMessages = [];
 
 // The effective mode actually rendered (may differ from getSettings().basemapMode
@@ -481,6 +485,7 @@ document.addEventListener('click', (event) => {
     const hex = selectedHex;
     activePopup?.remove();
     activePopup = null;
+    activePopupHex = null;
     if (hex) {
       setInspectedHex(hex);
       openPanel('aircraft');
@@ -590,6 +595,29 @@ function showInfoPopup(hex) {
   const state = aircraftState.get(hex);
   if (!state || !state.lastLngLat || !state.lastAircraft) return;
 
+  const html =
+    `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
+    `<br><button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`;
+
+  // Same aircraft's popup is already open -- refresh position/content on the
+  // *existing* instance instead of remove()-ing and creating a new one.
+  // This used to unconditionally recreate the popup on every call, which
+  // applyAircraftUpdate makes once per position tick for the selected
+  // aircraft (so roughly once a second for active traffic) -- MapLibre's
+  // Popup defaults to focusAfterOpen: true, and .addTo() is what triggers
+  // that focus grab, so recreating it that often kept silently stealing
+  // focus away from anything else on the page. Reported live (2026-07-28):
+  // impossible to pick an option from an open native <select> (List's
+  // Configure view) while a popup's aircraft kept updating in the
+  // background -- every tick force-closed the dropdown. setLngLat/setHTML
+  // on an already-mounted popup don't call .addTo() again, so they don't
+  // re-trigger that focus grab; only a genuinely new popup (a different
+  // aircraft selected, or none open yet) should.
+  if (activePopup && activePopupHex === hex) {
+    activePopup.setLngLat(state.lastLngLat).setHTML(html);
+    return;
+  }
+
   activePopup?.remove();
   // Default offset is 0, so the popup's tip sits exactly on the aircraft's
   // coordinate -- since the marker (.mlpr-plane) is centered on that same
@@ -601,11 +629,9 @@ function showInfoPopup(hex) {
   const popupOffset = Math.round(getSettings().aircraftIconSize / 2) + 7;
   activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: popupOffset })
     .setLngLat(state.lastLngLat)
-    .setHTML(
-      `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
-        `<br><button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`,
-    )
+    .setHTML(html)
     .addTo(map);
+  activePopupHex = hex;
 }
 
 // A persistent, achromatic glow (.mlpr-plane-glow, styled in style.css) on
@@ -667,6 +693,7 @@ function deselectAircraft() {
   renderTrail();
   activePopup?.remove();
   activePopup = null;
+  activePopupHex = null;
 }
 
 // Three mutually-exclusive plane color modes (Settings -> Aircraft):

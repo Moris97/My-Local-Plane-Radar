@@ -206,13 +206,21 @@ html, body {
 
 #mlpr-attribution {
   position: fixed;
-  right: 6px;
+  /* Left, not right -- the List panel now reaches the true screen bottom
+     (see .mlpr-panel-fill below) and, on desktop, docks to the *right*
+     edge, which would otherwise sit exactly on top of a right-anchored
+     credit. OSM's own attribution guidelines
+     (osmfoundation.org/wiki/Licence/Attribution_Guidelines) confirm any
+     corner is acceptable ("While the lower right corner is traditional,
+     any corner of the map is acceptable") -- this isn't a license
+     constraint, just avoiding the new overlap. */
+  left: 6px;
   /* Reserving the full bottom-bar-height above the bar made sense back when
      the bar had a solid opaque background occupying that whole strip -- now
      that it's transparent floating pills (see #bottom-bar) this is only
      kept as the phone default, where the centered button row leaves too
      little horizontal room beside a full-length attribution credit
-     (measured: the Settings button and "MapLibre · OSM contributors" start
+     (measured: the List button and "MapLibre · OSM contributors" start
      colliding under ~420px wide). Desktop/tablet gets the actual corner
      below, matching the >=720px breakpoint already used for bottom-sheet
      vs. side-panel layout. */
@@ -225,11 +233,11 @@ html, body {
   pointer-events: none;
   /* The full OpenFreeMap/OpenMapTiles/OpenStreetMap credit (online mode) is
      much longer than the offline-mode text ever was -- this box has no
-     intrinsic width limit and is right-anchored, so on a narrow phone it
-     could otherwise run off the left edge of the screen instead of wrapping. */
+     intrinsic width limit and is left-anchored, so on a narrow phone it
+     could otherwise run off the right edge of the screen instead of wrapping. */
   max-width: calc(100vw - 12px);
   white-space: normal;
-  text-align: right;
+  text-align: left;
   /* The plain-text parts of the credit ("©", "Data from") sit outside the
      <a> tags -- OpenFreeMap's required attribution format is a name/symbol/
      name chain, not every word a link. Without an explicit color here they
@@ -367,6 +375,14 @@ html, body {
   display: none;
 }
 
+/* Resizing only makes sense in the >=900px side-panel layout (see the
+   matching @media block below, which turns this into an actual draggable
+   strip) -- hidden by default so it's not a stray empty flex item in the
+   full-width bottom-sheet layout below that breakpoint. */
+#panel-resize-handle {
+  display: none;
+}
+
 #panel-header {
   display: flex;
   justify-content: space-between;
@@ -455,8 +471,197 @@ html, body {
   font: 14px/1.5 system-ui, sans-serif;
 }
 
+/* List only (panels.js's PANELS.list/FULLSCREEN_MODALS.listFull `fill: true`)
+   -- reaches the true screen bottom instead of stopping above the bottom
+   bar, same as the map itself already does, so the table gets the full
+   available height rather than leaving a wasted strip below it. The
+   floating bottom-bar pills (z-index 30) end up on top of the last rows,
+   same visual relationship they already have with the map; the extra
+   bottom padding below keeps those rows reachable by scrolling past the
+   pills rather than truly hidden behind them. Settings/Stats/aircraft
+   details are unaffected -- they don't get this class.
+   Selector specificity (#panel.mlpr-panel-fill has higher specificity than
+   the plain `#panel` selector inside the `@media (min-width: 900px)` block
+   above) is what makes this win on both the mobile and desktop layouts
+   without needing to duplicate it inside that media query. */
+#panel.mlpr-panel-fill,
+#fullscreen-modal.mlpr-panel-fill {
+  bottom: 0;
+}
+
+#panel.mlpr-panel-fill #panel-content,
+#fullscreen-modal.mlpr-panel-fill #fullscreen-modal-content {
+  padding-bottom: calc(16px + var(--bottom-bar-height) + env(safe-area-inset-bottom));
+}
+
 .mlpr-empty {
   color: #6f8a97;
+}
+
+.mlpr-list-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.mlpr-list-action-btn {
+  background: rgba(127, 216, 168, 0.1);
+  border: 1px solid rgba(127, 216, 168, 0.3);
+  color: #7fd8a8;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mlpr-list-action-btn:hover {
+  background: rgba(127, 216, 168, 0.2);
+}
+
+/* Configure toggled state -- re-clicking it now closes the config view
+   (list.js's toggleConfigView), so this is the visual confirmation of
+   which action the button currently performs. A noticeably green
+   background, not just a near-black tint (raised from the original
+   rgba(11, 38, 25, 0.8), same dark-with-a-hint-of-green .mlpr-bar-btn.active
+   uses elsewhere -- too subtle here per explicit follow-up request). */
+.mlpr-list-action-btn.active {
+  color: #3ddc84;
+  background: rgba(61, 220, 132, 0.35);
+  border-color: #3ddc84;
+}
+
+/* Used only by list.js's 'inline' mode (fullscreen with enough measured
+   width -- FULLSCREEN_SIDE_BY_SIDE_MIN_WIDTH) -- the desktop side panel's
+   Configure is a genuinely separate #list-config-window instead (see
+   list.js's 'floating' mode), not this nested layout. #mlpr-list-view and
+   #mlpr-list-config-view otherwise swap via inline display:none, one
+   visible at a time (list.js's updateLayout) -- this class shows both at
+   once instead, config on the *left*, table on the right (row-reverse; DOM
+   order stays list-view-then-config-view, matching the swap case's simpler
+   "just toggle these two" logic, only the visual order flips here). */
+.mlpr-list-body-wide {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+/* Its own independent-looking window, not a plain content region tucked
+   inside the list panel -- own background/border/corners regardless of
+   layout (narrow-mode swap included), per explicit request (2026-07-28:
+   the config side needs to read as genuinely separate from the list, not
+   a second column of the same panel). Shared with #list-config-window (the
+   *actually* separate, non-nested version used in the desktop side-panel
+   layout -- see list.js's 'floating' mode) so both look identical; only
+   #list-config-window additionally needs fixed positioning below, since
+   #mlpr-list-config-view is always nested in normal document flow. */
+#mlpr-list-config-view,
+#list-config-window {
+  background: #0b1116;
+  border: 1px solid #1c2e3a;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+/* Genuinely a separate window, not nested inside #panel at all (see
+   index.html) -- position:fixed and glued to #panel's left edge by
+   list.js's positionConfigWindow (right, not left: #panel is right-docked
+   in this layout, so anchoring from the right edge is what stays correct
+   regardless of #panel's own width). Only ever shown in that same
+   side-panel layout, so top/bottom can just match #panel.mlpr-panel-fill's
+   own (0 to 0) without a media query of its own. */
+#list-config-window {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  width: 340px;
+  z-index: 20;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+  overflow-y: auto;
+}
+
+#list-config-window.hidden {
+  display: none;
+}
+
+.mlpr-listconfig-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: -14px -14px 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #14212b;
+  /* Reads as the config window's own title bar (matching #panel-header's
+     shape/role one level up) rather than plain text sitting inside it --
+     the negative margin cancels the card's own padding just for this strip
+     so the border-bottom spans the card's full width. */
+  border-radius: 12px 12px 0 0;
+}
+
+/* Side by side (see .mlpr-list-body-wide above): the list gets the same
+   card treatment so both read as two same-sized windows glued together,
+   not one card floating on a plain background next to it. */
+.mlpr-list-body-wide #mlpr-list-view {
+  background: #0b1116;
+  border: 1px solid #1c2e3a;
+  border-radius: 12px;
+  padding: 14px;
+  flex: 1 1 auto;
+  /* Without this, a flex item's default min-width:auto keeps it from
+     shrinking below its content's natural width -- exactly what
+     #mlpr-list-table-wrap's own overflow-x:auto needs to actually kick in
+     instead of pushing the config column off to the side. */
+  min-width: 0;
+}
+
+/* Keep this flex-basis and the row's 16px gap in sync with
+   CONFIG_PANE_FLEX_BASIS/CONFIG_PANE_GAP in list.js -- that's the exact
+   amount expandPanelWidth grows #panel by, so the table keeps its full
+   existing width rather than shrinking to make room. */
+.mlpr-list-body-wide #mlpr-list-config-view {
+  flex: 0 0 340px;
+}
+
+.mlpr-listconfig-title {
+  font: 600 13px system-ui, sans-serif;
+  color: #d8f3e6;
+}
+
+.mlpr-listconfig-close-x {
+  background: none;
+  border: none;
+  color: #9fb7c4;
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
+}
+
+.mlpr-listconfig-close-x:hover {
+  color: #d8f3e6;
+}
+
+.mlpr-listconfig-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.mlpr-listconfig-row select {
+  flex: 1;
+  min-width: 0;
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 13px;
+}
+
+.mlpr-listconfig-row button {
+  flex-shrink: 0;
+  min-width: 30px;
 }
 
 .mlpr-list-header {
@@ -485,9 +690,21 @@ html, body {
   font-size: 13px;
 }
 
+/* Columns are now user-configurable (list-fields.js's ~40-field catalog) and
+   can easily add up to wider than the viewport -- scrolls horizontally
+   instead of overflowing the panel. */
+#mlpr-list-table-wrap {
+  overflow-x: auto;
+}
+
 .mlpr-list-table {
   width: 100%;
   border-collapse: collapse;
+}
+
+.mlpr-list-table th,
+.mlpr-list-table td {
+  white-space: nowrap;
 }
 
 .mlpr-list-table th {
@@ -837,6 +1054,17 @@ html, body {
   border-radius: 8px;
   margin: 0 0 12px;
   padding: 8px 12px 12px;
+  /* <fieldset> has a browser-default min-width of min-content, which
+     ignores its container's actual width and keeps the box (and everything
+     inside it) from ever shrinking below its content's natural size --
+     surfaced by the config window's sort rows (two <select>s + three
+     buttons) overflowing straight past the edge of the narrow (340px)
+     floating window instead of the flex children shrinking to fit, per
+     .mlpr-listconfig-row select's own min-width: 0. Harmless/no-op
+     everywhere else this class is used (Settings' tabs are never this
+     width-constrained), so applying it unconditionally here is simpler
+     than a config-window-specific override. */
+  min-width: 0;
 }
 
 .mlpr-settings-group legend {
@@ -1208,5 +1436,27 @@ html, body {
     border-radius: 0;
     border-left: 1px solid #1c2e3a;
     border-top: none;
+  }
+
+  /* Drag-to-resize -- only meaningful in this side-panel layout (below this
+     breakpoint #panel is a full-width bottom sheet, where "width" isn't a
+     concept). panels.js applies/persists the actual width as an inline
+     style (settings-state.js's sidePanelWidth); this just needs a wide
+     enough hit target overlapping the panel's left edge to grab, since the
+     visible 1px border alone is too thin to reliably grab with a mouse. */
+  #panel-resize-handle {
+    display: block;
+    position: absolute;
+    left: -4px;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: ew-resize;
+    z-index: 5;
+  }
+
+  #panel-resize-handle:hover,
+  #panel-resize-handle.mlpr-resize-active {
+    background: rgba(61, 220, 132, 0.35);
   }
 }

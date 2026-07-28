@@ -11,6 +11,7 @@ const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
+const { hasSeenAircraft } = await import('../db.js');
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -86,21 +87,55 @@ test('disabling a specific squawk code only suppresses that code', () => {
   assert.match(squawkNotifications[0].payload.title, /7500/);
 });
 
-test('first-seen fires exactly once for a given hex', () => {
+test('first-seen does not fire on the very first tick a hex is noticed', () => {
   const aircraft = aircraftFixture();
-  rules.evaluateAircraftRules(aircraft);
-  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft, Date.now());
+  assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 0);
+});
+
+test('first-seen still does not fire while still within the delay window', () => {
+  const aircraft = aircraftFixture();
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 1000);
+  assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 0);
+});
+
+test('first-seen fires once the delay has elapsed, exactly once even with further ticks after', () => {
+  const aircraft = aircraftFixture();
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 3000);
+  rules.evaluateAircraftRules(aircraft, start + 4000);
   assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 1);
 });
 
-test('first-seen still records the hex as seen even when disabled', () => {
+test('a hex never seen again within the delay never fires and is never recorded as seen', () => {
+  const aircraft = aircraftFixture();
+  rules.evaluateAircraftRules(aircraft, Date.now());
+  assert.equal(hasSeenAircraft(aircraft.hex), false);
+
+  // No second tick for this hex, ever -- prunePendingFirstSeen(0) simulates
+  // however much later "never" ends up meaning, evicting the still-pending
+  // entry; a further tick (as if the hex reappeared much later) is treated
+  // as a fresh first sighting rather than resuming the old one, and still
+  // doesn't fire immediately.
+  rules.prunePendingFirstSeen(0);
+  rules.evaluateAircraftRules(aircraft, Date.now());
+  assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 0);
+  assert.equal(hasSeenAircraft(aircraft.hex), false);
+});
+
+test('first-seen still records the hex as seen (once the delay elapses) even when disabled', () => {
   updateNotificationSettings({ firstSeenEnabled: false });
   const aircraft = aircraftFixture();
-  rules.evaluateAircraftRules(aircraft);
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 3000);
   assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 0);
 
   updateNotificationSettings({ firstSeenEnabled: true });
-  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft, start + 4000);
   assert.equal(sent.filter((n) => n.payload.title === 'First time seen').length, 0);
 });
 

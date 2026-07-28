@@ -33,6 +33,7 @@
 
 <div id="panel-overlay" class="hidden"></div>
 <section id="panel" class="hidden" aria-hidden="true">
+  <div id="panel-resize-handle" aria-hidden="true"></div>
   <header id="panel-header">
     <h2 id="panel-title"></h2>
     <button type="button" id="panel-close">
@@ -44,6 +45,12 @@
   </header>
   <div id="panel-content"></div>
 </section>
+
+<!-- List's Configure view, desktop side-panel layout only (see list.js's
+     "floating" mode) -- a genuinely separate window glued to #panel's left
+     edge, not nested inside it, so opening/closing it never changes #panel's
+     own size or position. Positioned/shown entirely by list.js; empty here. -->
+<section id="list-config-window" class="hidden" aria-hidden="true"></section>
 
 <section id="fullscreen-modal" class="hidden" aria-hidden="true">
   <header id="fullscreen-modal-header">

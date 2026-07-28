@@ -35,6 +35,19 @@ const defaults = {
   // refreshCoverage/ensureCoverageLayer.
   showCoverage: false,
   coverageBand: 'all',
+  // List panel column/sort configuration -- see list.js/list-fields.js.
+  // listColumns is an ordered array of list-fields.js keys; listSortLevels
+  // is an ordered array of {key, asc} (VRS-style "sort by / then by", but
+  // any number of levels rather than a fixed three). Defaults match the
+  // list's pre-configurable-columns hardcoded 4-column layout exactly, so
+  // existing installs see no visible change until they open Configure.
+  listColumns: ['flight', 'typeCode', 'altBaro', 'gs'],
+  listSortLevels: [{ key: 'flight', asc: true }],
+  listPositionFirst: false,
+  // Side panel width in px (desktop/tablet layout only, >=900px -- see
+  // panels.js's drag-to-resize handle). Matches the old fixed CSS value, so
+  // nobody who hasn't dragged the handle sees any visual change.
+  sidePanelWidth: 440,
 };
 
 function load() {

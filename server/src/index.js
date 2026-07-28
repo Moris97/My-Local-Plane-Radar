@@ -16,14 +16,14 @@ import {
   restoreFromSnapshot,
 } from './stats-history.js';
 import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeenFlight } from './db.js';
-import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule, prunePendingFirstSeen } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { pruneTokens } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
 import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
-import { distanceKm } from './range.js';
+import { distanceKm, isRangeEligible } from './range.js';
 import { recordAntennaSample, recordSignalReading, flushAntennaStatsIfDirty } from './antenna-stats.js';
 import { resolvePort } from './server-config.js';
 
@@ -90,7 +90,13 @@ function recordRangeAndRegistrationSightings() {
   for (const aircraft of getTrackedAircraft()) {
     const hasPosition = typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
 
-    if (home && hasPosition) {
+    // isRangeEligible excludes MLAT (and everything else that isn't
+    // straight ADS-B) from range/antenna sampling -- see range.js. An MLAT
+    // position doesn't say anything about *this* antenna's own reception
+    // range, so letting it feed the range-record notification, the Stats
+    // range chart, or the coverage map would inflate all three with
+    // contacts this receiver never actually heard that far out.
+    if (home && hasPosition && isRangeEligible(aircraft.sourceType)) {
       const km = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
       if (bestRangeKm === null || km > bestRangeKm) bestRangeKm = km;
 
@@ -237,6 +243,7 @@ async function main() {
 
   setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => pruneTokens(), COOLDOWN_PRUNE_INTERVAL_MS);
+  setInterval(() => prunePendingFirstSeen(), COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {
     evictStaleTrails(new Set(getTrackedAircraft().map((aircraft) => aircraft.hex)));
   }, TRAIL_EVICTION_INTERVAL_MS);

@@ -3,7 +3,7 @@ import { formatAltitude, formatSpeed, formatVerticalRate } from './units.js';
 // Emitter category (ADS-B), the subset actually useful to show -- A0/B0/C0/D*
 // mean "no info" or are reserved, so they're deliberately left unmapped and
 // just fall back to the raw code.
-const CATEGORY_LABELS = {
+export const CATEGORY_LABELS = {
   A1: 'Light',
   A2: 'Small',
   A3: 'Large',
@@ -24,7 +24,7 @@ const CATEGORY_LABELS = {
   C5: 'Line obstacle',
 };
 
-const SOURCE_TYPE_LABELS = {
+export const SOURCE_TYPE_LABELS = {
   adsb_icao: 'ADS-B (ICAO)',
   adsb_icao_nt: 'ADS-B (ICAO, non-transponder)',
   adsr_icao: 'ADS-R (ICAO)',
@@ -39,7 +39,7 @@ const SOURCE_TYPE_LABELS = {
   tisb_trackfile: 'TIS-B (track file)',
 };
 
-const EMERGENCY_LABELS = {
+export const EMERGENCY_LABELS = {
   general: 'General emergency',
   lifeguard: 'Lifeguard/medical',
   minfuel: 'Minimum fuel',
@@ -49,7 +49,7 @@ const EMERGENCY_LABELS = {
   reserved: 'Reserved',
 };
 
-const NAV_MODE_LABELS = {
+export const NAV_MODE_LABELS = {
   autopilot: 'Autopilot',
   vnav: 'VNAV',
   althold: 'Altitude hold',
@@ -58,17 +58,17 @@ const NAV_MODE_LABELS = {
   tcas: 'TCAS',
 };
 
-const SIL_TYPE_LABELS = {
+export const SIL_TYPE_LABELS = {
   unknown: 'Unknown',
   perhour: 'Per hour',
   persample: 'Per sample',
 };
 
-function num(value) {
+export function num(value) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function round(value, decimals = 0) {
+export function round(value, decimals = 0) {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
 }
@@ -78,20 +78,20 @@ function round(value, decimals = 0) {
 // its output is testable with plain `node --test`).
 const GROUND_VALUE_MARKER = 'ground';
 
-function altitudeValue(aircraft, altKey, units) {
+export function altitudeValue(aircraft, altKey, units) {
   if (altKey === 'altBaro' && aircraft.onGround) return GROUND_VALUE_MARKER;
   return formatAltitude(num(aircraft[altKey]), units);
 }
 
-function rateValue(aircraft, key, units) {
+export function rateValue(aircraft, key, units) {
   return formatVerticalRate(num(aircraft[key]), units);
 }
 
-function speedValue(aircraft, key, units) {
+export function speedValue(aircraft, key, units) {
   return formatSpeed(num(aircraft[key]), units);
 }
 
-function degreesValue(aircraft, key) {
+export function degreesValue(aircraft, key) {
   const v = num(aircraft[key]);
   return v === null ? null : `${round(v)}°`;
 }

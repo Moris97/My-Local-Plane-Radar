@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees, destinationPoint } from './range.js';
+import { distanceKm, bearingDegrees, destinationPoint, isRangeEligible } from './range.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(
@@ -99,4 +99,21 @@ test('destinationPoint normalizes longitude back into [-180, 180] when crossing 
   const { lon } = destinationPoint(0, 179.5, 90, 200); // heading east from near +180
   assert.ok(lon >= -180 && lon <= 180, `expected ${lon} to be within [-180, 180]`);
   assertClose(lon, -178.7, 0.1);
+});
+
+test('isRangeEligible accepts every real adsb_-prefixed sourceType', () => {
+  for (const sourceType of ['adsb_icao', 'adsb_icao_nt', 'adsb_other']) {
+    assert.equal(isRangeEligible(sourceType), true, sourceType);
+  }
+});
+
+test('isRangeEligible rejects MLAT and every other non-ADS-B sourceType', () => {
+  for (const sourceType of ['mlat', 'mode_s', 'adsc', 'adsr_icao', 'adsr_other', 'tisb_icao', 'tisb_other', 'tisb_trackfile', 'other']) {
+    assert.equal(isRangeEligible(sourceType), false, sourceType);
+  }
+});
+
+test('isRangeEligible rejects a missing/undefined sourceType', () => {
+  assert.equal(isRangeEligible(undefined), false);
+  assert.equal(isRangeEligible(null), false);
 });

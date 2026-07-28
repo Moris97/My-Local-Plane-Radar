@@ -3,22 +3,29 @@ import { renderListPanel } from './list.js';
 import { renderStatsPanel } from './stats.js';
 import { renderSettingsPanel } from './settings.js';
 import { renderAircraftDetailsPanel, aircraftDetailsPanelTitle } from './aircraft-panel.js';
+import { getSettings, updateSettings } from './settings-state.js';
 
 // Bottom-sheet on phones / side panel on desktop (see the @media block in
-// style.css).
+// style.css). `fill: true` (List only) makes the panel reach the true
+// screen bottom instead of stopping above the bottom bar -- see the
+// mlpr-panel-fill CSS rule, toggled below in openPanel/openFullscreenModal.
 const PANELS = {
-  list: { title: () => t('list'), render: renderListPanel },
+  list: { title: () => t('list'), render: renderListPanel, fill: true },
   settings: { title: () => t('settings'), render: renderSettingsPanel },
   // Not tied to a bottom-bar button -- opened contextually from the
   // "show more details" button in an aircraft's popup (see app.js).
   aircraft: { title: aircraftDetailsPanelTitle, render: renderAircraftDetailsPanel },
 };
 
-// Full-screen instead -- currently just Stats, which is getting more
-// screen-hungry options later; kept as its own registry (not shoehorned
-// into PANELS) so future full-screen views don't need special-casing here.
+// Full-screen instead -- currently Stats and the List's own "open
+// fullscreen" button (see list.js), kept as its own registry (not
+// shoehorned into PANELS) so future full-screen views don't need
+// special-casing here. listFull renders the exact same list.js view as
+// PANELS.list, just with more screen real estate -- not a separate
+// column/sort configuration.
 const FULLSCREEN_MODALS = {
   stats: { title: () => t('stats'), render: renderStatsPanel },
+  listFull: { title: () => t('list'), render: (el) => renderListPanel(el, { fullscreen: true }), fill: true },
 };
 
 const barButtons = document.querySelectorAll('.mlpr-bar-btn');
@@ -32,6 +39,79 @@ const modalEl = document.getElementById('fullscreen-modal');
 const modalTitleEl = document.getElementById('fullscreen-modal-title');
 const modalContentEl = document.getElementById('fullscreen-modal-content');
 const modalCloseBtn = document.getElementById('fullscreen-modal-close');
+const resizeHandleEl = document.getElementById('panel-resize-handle');
+
+const SIDE_PANEL_MIN_WIDTH = 320;
+const SIDE_PANEL_MAX_WIDTH = 900;
+const SIDE_PANEL_LAYOUT_QUERY = '(min-width: 900px)';
+
+// Exported so list.js can decide, alongside the same breakpoint, whether its
+// Configure view has room to float as a separate window next to #panel (see
+// list.js's "floating" mode) or must fall back to swapping the table out
+// in place instead (mobile bottom sheet, no room for a second window at all).
+export function isSidePanelLayout() {
+  return window.matchMedia(SIDE_PANEL_LAYOUT_QUERY).matches;
+}
+
+// Applies the persisted width (drag-to-resize, see below) as an inline
+// style -- only in the >=900px side-panel layout, where #panel has an
+// actual "width" to speak of; below that it's a full-width bottom sheet, and
+// an inline width here would override that (inline styles win over the
+// external stylesheet's media-query rules regardless of specificity) and
+// wrongly pin it to a fixed pixel width. Called on every panel open and on
+// window resize, so crossing the breakpoint with a panel already open
+// (e.g. rotating a tablet, or resizing a desktop browser window) still
+// lands on the right layout. Deliberately the *only* thing that ever sets
+// #panel's width -- List's Configure view used to also grow it temporarily,
+// but that was reverted (2026-07-28, explicit request): opening/closing
+// Configure must never change #panel's width, position, or any of its
+// buttons, full stop. See list.js's separate #list-config-window instead.
+function applySidePanelWidth() {
+  if (!isSidePanelLayout()) {
+    panelEl.style.width = '';
+    return;
+  }
+  const maxWidth = Math.min(SIDE_PANEL_MAX_WIDTH, window.innerWidth - 40);
+  panelEl.style.width = `${Math.min(maxWidth, getSettings().sidePanelWidth)}px`;
+}
+
+window.addEventListener('resize', applySidePanelWidth);
+
+resizeHandleEl.addEventListener('pointerdown', (event) => {
+  if (!isSidePanelLayout()) return;
+  event.preventDefault();
+  resizeHandleEl.setPointerCapture(event.pointerId);
+  resizeHandleEl.classList.add('mlpr-resize-active');
+  // #panel is right-docked (right:0, left:auto in the side-panel layout) --
+  // its right edge stays fixed while dragging, so width is just how far the
+  // pointer is from that fixed edge, not from the (moving) left edge.
+  const fixedRight = panelEl.getBoundingClientRect().right;
+  const maxWidth = Math.min(SIDE_PANEL_MAX_WIDTH, window.innerWidth - 40);
+  // Dragging across the panel's own text/content would otherwise select it
+  // like any other drag gesture -- standard resize-handle UX is to suppress
+  // that for the duration of the drag.
+  const previousUserSelect = document.body.style.userSelect;
+  document.body.style.userSelect = 'none';
+
+  function widthFor(pointerEvent) {
+    return Math.min(maxWidth, Math.max(SIDE_PANEL_MIN_WIDTH, fixedRight - pointerEvent.clientX));
+  }
+
+  function onMove(moveEvent) {
+    panelEl.style.width = `${widthFor(moveEvent)}px`;
+  }
+
+  function onUp(upEvent) {
+    resizeHandleEl.removeEventListener('pointermove', onMove);
+    resizeHandleEl.removeEventListener('pointerup', onUp);
+    resizeHandleEl.classList.remove('mlpr-resize-active');
+    document.body.style.userSelect = previousUserSelect;
+    updateSettings({ sidePanelWidth: widthFor(upEvent) });
+  }
+
+  resizeHandleEl.addEventListener('pointermove', onMove);
+  resizeHandleEl.addEventListener('pointerup', onUp);
+});
 
 // This module (imported by app.js, evaluated before app.js's own top-level
 // code including the WebGL-dependent `new maplibregl.Map(...)`) is the
@@ -146,7 +226,9 @@ export async function openPanel(name) {
   contentEl.innerHTML = '';
 
   panelEl.classList.remove('hidden');
+  panelEl.classList.toggle('mlpr-panel-fill', !!entry.fill);
   panelEl.setAttribute('aria-hidden', 'false');
+  applySidePanelWidth();
   overlayEl.classList.remove('hidden');
   setActiveBarButton(name);
   // Moves focus into the dialog immediately (not gated on the render below,
@@ -184,7 +266,7 @@ function closePanel({ fromPopstate = false } = {}) {
   }
 }
 
-async function openFullscreenModal(name) {
+export async function openFullscreenModal(name) {
   const entry = FULLSCREEN_MODALS[name];
   if (!entry) return;
 
@@ -206,6 +288,7 @@ async function openFullscreenModal(name) {
   modalContentEl.innerHTML = '';
 
   modalEl.classList.remove('hidden');
+  modalEl.classList.toggle('mlpr-panel-fill', !!entry.fill);
   modalEl.setAttribute('aria-hidden', 'false');
   setActiveBarButton(name);
   modalCloseBtn.focus();

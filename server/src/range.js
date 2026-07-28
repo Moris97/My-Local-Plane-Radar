@@ -1,5 +1,22 @@
 const EARTH_RADIUS_KM = 6371;
 
+// Whether an aircraft's *position* says anything meaningful about this
+// receiver's own reception range. Only true ADS-B ("adsb_icao",
+// "adsb_icao_nt", "adsb_other") qualifies -- MLAT positions are computed
+// from several receivers' message timing, so a distant MLAT contact can
+// mean stations on the other side of the country triangulated it, not that
+// this antenna actually heard it that far out (reported live, 2026-07-28:
+// a Stats/coverage-map range figure inflated by exactly this). Everything
+// else (mlat, mode_s, adsc, adsr_*, tisb_*, other) is excluded the same
+// way, simply by not matching the adsb_ prefix -- not an oversight, that's
+// the literal filter asked for. Used to gate range/antenna sampling only;
+// deliberately not applied anywhere position itself is displayed (the map,
+// the details panel) -- an MLAT contact is still a real aircraft, just not
+// trustworthy evidence of *this* antenna's range.
+export function isRangeEligible(sourceType) {
+  return typeof sourceType === 'string' && sourceType.startsWith('adsb_');
+}
+
 function toRadians(degrees) {
   return (degrees * Math.PI) / 180;
 }

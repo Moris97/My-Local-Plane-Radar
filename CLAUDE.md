@@ -327,21 +327,30 @@ not a special case that bypasses it.
     credit is included anyway per explicit request, not a license
     obligation. Offline mode (Natural Earth, public domain) needs no data
     attribution, hence only the MapLibre half shows.
-  - **Position**: pinned to the true bottom-right corner (`bottom: 6px`) only
-    on screens `>=720px` wide (`public/css/style.css`, reusing the
+  - **Position**: pinned to the true bottom-**left** corner (`bottom: 6px`)
+    only on screens `>=720px` wide (`public/css/style.css`, reusing the
     breakpoint the bottom-sheet/side-panel split already uses) — below that
     it stays raised above the bottom bar's height
     (`calc(var(--bottom-bar-height) + 4px)`), the old default for every
     width. Below ~420px wide, a full-length credit pinned to the literal
-    corner collides with the Settings pill button, since the bottom bar's
-    buttons are centered and leave little room beside a right-anchored
-    corner element (measured empirically, not guessed — see the git history
+    corner collides with the List pill button, since the bottom bar's
+    buttons are centered and leave little room beside a corner element on
+    either side (measured empirically, not guessed — see the git history
     for this line). This was **not** an issue before the bottom bar was
     redesigned as floating pills (see below): the old opaque full-width bar
     was the reason for the raised position everywhere, and simply hadn't
     been revisited when that redesign made the bar transparent, which is
     what the raised position on wide screens looked like a bug (floating in
     empty space above the actual corner) rather than a deliberate choice.
+    **Moved from the right to the left edge 2026-07-28**, when the List
+    panel gained its own `.mlpr-panel-fill` (see below): on desktop the List
+    side panel docks to the *right* edge of the screen and, once it was
+    extended to reach the true bottom, would otherwise sit directly under a
+    right-anchored credit. Confirmed against OSM's own attribution
+    guidelines (osmfoundation.org/wiki/Licence/Attribution_Guidelines:
+    "While the lower right corner is traditional, any corner of the map is
+    acceptable") that this isn't a license constraint — moving corners is
+    purely to dodge the new overlap.
 - Icons: inline SVG only, authored in-repo. No icon libraries, icon fonts, or
   CDNs — everything must work fully offline.
 
@@ -410,6 +419,187 @@ not a special case that bypasses it.
   marker exactly where it last was rather than deleting it — the regular
   fade/forget timers retire it on schedule if a real position never
   returns.
+- **List columns and sort order are user-configurable** (2026-07-28,
+  requested to match Virtual Radar Server/tar1090-style flexibility): a
+  "Configure" button at the top of the List panel (`#mlpr-list-configure`)
+  swaps the table view for an in-place config view within the same
+  container (`display:none` toggle, same pattern `settings.js` already uses
+  for its tab panels — no separate panel/modal machinery needed). **Every
+  edit auto-saves** — no Save/Cancel step (removed after user feedback
+  2026-07-28: a draft-then-Save step just added friction here). Each row
+  control's own handler calls `updateSettings()` directly, then
+  `renderConfigView()` re-renders the whole config view fresh from
+  `getSettings()` — safe to do unconditionally because it's only ever
+  triggered by a `<select>`'s `change` (fires once a choice is already
+  committed, unlike a text input's `input` event mid-keystroke) or a button
+  click, never mid-interaction. The underlying table
+  (`drawTable`, subscribed to `onSettingsChange`) updates live alongside it
+  for the same reason. Column *and* sort-level rows both get ↑/↓ reorder
+  buttons plus Remove (disabled at one remaining column/level — an empty
+  table or a fully-unordered list aren't useful states) — sort levels
+  originally only had Remove, reordering meant deleting and re-adding from
+  scratch, fixed on the same feedback round as the auto-save change.
+  Persisted per-browser in `settings-state.js`: `listColumns` (ordered array
+  of `public/js/list-fields.js` keys), `listSortLevels` (ordered array of
+  `{key, asc}` — VRS's fixed "sort by / then by / then by" three-line UI,
+  generalized to any number of add/removable levels instead), and
+  `listPositionFirst` (aircraft with a known position sort before those
+  without, applied as a pre-sort grouping ahead of the configured levels).
+  Defaults match the pre-configurable 4-column layout exactly
+  (`flight`/`typeCode`/`altBaro`/`gs`, single ascending flight sort), so
+  existing installs see no visible change until they open Configure.
+  Clicking a column header still gives quick single-column sort like
+  before, but now **persists** through the same `listSortLevels` setting
+  instead of resetting on reload.
+  **Configure is a genuinely separate, independent window in the desktop
+  side-panel layout — `#panel` itself never changes size, position, or
+  content when it opens or closes** (2026-07-28, after two earlier same-day
+  attempts: first a passive "only show side by side if the panel happens to
+  already be wide enough" check, then an auto-grow-the-panel version — both
+  wrong per explicit follow-up feedback; the actual ask was that `#panel`,
+  its width, and its own "Configure"/"Open fullscreen" buttons must be
+  completely unaffected by opening Configure, full stop). `list.js`'s
+  `currentMode()` picks one of three presentations:
+  - **`'floating'`** (`!fullscreen && isSidePanelLayout()`, the normal
+    desktop case): Configure renders into `#list-config-window` — a
+    top-level `<section>` in `index.html`, a *sibling* of `#panel`, not
+    nested inside it anywhere. `positionConfigWindow()` glues its right
+    edge to `#panel`'s actual left edge (`getBoundingClientRect()`, not
+    recomputed from settings — correct whether that edge is at the default
+    width, a persisted drag-resize, or mid-drag) plus a small
+    `CONFIG_WINDOW_GAP` (12px), so it reads as touching-but-separate rather
+    than fused. Since it's a different DOM element entirely, `#panel` is
+    structurally incapable of changing when this opens — not just
+    "unlikely to," genuinely can't.
+  - **`'inline'`** (`fullscreen`, i.e. `FULLSCREEN_MODALS.listFull`): no
+    "beside it" to float into (the modal already spans the full available
+    width) but doesn't usually need one — `#mlpr-list-config-view` renders
+    *nested* in `#mlpr-list-body` instead, `row-reverse` in CSS putting it
+    on the left of the table, shown once the modal's own measured width
+    (`ResizeObserver` on `container`) clears `FULLSCREEN_SIDE_BY_SIDE_MIN_
+    WIDTH` (760px) — falls back to swapping on a narrow phone even in
+    fullscreen, where there's genuinely no room either way.
+  - **`'swap'`** (mobile bottom sheet, not fullscreen): `#mlpr-list-config-
+    view` replaces the table in place — the original, simplest behavior,
+    unchanged since this feature's first version.
+  `updateLayout()` computes the mode fresh each call and only re-renders
+  into a *different* target than last time (`activeConfigTarget`) — covers
+  both a plain open (target goes from `null` to real) and a mode change
+  mid-session (e.g. the browser window crossing the side-panel breakpoint
+  while Configure was already open in 'floating' mode). One `ResizeObserver`
+  on `container` drives both the 'floating' case's repositioning (dragging
+  `#panel`'s resize handle changes `#panel-content`'s width too, which is
+  what `container` actually is here) and the 'inline' case's width
+  measurement — reacting to a `container` resize covers both reasons to
+  care, so one observer is enough.
+  Whenever list and config are both visible ('floating' or wide 'inline'),
+  a column/sort change's effect on the table is visible immediately without
+  closing Configure first to check — this part falls out of the auto-save
+  behavior above for free, nothing about *when* settings commit changed.
+  **Closing**: re-clicking "Configure" *toggles* it closed (`toggleConfigView`,
+  button gets an `active` class reusing `.mlpr-bar-btn.active`'s look as the
+  visual cue for which action it currently performs), and a small `✕` in the
+  config window's own header (`#mlpr-listconfig-close`) does the same thing
+  as a second, more discoverable affordance — both call the identical
+  `closeConfigView()`.
+  **Visually, list and config read as two independent windows stuck
+  together, not one panel with two columns**: `#mlpr-list-config-view` and
+  `#list-config-window` share one CSS rule for the "independent window"
+  look (background/border/rounded corners, `#0b1116` on `#1c2e3a`, matching
+  `.mlpr-stat-chart` cards elsewhere) — `#list-config-window` additionally
+  gets `position: fixed` (glued to `#panel` as above) since it's the
+  genuinely-separate version; `#mlpr-list-config-view` stays in normal
+  document flow since it's still nested (the 'inline'/'swap' cases).
+  `.mlpr-listconfig-header` reads as that card's own title bar (negative
+  margin canceling the card's own padding just for that strip, so the
+  `border-bottom` spans the full width — same shape/role as `#panel-header`
+  one level up). In 'inline' mode specifically, `#mlpr-list-view` gets the
+  identical card treatment too, so both sides are visually symmetric. The
+  toolbar (`.mlpr-list-toolbar`, "Configure"/"Open fullscreen") is a sibling
+  of `#mlpr-list-body` and is never touched by any layout/mode logic, so it
+  can't move, duplicate, or change between the two windows.
+  **Two `<fieldset>` gotchas hit while building the narrow (340px)
+  `#list-config-window`**, both worth remembering for any future
+  narrow-container work: (1) a sort row (two `<select>`s + up/down/remove
+  buttons) overflowed straight past the window's edge instead of its
+  `<select>`s shrinking, despite `flex: 1; min-width: 0` on them —
+  `<fieldset>` has a browser-default `min-width: min-content` that ignores
+  its actual container width and keeps expanding to fit its content's
+  intrinsic minimum, so `.mlpr-settings-group` (the fieldset class both
+  "Columns" and "Sort order" use) now has an explicit `min-width: 0` to
+  override that; harmless everywhere else that class is used, since
+  Settings' own tabs are never this width-constrained. (2) Once that was
+  fixed, the row still didn't fit with a full-text "Remove" button — both
+  config sections' remove buttons became icon-only (`✕`, `aria-label`
+  keeps the real word) to match the already-icon-only ↑/↓ buttons, which is
+  what actually made the row fit.
+  `list-fields.js` is a flat catalog of every field the list can show —
+  the same field set `aircraft-details.js`'s `CORE_SPEC`/`EXTRA_SPEC`
+  expose in the aircraft details panel, flattened out of that file's
+  tile/cluster grouping (a details-panel-only display concern), plus two
+  additions: `distance` (home location to aircraft position, reusing
+  `geo.js`'s existing `distanceKm` — no new distance math) and `military`
+  (already existed as a details-panel flag hidden unless true; here it's an
+  always-visible boolean column instead, since a blank table cell reads as
+  missing data in a way an omitted panel tile doesn't). Reuses
+  `aircraft-details.js`'s formatting helpers and label maps directly (now
+  exported from there) rather than duplicating them. Each catalog entry
+  separates `format()` (display string, or a raw sentinel like
+  `GROUND_MARKER` that `list.js`'s `formatCell` — not the catalog itself,
+  which stays i18n-free like `aircraft-details.js` — translates via `t()`,
+  same split `aircraft-panel.js` already uses for the details panel) from
+  `sortValue()` (the raw comparable value), mirroring the sort/display
+  split the List already had for altitude before this catalog existed.
+  Dropdowns populate from `sortedFieldOptions()`, alphabetized by the
+  *current-language* translated label as requested.
+  An "Open fullscreen" button opens the exact same `renderListPanel` view in
+  `panels.js`'s `FULLSCREEN_MODALS.listFull` — same column/sort
+  configuration, just more screen space, not a separate config. Inside
+  fullscreen, that button is replaced by an "Exit fullscreen" one
+  (`fullscreen` param on `renderListPanel` picks which of the two renders)
+  that calls the now-exported `openPanel('list')` to switch back to the
+  small panel/bottom sheet — originally missing entirely (no way back short
+  of closing the whole thing and reopening from the bottom bar), caught in
+  the same feedback round as the auto-save change above. Uses the identical
+  "just switch, don't push/pop history" path `panels.js` already has for
+  List↔Stats (`openPanel` calls `hideModalUI()` first), so it doesn't leave
+  a stray history entry. Both `PANELS.list` and
+  `FULLSCREEN_MODALS.listFull` carry a `fill: true` flag that
+  `openPanel`/`openFullscreenModal` turn into a `mlpr-panel-fill` class on
+  open: List (and only List — Settings/Stats/aircraft details don't get
+  this) now reaches the true screen bottom instead of stopping above the
+  bottom bar, same as the map itself already does, so the table gets the
+  full available height instead of leaving a wasted strip below it. The
+  floating bottom-bar pills end up on top of the last rows (same visual
+  relationship they already have with the map); `#panel.mlpr-panel-fill
+  #panel-content` gets extra bottom padding so those rows stay reachable by
+  scrolling past the pills. Selector specificity (an id+class selector
+  beats the plain `#panel` id selector inside the `@media (min-width:
+  900px)` desktop-layout block) is what makes one small rule apply
+  correctly on both the mobile and desktop layouts without duplicating it
+  inside that media query.
+- **The side panel's width is drag-resizable** (2026-07-28, requested once
+  List's column count grew past what the fixed 440px side panel could show
+  comfortably) — `#panel-resize-handle` (`index.html`, a thin strip on
+  `#panel`'s left edge, only shown/active in the >=900px side-panel layout)
+  wired up in `panels.js` with plain `pointerdown`/`pointermove`/`pointerup`
+  (`setPointerCapture` so the drag tracks even if the cursor outruns the
+  8px-wide handle). `#panel` is right-docked in that layout (`right: 0`
+  implicit from the base rule, `left: auto` in the `>=900px` override), so
+  width is computed from the *fixed* right edge captured once at drag-start
+  minus the current pointer X, not from the (moving) left edge. Persisted
+  per-browser as `sidePanelWidth` in `settings-state.js` (default 440,
+  matching the old hardcoded CSS value byte-for-byte so nobody who hasn't
+  dragged sees a change), clamped to `[320, min(900, viewport width − 40)]`.
+  Applied as an inline `style.width` on every panel open and on window
+  resize (`applySidePanelWidth`) — **deliberately gated on
+  `matchMedia('(min-width: 900px)').matches`**, cleared to `''` otherwise:
+  an inline style wins over the stylesheet's media-query rules regardless
+  of specificity, so applying it unconditionally would break the mobile
+  full-width bottom sheet by pinning it to a fixed pixel width. This is
+  shared `#panel` chrome, not List-specific — Settings and the aircraft
+  details panel get the same resizable width for free, which is fine (more
+  room never hurts) rather than something to special-case away.
 - List and Settings are bottom sheets on phones, a side panel on large
   screens; closable via X, Android/iOS back-gesture, click on the overlay,
   or **Escape** (`panels.js`'s top-level `keydown` listener — closes
@@ -467,7 +657,25 @@ not a special case that bypasses it.
   / 2) + 7`, not a fixed constant) — MapLibre's default popup offset is 0,
   which anchors the popup's tip exactly on the aircraft's coordinate, and
   since the marker is centered on that same point, an unoffset popup covers
-  half the icon.
+  half the icon. `showInfoPopup` **reuses the existing popup instance**
+  (`setLngLat`/`setHTML` on `activePopup`) when it's already showing the
+  currently-selected aircraft, only `.remove()`-ing and creating a genuinely
+  new one when the selection changes. It used to unconditionally recreate
+  the popup on every call, which `applyAircraftUpdate` triggers once per
+  position tick for the selected aircraft (so roughly once a second for
+  active traffic) — MapLibre's `Popup` defaults to `focusAfterOpen: true`,
+  and `.addTo()` is what triggers that focus grab, so recreating it that
+  often kept silently stealing focus away from anything else on the page.
+  Reported live (2026-07-28): impossible to pick an option from an open
+  native `<select>` (List's Configure view, but this would have hit *any*
+  focusable control anywhere in the app) while a popup's aircraft kept
+  updating in the background — every tick force-closed the dropdown, since
+  browsers close an open `<select>` when focus moves elsewhere.
+  `setLngLat`/`setHTML` on an already-mounted popup don't call `.addTo()`
+  again, so reusing the instance avoids re-triggering the grab; a new
+  module-level `activePopupHex` (kept in sync everywhere `activePopup` is
+  cleared) is what lets `showInfoPopup` tell "same aircraft, just
+  refresh in place" apart from "different aircraft, need a new popup".
 - **Icon size is user-adjustable** (`aircraftIconSize` in `settings-state.js`,
   default 40px, a Settings → Aircraft slider, range 24–64px) — applied via a
   single CSS custom property (`--mlpr-plane-size`, set on `documentElement`
@@ -749,7 +957,21 @@ persisted in the SQLite `config` table — see `db.js`'s JSON config helpers).
 Live triggers: squawk 7500/7600/7700, first-time-seen aircraft (checked
 against the `seen_aircraft` table — grows for the life of the install, bounded
 by distinct aircraft ever seen, not a "position history" table so it's fine
-under hard rule 4), new all-time range record (compared against a
+under hard rule 4) **delayed by `FIRST_SEEN_DELAY_MS` (3s, a few poll ticks)**
+before it actually notifies or writes to `seen_aircraft` — readsb can take a
+tick or two to decode an aircraft's callsign/position after first hearing its
+Mode-S address, and firing immediately produced notifications like "c48e893"
+or "4892c6 · 484 kt" with fields still missing (reported live, 2026-07-27;
+fixed 2026-07-28). `rules.js`'s in-memory `pendingFirstSeen` map (hex → first-
+noticed timestamp, same shape as `cooldown.js`'s `lastNotifiedAt`, pruned on
+the same hourly interval via `prunePendingFirstSeen`) tracks this; a hex that
+never gets a second look within the delay (a one-off Mode-S blip) simply never
+notifies and is never written to `seen_aircraft` either — arguably more
+correct than the old immediate-fire behavior, since we never actually got a
+good-enough look at it. `evaluateAircraftRules` takes an optional second `now`
+argument (defaults to the real clock) purely so tests can exercise the delay
+deterministically without real waits or fake timers; the one real call site
+(`index.js`) never passes it. New all-time range record (compared against a
 `allTimeMaxRangeKm` config value, fed by `stats.json`'s own `max_distance` —
 no per-aircraft distance math needed), and a **watch list**
 (`watchlist.js`): entries `{id, matchType: type|registration|flight,
@@ -878,6 +1100,24 @@ This makes the number robust against a single lucky MLAT spike inflating an
 otherwise-ordinary day. `getRangeSummary()` in `stats-history.js` always
 includes the current in-progress minute so a read is never more than ~60s
 stale.
+
+**MLAT is now excluded from this sampling entirely** (2026-07-28,
+`range.js`'s `isRangeEligible(sourceType)`, true only for a `sourceType`
+starting with `adsb_`) — an MLAT position is computed from *several*
+receivers' message timing, so a "contact" can be hundreds of km away because
+stations elsewhere in the country triangulated it, not because this antenna
+actually heard it that far out; the top-10%-average above blunts a single
+MLAT *spike* but a receiver in an MLAT-dense area could see its typical
+`range_top_avg_km` (and the antenna coverage map/bar chart, `recordAntennaSample`
+in `index.js`, gated by the same check in the same loop) skewed by MLAT
+contacts routinely, not just as an outlier. **This does not touch the
+all-time-max-range notification or Stats' "Od początku" all-time max range
+tile** — both still read `getAllTimeMaxRangeKm()` / `stats.json`'s
+`total.max_distance` straight from readsb (see the paragraph above), a
+single pre-aggregated number with no per-aircraft breakdown we could filter
+even if we wanted to; only the figures actually built from our own
+per-aircraft Haversine loop (`range_top_avg_km` and the antenna stats) are
+in scope here.
 
 ### Registration visit-tracking (`server/src/stats-registrations.js`)
 

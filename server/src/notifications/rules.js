@@ -12,6 +12,21 @@ const SQUAWK_MEANINGS = {
 
 const ALL_TIME_MAX_RANGE_KEY = 'allTimeMaxRangeKm';
 
+// readsb can take a poll tick or two to decode an aircraft's callsign and
+// position after first hearing its Mode-S address -- firing "first time
+// seen" on the very first tick produced notifications like "c48e893" or
+// "4892c6 · 484 kt" with fields still missing (reported live, 2026-07-27;
+// TODO.md tracked this as deferred until now). hex -> ms epoch of the first
+// tick this hex was noticed but not yet notified/recorded -- in-memory
+// only, same as cooldown.js's lastNotifiedAt (hard rule 6: fine to lose on
+// restart, a still-pending hex just gets treated as new again). A hex that
+// never gets a second look within the delay (a one-off Mode-S blip) simply
+// never resolves -- no notification, and never written to seen_aircraft
+// either, which is arguably more correct than the old immediate-fire
+// behavior: we never actually got a good look at it.
+const FIRST_SEEN_DELAY_MS = 3000; // a few POLL_INTERVAL_MS (1000ms) ticks
+const pendingFirstSeen = new Map();
+
 let notifySender = sendNtfyNotification;
 
 export function setNotifySender(fn) {
@@ -69,7 +84,10 @@ function aircraftLabel(aircraft) {
   return parts.join(' · ');
 }
 
-export function evaluateAircraftRules(aircraft) {
+// `now` is injectable (defaults to the real clock) purely so tests can
+// exercise FIRST_SEEN_DELAY_MS deterministically without real waits or
+// fake timers -- index.js's only call site never passes it.
+export function evaluateAircraftRules(aircraft, now = Date.now()) {
   const settings = getNotificationSettings();
 
   if (settings.squawkEnabled && aircraft.squawk && settings.squawkCodes[aircraft.squawk]) {
@@ -85,14 +103,20 @@ export function evaluateAircraftRules(aircraft) {
   }
 
   if (!hasSeenAircraft(aircraft.hex)) {
-    markAircraftSeen(aircraft.hex);
-    if (settings.firstSeenEnabled) {
-      notify({
-        title: 'First time seen',
-        message: aircraftLabel(aircraft),
-        priority: 3,
-        tags: ['eye'],
-      });
+    const firstNoticedAt = pendingFirstSeen.get(aircraft.hex);
+    if (firstNoticedAt === undefined) {
+      pendingFirstSeen.set(aircraft.hex, now);
+    } else if (now - firstNoticedAt >= FIRST_SEEN_DELAY_MS) {
+      pendingFirstSeen.delete(aircraft.hex);
+      markAircraftSeen(aircraft.hex);
+      if (settings.firstSeenEnabled) {
+        notify({
+          title: 'First time seen',
+          message: aircraftLabel(aircraft),
+          priority: 3,
+          tags: ['eye'],
+        });
+      }
     }
   }
 
@@ -107,6 +131,17 @@ export function evaluateAircraftRules(aircraft) {
         tags: ['eyes'],
       });
     }
+  }
+}
+
+// Evicts pending hexes that never resolved within maxAgeMs (a one-off
+// Mode-S blip that was never heard again) -- otherwise pendingFirstSeen
+// would grow unbounded over an install's lifetime. Mirrors cooldown.js's
+// pruneCooldowns; called on the same hourly interval from index.js.
+export function prunePendingFirstSeen(maxAgeMs = 10 * 60 * 1000) {
+  const now = Date.now();
+  for (const [hex, at] of pendingFirstSeen) {
+    if (now - at > maxAgeMs) pendingFirstSeen.delete(hex);
   }
 }
 
