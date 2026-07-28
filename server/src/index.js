@@ -61,6 +61,12 @@ async function pollOnce(broadcast) {
         altBaro: aircraft.altBaro,
         onGround: aircraft.onGround,
         t: Date.now(),
+        // Lets the client (trail.js) tell an MLAT-derived position apart
+        // from a genuine ADS-B one when it seeds a trail from
+        // GET /api/trails -- MLAT-only smoothing/anomaly-rejection needs
+        // this for points recorded before the current tab was even open,
+        // not just ones arriving live over the WebSocket.
+        sourceType: aircraft.sourceType,
       });
     }
   }

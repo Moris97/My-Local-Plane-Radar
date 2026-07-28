@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 import { identifyOperator, resolveAirlineIcao } from './airline-lookup.js';
 
@@ -62,4 +62,32 @@ test('trailing spaces in the callsign (as readsb sends it) do not break matching
   const result = identifyOperator({ flight: 'LOT283  ', registration: null, military: false }, airlines());
   assert.equal(result.kind, 'airline');
   assert.equal(result.icao, 'LOT');
+});
+
+test('an unmatched airline prefix is logged once, not once per aircraft/tick', () => {
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    // Distinct prefix, not used by any other test in this file -- the
+    // dedup Set is module-level and persists for the process/test-file
+    // lifetime, so reusing e.g. "ZZZ" here would already be logged from an
+    // earlier test and this assertion would see zero new calls.
+    identifyOperator({ flight: 'QQQ123', registration: null, military: false }, airlines());
+    identifyOperator({ flight: 'QQQ123', registration: null, military: false }, airlines());
+    identifyOperator({ flight: 'QQQ456', registration: null, military: false }, airlines());
+    assert.equal(warn.mock.callCount(), 1);
+    assert.match(warn.mock.calls[0].arguments[0], /QQQ/);
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test('a different unmatched prefix logs its own, separate warning', () => {
+  const warn = mock.method(console, 'warn', () => {});
+  try {
+    identifyOperator({ flight: 'WWW123', registration: null, military: false }, airlines());
+    assert.equal(warn.mock.callCount(), 1);
+    assert.match(warn.mock.calls[0].arguments[0], /WWW/);
+  } finally {
+    warn.mock.restore();
+  }
 });

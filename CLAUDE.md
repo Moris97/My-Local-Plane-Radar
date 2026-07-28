@@ -517,7 +517,17 @@ not a special case that bypasses it.
   identical card treatment too, so both sides are visually symmetric. The
   toolbar (`.mlpr-list-toolbar`, "Configure"/"Open fullscreen") is a sibling
   of `#mlpr-list-body` and is never touched by any layout/mode logic, so it
-  can't move, duplicate, or change between the two windows.
+  can't move, duplicate, or change between the two windows. The shared
+  `#mlpr-list-config-view, #list-config-window` rule also needs its own
+  explicit `color` — `#mlpr-list-config-view` already inherits a readable
+  one from `#panel-content`, so this was a no-op there, but
+  `#list-config-window` is a genuinely separate top-level element with no
+  such ancestor; without it, anything inside relying on inherited color
+  (e.g. the "Show aircraft with a known position first" checkbox label —
+  everything else nearby happens to set its own color explicitly) fell back
+  to the browser default black, invisible on the near-black card background.
+  Reported live, 2026-07-28; same category of bug as the OpenFreeMap
+  attribution's missing `color` documented above.
   **Two `<fieldset>` gotchas hit while building the narrow (340px)
   `#list-config-window`**, both worth remembering for any future
   narrow-container work: (1) a sort row (two `<select>`s + up/down/remove
@@ -889,6 +899,41 @@ photo fetch, and is the piece wired into `panels.js`.
   one seam per second of flight. `tolerance: 0` on the source (disabling
   geojson-vt simplification) is still needed as well — the two address
   different halves of the same symptom, don't remove either.
+- **MLAT-derived trail points get anomaly-filtered and smoothed; ADS-B
+  points never do** (2026-07-28, `public/js/trail.js`'s
+  `filterMlatAnomalies`/`smoothMlatPositions`, both applied inside
+  `trailFeaturesFor` — so both the server-seeded history and points
+  recorded live from WS deltas get the same treatment, without duplicating
+  the logic server-side too). MLAT positions are computed from several
+  receivers' message timing rather than broadcast directly, so they can
+  jump in ways a real aircraft never would (jagged zigzags, false sharp
+  turns), especially with weak receiver geometry. Every point carries an
+  `isMlat` flag now (`sourceType === 'mlat'`, threaded through all the way
+  from `index.js`'s `recordPosition` call — the server-side ring buffer
+  stores `sourceType` per point purely so a freshly-opened tab's *seeded*
+  history can also be classified, not just points arriving live).
+  `filterMlatAnomalies` is a single oldest-to-newest streaming pass: an
+  ADS-B point (or a gap marker) is always kept and becomes the new
+  reference; an MLAT point is judged against the two most recent *accepted*
+  points (not just the raw previous one, so a run of several bad samples in
+  a row doesn't each get compared against an already-rejected neighbor) and
+  dropped outright — never just flagged — if it implies either an
+  unrealistic speed (`MLAT_MAX_SPEED_KMH`, ~1200 kt, deliberately generous,
+  only catches genuine multi-hundred-km jumps) or an unrealistic turn rate
+  (`MLAT_MAX_TURN_RATE_DEG_PER_SEC`, 10°/s — a "standard rate" airliner turn
+  is ~3°/s, even a hard fighter break is well under this). The turn-rate
+  check is skipped entirely when either leg is shorter than
+  `MLAT_MIN_TURN_CHECK_KM` (300 m) — GPS/MLAT-scale positional noise alone
+  can imply a huge bearing swing between two points that close together,
+  which isn't a real "turn" to reject. `smoothMlatPositions` runs second,
+  over whatever survives filtering: a simple weighted 3-point moving
+  average (`prev + 2×point + next` / 4) that only ever *moves* an MLAT
+  point — ADS-B points are read as trustworthy anchors for an adjacent
+  MLAT point's average but are never themselves modified, and an MLAT point
+  at a trail's start/end or next to a gap (only one real neighbor) is left
+  alone rather than half-averaged. Both passes are cheap no-ops on an
+  all-ADS-B trail (the common case), so there's no need to gate them on
+  whether MLAT is actually present.
 - **Trail history is server-side** (`server/src/trail-history.js`), not just
   accumulated in the browser tab: an in-memory (never SQLite — hard rule 4 is
   about exactly this, raw position history) capped ring buffer per hex,
@@ -1163,8 +1208,18 @@ Served to the browser via `GET /api/airlines`
 if the file doesn't exist yet — e.g. offline install before the fetch
 script has run). **Never commit airline logos** — trademark risk, and not
 needed since the doughnut charts use plain color swatches + text, not logos.
-Logging unmatched 3-letter prefixes for future review was discussed as a
-nice-to-have but not implemented — see `TODO.md`.
+**Unmatched 3-letter prefixes are logged** (2026-07-28, implemented after
+being deferred as a nice-to-have on 2026-07-27): `identifyOperator` calls
+`logUnmatchedPrefixOnce(icao, callsign)` whenever a well-formed
+airline-shaped callsign's prefix isn't in the loaded `airlines` map
+(`kind: 'airline_unknown'`). A module-level `Set` dedupes by prefix so a
+frequently-seen unmatched aircraft doesn't spam the log once per poll
+tick — only the *first* time a given prefix is seen per process lifetime
+gets a `console.warn`, so `journalctl -u mlpr@...` shows what's missing
+from OpenFlights' data without drowning in repeats. Plain `console.warn`
+rather than threading a pino logger in from `server.js` — this module is a
+pure classifier several layers away from the Fastify instance, not worth
+the interface churn for a diagnostic like this.
 
 ### Chart rendering (`public/js/chart.js`)
 

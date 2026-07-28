@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { colorForAltitude, recordPosition, clearHistory, trailFeaturesFor } from './trail.js';
+import { colorForAltitude, recordPosition, clearHistory, trailFeaturesFor, filterMlatAnomalies, smoothMlatPositions } from './trail.js';
 
 test('colorForAltitude is golden-green at ground level, pure green by 10,000 ft', () => {
   // 0-10,000 ft used to be a flat, identical green -- the band most
@@ -148,4 +148,106 @@ test('every feature carries an explicit isGap boolean so the dashed layer filter
 test('a single recorded position produces no segments at all', () => {
   record(20, 35000);
   assert.deepEqual(trailFeaturesFor(HEX), []);
+});
+
+test('filterMlatAnomalies never rejects ADS-B points, however implausible the jump', () => {
+  const points = [
+    { lngLat: [20, 50], t: 0, isGap: false, isMlat: false },
+    { lngLat: [40, 60], t: 1000, isGap: false, isMlat: false }, // huge instant jump, but not MLAT
+  ];
+  assert.deepEqual(filterMlatAnomalies(points), points);
+});
+
+test('filterMlatAnomalies drops an MLAT point that would require unrealistic speed', () => {
+  const base = { lngLat: [20, 50], t: 0, isGap: false, isMlat: false };
+  const jump = { lngLat: [22, 50], t: 1000, isGap: false, isMlat: true }; // ~143 km in 1s
+  assert.deepEqual(filterMlatAnomalies([base, jump]), [base]);
+});
+
+test('filterMlatAnomalies keeps an MLAT point with a realistic implied speed', () => {
+  const base = { lngLat: [20, 50], t: 0, isGap: false, isMlat: false };
+  const reasonable = { lngLat: [20.05, 50], t: 10000, isGap: false, isMlat: true }; // ~3.6 km over 10s, ~1284 km/h
+  assert.deepEqual(filterMlatAnomalies([base, reasonable]), [base, reasonable]);
+});
+
+test('filterMlatAnomalies drops an MLAT point that implies an unrealistic turn rate, even at a plausible speed', () => {
+  const p0 = { lngLat: [20, 50], t: 0, isGap: false, isMlat: false };
+  const p1 = { lngLat: [20.1, 50], t: 60000, isGap: false, isMlat: false }; // heading east, ~430 km/h
+  // Reverses to heading west 10s later -- ~1284 km/h alone (plausible speed),
+  // but an 18deg/s turn (180deg swing in 10s), well past the turn-rate cap.
+  const sharpTurn = { lngLat: [20.05, 50], t: 70000, isGap: false, isMlat: true };
+  assert.deepEqual(filterMlatAnomalies([p0, p1, sharpTurn]), [p0, p1]);
+});
+
+test('filterMlatAnomalies does not flag a "turn" from tiny, noise-scale movements', () => {
+  const p0 = { lngLat: [20, 50], t: 0, isGap: false, isMlat: false };
+  const p1 = { lngLat: [20.001, 50], t: 60000, isGap: false, isMlat: false }; // ~71 m -- below the turn-check distance floor
+  const jitter = { lngLat: [19.999, 50], t: 61000, isGap: false, isMlat: true }; // reverses direction, but also tiny
+  assert.deepEqual(filterMlatAnomalies([p0, p1, jitter]), [p0, p1, jitter]);
+});
+
+test('a rejected MLAT point is not used as the reference point for judging the next one', () => {
+  const p0 = { lngLat: [20, 50], t: 0, isGap: false, isMlat: false };
+  const badJump = { lngLat: [25, 50], t: 1000, isGap: false, isMlat: true }; // rejected -- huge jump from p0
+  // Reasonable relative to p0 (the last *accepted* point), wildly
+  // unreasonable relative to badJump -- must be judged against p0.
+  const backToNormal = { lngLat: [20.05, 50], t: 11000, isGap: false, isMlat: true };
+  assert.deepEqual(filterMlatAnomalies([p0, badJump, backToNormal]), [p0, backToNormal]);
+});
+
+test('smoothMlatPositions blends an interior MLAT point 25/50/25 with its neighbors', () => {
+  const points = [
+    { lngLat: [20, 50], t: 0, isGap: false, isMlat: false },
+    { lngLat: [20.1, 50], t: 1000, isGap: false, isMlat: true },
+    { lngLat: [20, 50], t: 2000, isGap: false, isMlat: false },
+  ];
+  const [, smoothed] = smoothMlatPositions(points);
+  assert.equal(smoothed.lngLat[0], 20.05); // (20 + 2*20.1 + 20) / 4
+  assert.equal(smoothed.lngLat[1], 50);
+});
+
+test('smoothMlatPositions never modifies ADS-B or gap points', () => {
+  const points = [
+    { lngLat: [20, 50], t: 0, isGap: false, isMlat: false },
+    { lngLat: [20.1, 50], t: 1000, isGap: false, isMlat: false },
+    { lngLat: [20.2, 50], t: 2000, isGap: true, isMlat: false },
+  ];
+  assert.deepEqual(smoothMlatPositions(points), points);
+});
+
+test('smoothMlatPositions leaves an MLAT point with only one real neighbor (trail start/end) unchanged', () => {
+  const points = [
+    { lngLat: [20, 50], t: 0, isGap: false, isMlat: true },
+    { lngLat: [20.1, 50], t: 1000, isGap: false, isMlat: false },
+  ];
+  assert.deepEqual(smoothMlatPositions(points), points);
+});
+
+test('smoothMlatPositions does not blend an MLAT point across a gap', () => {
+  const points = [
+    { lngLat: [20, 50], t: 0, isGap: true, isMlat: false },
+    { lngLat: [20.1, 50], t: 1000, isGap: false, isMlat: true },
+    { lngLat: [20.2, 50], t: 2000, isGap: false, isMlat: false },
+  ];
+  assert.deepEqual(smoothMlatPositions(points), points);
+});
+
+test('trailFeaturesFor drops an anomalous MLAT jump end-to-end', () => {
+  recordPosition(HEX, [20, 50], 5000, 0, false, 'adsb_icao');
+  recordPosition(HEX, [25, 50], 5000, 1000, false, 'mlat'); // huge jump, MLAT
+  recordPosition(HEX, [20.01, 50], 5000, 11000, false, 'adsb_icao');
+
+  const features = trailFeaturesFor(HEX);
+  const allLngs = features.flatMap((f) => f.geometry.coordinates).map(([lng]) => lng);
+  assert.ok(!allLngs.includes(25), `the anomalous MLAT jump to lng=25 should have been dropped, got lngs ${allLngs}`);
+});
+
+test('trailFeaturesFor never drops or moves an ADS-B point, whatever its neighbors look like', () => {
+  recordPosition(HEX, [20, 50], 5000, 0, false, 'mlat');
+  recordPosition(HEX, [40, 60], 5000, 1000, false, 'adsb_icao'); // implausible jump, but real ADS-B
+  recordPosition(HEX, [20.01, 50], 5000, 2000, false, 'mlat');
+
+  const features = trailFeaturesFor(HEX);
+  const allCoords = features.flatMap((f) => f.geometry.coordinates);
+  assert.ok(allCoords.some(([lng, lat]) => lng === 40 && lat === 60), 'the ADS-B point at [40, 60] must survive untouched');
 });

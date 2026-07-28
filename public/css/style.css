@@ -561,6 +561,16 @@ html, body {
   border: 1px solid #1c2e3a;
   border-radius: 12px;
   padding: 14px;
+  /* #mlpr-list-config-view already inherits this from #panel-content, so
+     it's a no-op there -- #list-config-window doesn't, since it's a
+     genuinely separate top-level element outside #panel entirely, not a
+     descendant of anything that sets a text color. Without it, any text
+     here that doesn't have its own explicit color (e.g. the "Show
+     aircraft with a known position first" checkbox label -- everything
+     else nearby happens to set its own color already) fell back to the
+     browser default black, invisible on this near-black background.
+     Reported live, 2026-07-28. */
+  color: #d8f3e6;
 }
 
 /* Genuinely a separate window, not nested inside #panel at all (see

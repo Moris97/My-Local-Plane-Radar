@@ -797,7 +797,7 @@ function applyAircraftUpdate(aircraft) {
 
   const { trailMode } = getSettings();
   if (trailMode === 'all' || aircraft.hex === selectedHex) {
-    recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone);
+    recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone, aircraft.sourceType);
     renderTrail();
   }
 
