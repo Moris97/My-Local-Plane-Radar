@@ -21,6 +21,14 @@ function todayDateString(now = Date.now()) {
   return new Date(now).toISOString().slice(0, 10);
 }
 
+// Start of "today" (UTC midnight), matching the exact day boundary
+// dailyAccumulator/todayDateString already use -- the "Ten dzień" Stats
+// section reuses this same boundary rather than inventing a second,
+// possibly-inconsistent definition of "today" (e.g. local time).
+export function getTodayStartMs(now = Date.now()) {
+  return new Date(`${todayDateString(now)}T00:00:00.000Z`).getTime();
+}
+
 function minuteKey(now) {
   return Math.floor(now / 60000);
 }
@@ -44,6 +52,13 @@ const dailyAccumulator = {
   sumWithoutPos: 0,
   maxWithoutPos: 0,
   sampleCount: 0,
+  // Distinct hexes/flight-callsigns seen at any point today -- reset at
+  // midnight same as everything else here. Answers "how many different
+  // aircraft/flights today", which first_seen_at columns alone can't:
+  // an aircraft first seen last month that's also flying today must still
+  // count towards today's unique total.
+  uniqueHexes: new Set(),
+  uniqueFlights: new Set(),
 };
 
 function resetDailyAccumulator(date) {
@@ -57,9 +72,28 @@ function resetDailyAccumulator(date) {
   dailyAccumulator.sumWithoutPos = 0;
   dailyAccumulator.maxWithoutPos = 0;
   dailyAccumulator.sampleCount = 0;
+  dailyAccumulator.uniqueHexes = new Set();
+  dailyAccumulator.uniqueFlights = new Set();
   todaysRangeSamples = [];
   currentMinuteKey = null;
   currentMinuteBestKm = 0;
+}
+
+// Called once per poll tick per currently tracked aircraft (not just this
+// tick's delta) -- same reasoning as index.js's other per-tick sightings:
+// a stationary aircraft with nothing changed wouldn't necessarily show up
+// in a delta every tick, but it's still "seen today".
+export function recordDailyUnique(hex, flight, now = Date.now()) {
+  rolloverIfNewDay(now);
+  if (hex) dailyAccumulator.uniqueHexes.add(hex);
+  if (flight) dailyAccumulator.uniqueFlights.add(flight);
+}
+
+export function getDailyUniqueCounts() {
+  return {
+    uniqueAircraftCount: dailyAccumulator.uniqueHexes.size,
+    uniqueFlightsCount: dailyAccumulator.uniqueFlights.size,
+  };
 }
 
 // Called defensively from both ingestStats (every ~15s) and
@@ -104,6 +138,22 @@ export function getRangeSummary() {
     maxRangeKm: values.length ? Math.max(...values) : 0,
     rangeTopAvgKm: averageOfTopFraction(values, TOP_FRACTION),
   };
+}
+
+// Rolling last-60-minutes max, for the "Aktualnie" section's live range
+// tile -- distinct from getRangeSummary() above, which is *today's* max
+// (resets at midnight). Known edge case, same class as every other
+// midnight-boundary reset in this file: for the first ~59 minutes after
+// midnight, samples from just before midnight are gone (todaysRangeSamples
+// was cleared by resetDailyAccumulator), so the window is effectively
+// shorter than a full hour right after rollover. Not worth a cross-day
+// buffer for a once-a-day, hour-long edge case.
+export function getMaxRangeLastHourKm(now = Date.now()) {
+  const since = now - 60 * 60 * 1000;
+  const values = getTodaysRangeSamples()
+    .filter((s) => s.t >= since)
+    .map((s) => s.km);
+  return values.length ? Math.max(...values) : 0;
 }
 
 export function ingestStats(stats, now = Date.now()) {
@@ -179,8 +229,14 @@ export function resetStatsHistory() {
 export function snapshotForPersistence() {
   return {
     date: dailyAccumulator.date,
+    // Sets aren't JSON-serializable -- spread to arrays for the snapshot,
+    // restored back into Sets in restoreFromSnapshot below.
+    dailyAccumulator: {
+      ...dailyAccumulator,
+      uniqueHexes: [...dailyAccumulator.uniqueHexes],
+      uniqueFlights: [...dailyAccumulator.uniqueFlights],
+    },
     history: history.slice(),
-    dailyAccumulator: { ...dailyAccumulator },
     todaysRangeSamples: todaysRangeSamples.slice(),
     currentMinuteKey,
     currentMinuteBestKm,
@@ -200,6 +256,12 @@ export function restoreFromSnapshot(snapshot, now = Date.now()) {
   history.push(...snapshot.history);
 
   Object.assign(dailyAccumulator, snapshot.dailyAccumulator);
+  // Object.assign just copied the plain arrays snapshotForPersistence wrote
+  // (Sets aren't JSON-serializable) -- convert them back. An older snapshot
+  // taken before this field existed simply won't have them, leaving the
+  // freshly-initialized empty Sets from resetDailyAccumulator in place.
+  dailyAccumulator.uniqueHexes = new Set(snapshot.dailyAccumulator.uniqueHexes ?? []);
+  dailyAccumulator.uniqueFlights = new Set(snapshot.dailyAccumulator.uniqueFlights ?? []);
 
   todaysRangeSamples = snapshot.todaysRangeSamples.slice();
   currentMinuteKey = snapshot.currentMinuteKey;

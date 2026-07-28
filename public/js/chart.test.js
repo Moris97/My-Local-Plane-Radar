@@ -7,6 +7,7 @@ import {
   renderDoughnutSvg,
   doughnutSlices,
   renderSparklineSvg,
+  renderRoseChartSvg,
   formatBucketLabel,
 } from './chart.js';
 
@@ -163,4 +164,40 @@ test('renderAreaChartSvg also carries Y-axis units and X-axis time labels', () =
   const svg = renderAreaChartSvg(buckets, [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }]);
   assert.ok(svg.includes('>26.07.2026<'));
   assert.ok(svg.includes('>27.07.2026<'));
+});
+
+test('renderRoseChartSvg returns an empty svg for no items', () => {
+  const svg = renderRoseChartSvg([]);
+  assert.ok(svg.includes('<svg'));
+  assert.ok(!svg.includes('<path'));
+});
+
+test('renderRoseChartSvg draws one petal per item with a nonzero value, skipping zero-value sectors', () => {
+  const items = [
+    { label: 'N', value: 100 },
+    { label: 'E', value: 0 },
+    { label: 'S', value: 50 },
+    { label: 'W', value: 0 },
+  ];
+  const svg = renderRoseChartSvg(items);
+  assert.equal((svg.match(/<path/g) ?? []).length, 2);
+});
+
+test('renderRoseChartSvg draws the four cardinal direction labels', () => {
+  const items = [{ label: 'N', value: 10 }, { label: 'E', value: 20 }, { label: 'S', value: 5 }, { label: 'W', value: 15 }];
+  const svg = renderRoseChartSvg(items);
+  for (const cardinal of ['N', 'E', 'S', 'W']) {
+    assert.ok(svg.includes(`>${cardinal}<`), `expected a "${cardinal}" label`);
+  }
+});
+
+test('renderRoseChartSvg labels the outer ring with the max value, unit-formatted via formatValue', () => {
+  const items = [{ label: 'N', value: 123 }, { label: 'E', value: 45 }];
+  const svg = renderRoseChartSvg(items, { formatValue: (v) => `${Math.round(v)} km` });
+  assert.ok(svg.includes('>123 km<'));
+});
+
+test('renderRoseChartSvg never produces NaN in its path data, even with a single item', () => {
+  const svg = renderRoseChartSvg([{ label: 'N', value: 10 }]);
+  assert.ok(!svg.includes('NaN'));
 });

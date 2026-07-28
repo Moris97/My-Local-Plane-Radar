@@ -9,10 +9,13 @@ import {
   getLatestStatsValues,
   recordRangeSample,
   getRangeSummary,
+  getMaxRangeLastHourKm,
+  recordDailyUnique,
+  getDailyUniqueCounts,
   snapshotForPersistence,
   restoreFromSnapshot,
 } from './stats-history.js';
-import { upsertDailyStats, getConfigJSON, setConfigJSON } from './db.js';
+import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeenFlight } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { pruneTokens } from './settings-auth.js';
@@ -21,6 +24,7 @@ import { recordSighting, flushDirtyRegistrations } from './stats-registrations.j
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
 import { distanceKm } from './range.js';
+import { recordAntennaSample, recordSignalReading, flushAntennaStatsIfDirty } from './antenna-stats.js';
 import { resolvePort } from './server-config.js';
 
 const HOST = process.env.MLPR_HOST ?? '0.0.0.0';
@@ -73,17 +77,31 @@ async function pollOnce(broadcast) {
 // Deliberately iterates *every* currently tracked aircraft each tick, not
 // just this tick's delta (`updated` above) -- a stationary aircraft with
 // unchanged tracked fields wouldn't show up in the delta every tick, but it
-// should still count as "still being seen right now" for both the range
-// sample and the registration's lastSeenAt.
+// should still count as "still being seen right now" for the range sample,
+// the registration's lastSeenAt, the antenna band/sector maxima, and
+// today's unique aircraft/flight sets. All of this is folded into one loop
+// rather than four separate passes over the same (small) tracked-aircraft
+// list each second.
 function recordRangeAndRegistrationSightings() {
   const home = getEffectiveHome();
   const airlines = getAirlines();
   let bestRangeKm = null;
 
   for (const aircraft of getTrackedAircraft()) {
-    if (home && typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+    const hasPosition = typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
+
+    if (home && hasPosition) {
       const km = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
       if (bestRangeKm === null || km > bestRangeKm) bestRangeKm = km;
+
+      recordAntennaSample({
+        homeLat: home.lat,
+        homeLon: home.lon,
+        lat: aircraft.lat,
+        lon: aircraft.lon,
+        altBaro: aircraft.altBaro,
+        onGround: aircraft.onGround,
+      });
     }
 
     if (aircraft.registration) {
@@ -92,6 +110,13 @@ function recordRangeAndRegistrationSightings() {
         airlineIcao: resolveAirlineIcao(aircraft, airlines),
       });
     }
+
+    // Guarded the same way rules.js guards markAircraftSeen: a cheap SELECT
+    // every tick, but the INSERT (an actual SD write) only ever fires once
+    // per callsign, the first time it's seen -- not a per-tick write for
+    // every already-known aircraft (hard rule 5).
+    if (aircraft.flight && !hasSeenFlight(aircraft.flight)) markFlightSeen(aircraft.flight);
+    recordDailyUnique(aircraft.hex, aircraft.flight);
   }
 
   if (bestRangeKm !== null) recordRangeSample(bestRangeKm);
@@ -105,6 +130,13 @@ async function pollStats() {
   if (sample) {
     evaluateRangeRecordRule(sample.maxRangeKm);
   }
+
+  // `local` is absent in --net-only mode (no SDR attached, MLAT/network-only
+  // feed) -- optional chaining rather than assuming it's always there.
+  const local = stats.last1min?.local;
+  if (local) {
+    recordSignalReading(local.signal, local.peak_signal);
+  }
 }
 
 function broadcastStats(broadcast) {
@@ -114,6 +146,7 @@ function broadcastStats(broadcast) {
     aircraftCount: getTrackedAircraft().length,
     messagesPerSec,
     maxRangeKm,
+    maxRangeLastHourKm: getMaxRangeLastHourKm(),
   });
 }
 
@@ -124,6 +157,7 @@ function flushDailyStats() {
   // reflects readsb's own all-time running record's value as observed
   // today, not a true daily max. See stats-history.js.
   const rangeSummary = getRangeSummary();
+  const uniqueCounts = getDailyUniqueCounts();
   const avgAircraft = accumulator.sampleCount ? accumulator.sumAircraft / accumulator.sampleCount : 0;
   const avgWithPos = accumulator.sampleCount ? accumulator.sumWithPos / accumulator.sampleCount : 0;
   const avgWithoutPos = accumulator.sampleCount ? accumulator.sumWithoutPos / accumulator.sampleCount : 0;
@@ -138,6 +172,8 @@ function flushDailyStats() {
     avgWithoutPos,
     maxWithoutPos: accumulator.maxWithoutPos,
     rangeTopAvgKm: rangeSummary.rangeTopAvgKm,
+    uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
+    uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
   });
 
   flushDirtyRegistrations();
@@ -181,6 +217,14 @@ async function main() {
     } catch (err) {
       app.log.error(err, 'daily stats flush failed');
     }
+    try {
+      // Same cadence as the daily stats flush above -- flushAntennaStatsIfDirty
+      // is a no-op (no SD write at all) once a receiver's band/sector maxima
+      // stop moving, so checking this often costs nothing extra.
+      flushAntennaStatsIfDirty();
+    } catch (err) {
+      app.log.error(err, 'antenna stats flush failed');
+    }
   }, DAILY_STATS_FLUSH_INTERVAL_MS);
 
   setInterval(() => {
@@ -208,6 +252,11 @@ async function main() {
       flushStatsHistorySnapshot();
     } catch (err) {
       app.log.error(err, 'stats history snapshot flush on shutdown failed');
+    }
+    try {
+      flushAntennaStatsIfDirty();
+    } catch (err) {
+      app.log.error(err, 'antenna stats flush on shutdown failed');
     }
     await app.close();
     process.exit(0);

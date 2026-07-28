@@ -50,6 +50,18 @@ db.exec(`
   )
 `);
 
+// All-time distinct flight/callsign strings ever seen -- same shape and
+// purpose as seen_aircraft above, just keyed by callsign instead of hex, for
+// the Stats "unique flights seen" counters. Bounded the same way
+// registrations is: distinct callsigns a home receiver will ever observe,
+// not raw per-message history.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS seen_flights (
+    flight TEXT PRIMARY KEY,
+    first_seen_at INTEGER NOT NULL
+  )
+`);
+
 // Migration: installs from before the advanced-stats feature have a
 // daily_stats table without these columns. CREATE TABLE IF NOT EXISTS above
 // is a no-op on an existing table, so missing columns need an explicit
@@ -61,6 +73,8 @@ const DAILY_STATS_NEW_COLUMNS = [
   ['avg_without_pos', 'REAL NOT NULL DEFAULT 0'],
   ['max_without_pos', 'INTEGER NOT NULL DEFAULT 0'],
   ['range_top_avg_km', 'REAL NOT NULL DEFAULT 0'],
+  ['unique_aircraft_count', 'INTEGER NOT NULL DEFAULT 0'],
+  ['unique_flights_count', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 const existingColumns = new Set(db.prepare('PRAGMA table_info(daily_stats)').all().map((col) => col.name));
 for (const [name, definition] of DAILY_STATS_NEW_COLUMNS) {
@@ -96,15 +110,18 @@ export function upsertDailyStats(
     avgWithoutPos = 0,
     maxWithoutPos = 0,
     rangeTopAvgKm = 0,
+    uniqueAircraftCount = 0,
+    uniqueFlightsCount = 0,
   },
 ) {
   db.prepare(`
     INSERT INTO daily_stats (
       date, max_aircraft, total_messages, max_range_km,
       avg_aircraft, avg_with_pos, max_with_pos, avg_without_pos, max_without_pos, range_top_avg_km,
+      unique_aircraft_count, unique_flights_count,
       updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(date) DO UPDATE SET
       max_aircraft = excluded.max_aircraft,
       total_messages = excluded.total_messages,
@@ -115,6 +132,8 @@ export function upsertDailyStats(
       avg_without_pos = excluded.avg_without_pos,
       max_without_pos = excluded.max_without_pos,
       range_top_avg_km = excluded.range_top_avg_km,
+      unique_aircraft_count = excluded.unique_aircraft_count,
+      unique_flights_count = excluded.unique_flights_count,
       updated_at = excluded.updated_at
   `).run(
     date,
@@ -127,6 +146,8 @@ export function upsertDailyStats(
     avgWithoutPos,
     maxWithoutPos,
     rangeTopAvgKm,
+    uniqueAircraftCount,
+    uniqueFlightsCount,
     Date.now(),
   );
 }
@@ -163,6 +184,25 @@ export function hasSeenAircraft(hex) {
 
 export function markAircraftSeen(hex) {
   db.prepare('INSERT OR IGNORE INTO seen_aircraft (hex, first_seen_at) VALUES (?, ?)').run(hex, Date.now());
+}
+
+// All-time distinct aircraft ever seen -- the "Ilość widzianych samolotów"
+// tile in Stats' "Od początku" section. seen_aircraft already exists for
+// first-seen notifications; this just counts it.
+export function getSeenAircraftCount() {
+  return db.prepare('SELECT COUNT(*) AS count FROM seen_aircraft').get().count;
+}
+
+export function hasSeenFlight(flight) {
+  return db.prepare('SELECT 1 FROM seen_flights WHERE flight = ?').get(flight) !== undefined;
+}
+
+export function markFlightSeen(flight) {
+  db.prepare('INSERT OR IGNORE INTO seen_flights (flight, first_seen_at) VALUES (?, ?)').run(flight, Date.now());
+}
+
+export function getSeenFlightsCount() {
+  return db.prepare('SELECT COUNT(*) AS count FROM seen_flights').get().count;
 }
 
 const upsertRegistrationStmt = db.prepare(`
@@ -206,4 +246,34 @@ export function getAllRegistrations() {
 
 export function getRegistrationsSince(sinceMs) {
   return db.prepare('SELECT * FROM registrations WHERE last_seen_at >= ? ORDER BY last_seen_at DESC').all(sinceMs);
+}
+
+// All-time distinct registrations ever seen -- "unikalnych rejestracji" in
+// Stats' "Od początku" section.
+export function getRegistrationsCount() {
+  return db.prepare('SELECT COUNT(*) AS count FROM registrations').get().count;
+}
+
+// One row per airline ICAO code actually seen, aggregated straight from the
+// registrations table -- no separate airlines table needed, this is exactly
+// the same data the "most common airline" chart already reads, just grouped
+// differently. Registrations with no resolved airline (military/GA/unmatched
+// callsigns) are excluded, same as the doughnut chart. Airline names
+// themselves come from /api/airlines (OpenFlights data) and are resolved
+// client-side, same as the existing registrations table.
+export function getAllAirlinesSummary() {
+  return db
+    .prepare(
+      `SELECT
+        airline_icao AS airlineIcao,
+        COUNT(*) AS registrationsCount,
+        SUM(times_seen) AS totalTimesSeen,
+        MIN(first_seen_at) AS firstSeenAt,
+        MAX(last_seen_at) AS lastSeenAt
+      FROM registrations
+      WHERE airline_icao IS NOT NULL
+      GROUP BY airline_icao
+      ORDER BY registrationsCount DESC`,
+    )
+    .all();
 }

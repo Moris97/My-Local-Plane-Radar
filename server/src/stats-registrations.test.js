@@ -120,3 +120,47 @@ test('getNewRegistrationsBuckets buckets by first-seen date, ignoring registrati
   assert.equal(buckets.length, 1);
   assert.equal(buckets[0].count, 2);
 });
+
+const T2 = T1 + 200000 * MIN;
+
+test('getNewRegistrationsCount returns a plain count, ignoring registrations from before the cutoff', () => {
+  statsRegistrations.recordSighting('SP-A', {}, T2);
+  statsRegistrations.recordSighting('SP-B', {}, T2);
+  statsRegistrations.recordSighting('SP-C', {}, T2 - 1000 * MIN); // old, outside range
+
+  assert.equal(statsRegistrations.getNewRegistrationsCount(T2 - MIN), 2);
+});
+
+test('getNewRegistrationsBucketsByKey splits new-registration counts per key, restricted to topKeys', () => {
+  const T3 = T2 + 200000 * MIN;
+  statsRegistrations.recordSighting('SP-X1', { typeCode: 'B738' }, T3);
+  statsRegistrations.recordSighting('SP-X2', { typeCode: 'B738' }, T3);
+  statsRegistrations.recordSighting('SP-X3', { typeCode: 'A320' }, T3);
+  statsRegistrations.recordSighting('SP-X4', { typeCode: 'C172' }, T3); // not in topKeys -- excluded
+
+  const buckets = statsRegistrations.getNewRegistrationsBucketsByKey(
+    T3 - MIN,
+    'day',
+    (e) => e.typeCode,
+    ['B738', 'A320'],
+  );
+  assert.equal(buckets.length, 1);
+  assert.deepEqual(buckets[0].B738, 2);
+  assert.deepEqual(buckets[0].A320, 1);
+  assert.equal('C172' in buckets[0], false);
+});
+
+test('getNewRegistrationsBucketsByKey fills a zero for a topKey with no registrations in a bucket that does have others', () => {
+  const T4 = T2 + 400000 * MIN;
+  statsRegistrations.recordSighting('SP-Y1', { typeCode: 'B738' }, T4);
+
+  const buckets = statsRegistrations.getNewRegistrationsBucketsByKey(
+    T4 - MIN,
+    'day',
+    (e) => e.typeCode,
+    ['B738', 'A320'],
+  );
+  assert.equal(buckets.length, 1);
+  assert.equal(buckets[0].B738, 1);
+  assert.equal(buckets[0].A320, 0);
+});

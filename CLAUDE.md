@@ -925,6 +925,133 @@ development (the legend showed real numbers while the chart area itself was
 blank), not by the original tests, which only checked for absence of
 `NaN`. Regression tests were added for both.
 
+### Stats v1.1: Now/Today/All-time sections, antenna stats, all-airlines
+
+The Stats view grew three new top sections (each a `.mlpr-stats-section` in
+`public/js/stats.js`), ahead of the existing range-selected charts:
+
+- **"Aktualnie" (Now)** replaced the old 3-item `<dl>` tile row entirely
+  (there is no separate "kafelki" strip above it any more — a deliberate
+  choice, made explicit with the user, to avoid showing aircraft
+  count/messages-per-sec twice on one screen). Aircraft count, with-position
+  count, messages/sec, and a rolling last-**hour** max range (new — distinct
+  from the existing all-time max range tile that used to live here) are live
+  numbers already available client-side (`radar-state.js`'s `getLiveStats`/
+  `getLiveAircraft`). The **nearest/farthest aircraft tiles** are computed
+  **entirely client-side** in `public/js/geo.js`'s `findNearestFarthest` —
+  `distanceKm`/`bearingDegrees` are duplicated there from
+  `server/src/range.js` (small pure formulas, and this codebase has no
+  shared-code mechanism between `server/src` and `public/js`, so duplicating
+  ~10 lines was simpler than inventing one). Home location for this is
+  **not** read from `app.js`'s existing `homeLocation`/home-marker code —
+  `stats.js` does its own independent `fetch('/api/settings')` on panel
+  open, same endpoint and therefore same access control as the home marker
+  (locked out if a Settings password is set and the browser isn't logged
+  in — the tiles then show "no receiver location set" rather than silently
+  guessing). Kept deliberately isolated from `app.js` to avoid touching
+  already-working, hard-to-verify-under-WebGL map code for an unrelated
+  feature.
+- **"Ten dzień" (Today)** and **"Od początku" (All time)** both hit one new
+  endpoint, `GET /api/stats/summary?period=today|all`, rather than the
+  6+ separate requests the range-selected charts below make — these two
+  sections aren't range-selector-scoped, so bundling them server-side into
+  one payload (`server/src/server.js`) made more sense than reusing the
+  per-chart endpoint shape. "Today" reads from newly-added live in-memory
+  state; "All time" reads straight from existing persistent tables that
+  already tracked exactly this:
+  - **Unique aircraft/flights seen today**: genuinely new tracking, because
+    neither existing "first ever seen" table (`seen_aircraft`) nor the
+    per-registration `registrations` table can answer "was this *also* seen
+    today" — an aircraft first seen last month flying again today must
+    still count. `stats-history.js`'s `dailyAccumulator` grew two `Set`s
+    (`uniqueHexes`, `uniqueFlights`), fed every poll tick from `index.js`'s
+    existing per-tick "iterate every tracked aircraft, not just this tick's
+    delta" loop (`recordRangeAndRegistrationSightings` — now doing four
+    things per aircraft per tick instead of two, still one pass). Reset at
+    the same UTC-midnight boundary `dailyAccumulator` already uses (new
+    export `getTodayStartMs`) — deliberately reusing that exact boundary
+    rather than a second, possibly-inconsistent definition of "today" (e.g.
+    local time). Sets aren't JSON-serializable, so `snapshotForPersistence`/
+    `restoreFromSnapshot` spread them to/from arrays — same
+    restart-survival mechanism as the rest of that file, same reasoning
+    (hard rule 6 exempts *today's* accumulated numbers, not just anything
+    RAM-only).
+  - **All-time unique aircraft/flights/registrations**: no new tracking
+    needed for two of these — `seen_aircraft`/`registrations` already
+    existed, just needed a `COUNT(*)` (`db.js`'s `getSeenAircraftCount`/
+    `getRegistrationsCount`). Unique *flights* all-time needed a new table,
+    `seen_flights` (`flight TEXT PRIMARY KEY, first_seen_at`) — same shape
+    and same "bounded by distinct callsigns ever seen" reasoning as
+    `seen_aircraft`, guarded the same way before every write
+    (`hasSeenFlight` SELECT before `markFlightSeen` INSERT, so a per-tick
+    loop only ever writes once per callsign ever, not once per tick — hard
+    rule 5. Getting this guard wrong here was a real bug caught before it
+    shipped, not hypothetical: an early version called `markFlightSeen`
+    unconditionally every tick for every aircraft with a callsign).
+  - **All-time max range** reuses the notification engine's existing
+    `allTimeMaxRangeKm` config value (`server/src/notifications/rules.js`'s
+    new `getAllTimeMaxRangeKm` getter) rather than re-deriving it — that
+    value was already the correct all-time record, just previously only
+    read internally by the range-record notification rule.
+- **Doughnut ↔ line toggle** on the two "most common type/airline" charts
+  in the existing range-selected section (`chartView` state in `stats.js`,
+  two small pill buttons at the chart's top-right, reusing `.mlpr-range-btn`
+  styling). The line view is **not** a different chart of the same
+  statistic — no per-bucket "how many of this type were active" figure
+  exists cheaply — it's *new-registrations-of-this-type/airline over time*,
+  reusing the exact same first-seen bucketing as the existing "new
+  registrations" chart (`stats-registrations.js`'s new
+  `getNewRegistrationsBucketsByKey`), just split into one series per
+  already-top-N key from the doughnut's own counts instead of one aggregate
+  total. Restricted to the doughnut's own top 5 keys (`TREND_TOP_N`) — a
+  long tail of one-off types as separate lines would be pure noise, same
+  reasoning `doughnutSlices`' `maxSlices` already applies to the pie view.
+  Server endpoint: `GET /api/stats/registrations-trend?range&field=type|
+  airline&keys=A,B,C` (comma-separated, from the doughnut's already-fetched
+  data — this endpoint never independently decides what's "top", so it
+  can't disagree with the doughnut showing the same range).
+- **Antenna statistics** (`server/src/antenna-stats.js`, all-time-only —
+  deliberately not range-selected or daily-reset, since "which direction
+  does my antenna see farthest" is a slowly-accumulated picture that gets
+  more meaningful over months, not something that resets or needs a
+  24h/7d/etc. view): a **range-by-altitude bar chart** (9 fixed bands, 0–5k
+  ft up to 40k+, on-ground aircraft counted as 0 ft — same "ground = 0"
+  convention as the watch list's altitude condition) and a **directional
+  coverage rose chart** (`public/js/chart.js`'s new `renderRoseChartSvg`,
+  16-point compass rose, one filled pie-wedge "petal" per sector reaching
+  to a radius proportional to that sector's max range — literally "petals
+  in different directions marking max range," the shape the user asked
+  for, distinguishing it from a spider-chart's straight-edged polygon).
+  Both are running **all-time maxima only** (`altitudeBandIndex`/
+  `sectorIndex` bucket a sample, then only `Math.max` is kept per bucket —
+  same shape as the pre-existing single-scalar `allTimeMaxRangeKm`, just
+  broken down 9-and-16-ways instead of one number), fed from the same
+  per-tick loop as the daily-uniques tracking above, persisted as one small
+  JSON blob (`antennaStats` config key) **only when actually dirty**
+  (`flushAntennaStatsIfDirty` — a no-op, no SD write at all, once a
+  receiver's maxima stop moving after the first weeks). Bearing math
+  (`bearingDegrees`, standard great-circle initial-bearing formula) was
+  added to `server/src/range.js` alongside the pre-existing `distanceKm`.
+  **Signal strength** (current mean/peak, in dBFS) is a separate, much
+  simpler live-only reading — `stats.last1min.local.signal`/`peak_signal`
+  from readsb's own `stats.json` (verified against readsb's own
+  `README-json.md` before adding — see the "aircraft.json contract" rule
+  above about not inventing fields), ingested every ~15s alongside the
+  existing `pollStats`, **not averaged or persisted** (just the latest
+  reading, same spirit as the existing messages/sec live number). Absent
+  entirely (not zero — `null`) for a `--net-only` readsb with no local SDR,
+  shown as a plain "not available" message rather than a misleading `0
+  dBFS` tile.
+- **All airlines table**, mirroring the existing "all registrations" table
+  (lazy-loaded on click, client-side sort/search/paginate over one fetched
+  array). No new table needed — `db.js`'s `getAllAirlinesSummary` is a
+  `GROUP BY airline_icao` aggregate straight off the existing
+  `registrations` table (registrations with no resolved airline excluded,
+  same as the doughnut chart). The two now-near-identical lazy-table
+  implementations (registrations, airlines) were factored into one shared
+  `loadLazyTable` helper in `stats.js` — worth it once there were genuinely
+  two call sites of a ~150-line pattern, not before.
+
 ## Settings access control (`server/src/settings-auth.js`)
 
 Off by default (local LAN app, most people don't need this) — a button in

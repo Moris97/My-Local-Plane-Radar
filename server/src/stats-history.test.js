@@ -8,7 +8,11 @@ import {
   resetStatsHistory,
   recordRangeSample,
   getRangeSummary,
+  getMaxRangeLastHourKm,
   getTodaysRangeSamples,
+  recordDailyUnique,
+  getDailyUniqueCounts,
+  getTodayStartMs,
   snapshotForPersistence,
   restoreFromSnapshot,
 } from './stats-history.js';
@@ -195,4 +199,80 @@ test('a snapshot from a previous day is not restored -- today starts fresh inste
 test('restoreFromSnapshot is a safe no-op when there is nothing stored yet (fresh install)', () => {
   restoreFromSnapshot(null, T0);
   assert.equal(getHistory().length, 0);
+});
+
+test('recordDailyUnique counts distinct hexes and flights, not raw calls', () => {
+  recordDailyUnique('abc123', 'RYR4521');
+  recordDailyUnique('abc123', 'RYR4521'); // same aircraft, same flight -- no change
+  recordDailyUnique('def456', 'RYR4521'); // different aircraft, same flight number
+  recordDailyUnique('ghi789', null); // no callsign yet -- counts the aircraft, not a flight
+
+  const counts = getDailyUniqueCounts();
+  assert.equal(counts.uniqueAircraftCount, 3);
+  assert.equal(counts.uniqueFlightsCount, 1);
+});
+
+test('recordDailyUnique resets at day rollover, same as the rest of the daily accumulator', () => {
+  recordDailyUnique('abc123', 'RYR4521', T0);
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 1);
+
+  recordDailyUnique('def456', 'WZZ7A', T0 + 24 * 60 * MINUTE);
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 1);
+});
+
+test('a same-day snapshot restore brings back the daily unique counts', () => {
+  recordDailyUnique('abc123', 'RYR4521', T0);
+  recordDailyUnique('def456', 'WZZ7A', T0);
+  ingestStats(statsFixture({ last1min: { end: T0 / 1000, messages: 1 } }), T0);
+
+  const snapshot = snapshotForPersistence();
+  resetStatsHistory();
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 0);
+
+  restoreFromSnapshot(snapshot, T0 + 5 * MINUTE);
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 2);
+  assert.equal(getDailyUniqueCounts().uniqueFlightsCount, 2);
+});
+
+test('restoring an older snapshot shape without uniqueHexes/uniqueFlights leaves fresh empty sets, not a crash', () => {
+  ingestStats(statsFixture({ last1min: { end: T0 / 1000, messages: 1 } }), T0);
+  const snapshot = snapshotForPersistence();
+  delete snapshot.dailyAccumulator.uniqueHexes;
+  delete snapshot.dailyAccumulator.uniqueFlights;
+  resetStatsHistory();
+
+  assert.doesNotThrow(() => restoreFromSnapshot(snapshot, T0 + 5 * MINUTE));
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 0);
+  // And the restored state must still support further recording, i.e. it's
+  // a real Set, not left as undefined. Stays within the same restored day
+  // (T0 + 5 min) so this doesn't itself trigger another rollover.
+  recordDailyUnique('abc123', 'RYR4521', T0 + 5 * MINUTE);
+  assert.equal(getDailyUniqueCounts().uniqueAircraftCount, 1);
+});
+
+test('getMaxRangeLastHourKm only considers samples from the last 60 minutes', () => {
+  recordRangeSample(50, T0);
+  recordRangeSample(500, T0 + 10 * MINUTE);
+  assert.equal(getMaxRangeLastHourKm(T0 + 45 * MINUTE), 500);
+
+  // At T0 + 90min, the window is [T0+30min, T0+90min] -- both earlier
+  // samples (T0 and T0+10min) have aged out of it.
+  recordRangeSample(20, T0 + 90 * MINUTE);
+  assert.equal(getMaxRangeLastHourKm(T0 + 90 * MINUTE), 20);
+});
+
+test('getMaxRangeLastHourKm is 0 when nothing has been recorded yet', () => {
+  assert.equal(getMaxRangeLastHourKm(T0), 0);
+});
+
+test('getTodayStartMs returns UTC midnight of the given day, matching todayDateString\'s boundary', () => {
+  const midday = new Date('2026-03-15T14:23:00.000Z').getTime();
+  assert.equal(getTodayStartMs(midday), new Date('2026-03-15T00:00:00.000Z').getTime());
+});
+
+test('getTodayStartMs is stable across the whole day, including right up to the boundary', () => {
+  const justBeforeMidnight = new Date('2026-03-15T23:59:59.999Z').getTime();
+  const justAfterMidnight = new Date('2026-03-16T00:00:00.001Z').getTime();
+  assert.equal(getTodayStartMs(justBeforeMidnight), new Date('2026-03-15T00:00:00.000Z').getTime());
+  assert.equal(getTodayStartMs(justAfterMidnight), new Date('2026-03-16T00:00:00.000Z').getTime());
 });

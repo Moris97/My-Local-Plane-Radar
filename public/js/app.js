@@ -656,6 +656,7 @@ function handleSnapshot(snapshot) {
       aircraftCount: snapshot.aircraftCount,
       messagesPerSec: snapshot.messagesPerSec,
       maxRangeKm: snapshot.maxRangeKm,
+      maxRangeLastHourKm: snapshot.maxRangeLastHourKm,
     });
   }
 }

@@ -125,6 +125,10 @@ test('rangeRecordEnabled=false still updates the record but sends nothing', () =
   assert.equal(sent.filter((n) => n.payload.title === 'New range record').length, 0);
 });
 
+test('getAllTimeMaxRangeKm reflects the record maintained by evaluateRangeRecordRule, regardless of notification toggle', () => {
+  assert.equal(rules.getAllTimeMaxRangeKm(), 200);
+});
+
 function watchedNotifications() {
   return sent.filter((n) => n.payload.title === 'Watched aircraft');
 }

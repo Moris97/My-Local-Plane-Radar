@@ -110,6 +110,13 @@ export function evaluateAircraftRules(aircraft) {
   }
 }
 
+// Reads the same all-time record evaluateRangeRecordRule below maintains --
+// used by Stats' "Od początku" section, which wants a single all-time max
+// range number without reimplementing this tracking a second time.
+export function getAllTimeMaxRangeKm() {
+  return Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
+}
+
 export function evaluateRangeRecordRule(maxRangeKm) {
   if (typeof maxRangeKm !== 'number') return;
 

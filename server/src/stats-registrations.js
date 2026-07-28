@@ -120,6 +120,41 @@ export function getNewRegistrationsBuckets(sinceMs, granularity) {
   });
 }
 
+// Plain count version of the above, for the "Ten dzień"/"Od początku" tiles
+// -- those want one number, not a time series.
+export function getNewRegistrationsCount(sinceMs) {
+  ensureLoaded();
+  return Array.from(cache.values()).filter((e) => e.firstSeenAt >= sinceMs).length;
+}
+
+// Same bucketing as getNewRegistrationsBuckets, but split into one series
+// per key (typeCode or airlineIcao) instead of one aggregate total -- feeds
+// the doughnut<->line toggle on the "most common type/airline" charts: the
+// line view is "new-registration trend for each of the top N", reusing the
+// exact same first-seen bucketing already used for the aggregate chart
+// rather than a different statistic. keyFn extracts the field to split on;
+// topKeys restricts to the doughnut's own already-computed top-N list (a
+// long tail of one-off types/airlines would just be visual noise as lines).
+export function getNewRegistrationsBucketsByKey(sinceMs, granularity, keyFn, topKeys) {
+  ensureLoaded();
+  const topKeySet = new Set(topKeys);
+  const items = Array.from(cache.values()).filter((e) => e.firstSeenAt >= sinceMs && topKeySet.has(keyFn(e)));
+
+  const buckets = bucketize(items, {
+    getTime: (e) => e.firstSeenAt,
+    getValue: (e) => keyFn(e),
+    granularity,
+    reducer: (values) => {
+      const counts = {};
+      for (const key of topKeys) counts[key] = 0;
+      for (const key of values) counts[key] += 1;
+      return counts;
+    },
+  });
+
+  return buckets;
+}
+
 export function resetRegistrationsCache() {
   cache.clear();
   loaded = false;

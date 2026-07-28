@@ -247,6 +247,69 @@ export function doughnutSlices(items, { maxSlices = 6, otherLabel = 'Other' } = 
   return otherValue > 0 ? [...top, { label: otherLabel, value: otherValue }] : top;
 }
 
+// items: [{ label, value }], one per compass sector (typically 16, see
+// antenna-stats.js's SECTOR_LABELS), in clockwise order starting from due
+// north. Each sector is drawn as a filled pie-wedge ("petal") reaching out
+// to a radius proportional to its value -- the antenna "directional
+// coverage" chart, showing at a glance which direction the receiver sees
+// the farthest (and, just as usefully, which is shadowed by a building or
+// hill). Concentric rings mark 25/50/75/100% of the max value; N/E/S/W
+// labels orient the reader (a 16-point rose with every label would be
+// unreadably cluttered, so only the four cardinals are drawn).
+export function renderRoseChartSvg(items, { width = 260, height = 260, color = '#3ddc84', formatValue = defaultFormatValue } = {}) {
+  if (items.length === 0) return emptyChartSvg(width, height);
+
+  const cx = width / 2;
+  const cy = height / 2;
+  const maxRadius = Math.min(width, height) / 2 - 22;
+  const maxValue = Math.max(1, ...items.map((i) => i.value));
+  const sectorAngle = (2 * Math.PI) / items.length;
+
+  // Bearing 0 = north = straight up in screen space, clockwise.
+  const point = (bearingRad, radius) => [cx + radius * Math.sin(bearingRad), cy - radius * Math.cos(bearingRad)];
+
+  const petals = items
+    .map((item, i) => {
+      const r = (Math.max(0, item.value) / maxValue) * maxRadius;
+      if (r <= 0) return '';
+      const startAngle = i * sectorAngle;
+      const endAngle = (i + 1) * sectorAngle;
+      const [x1, y1] = point(startAngle, r);
+      const [x2, y2] = point(endAngle, r);
+      const largeArc = sectorAngle > Math.PI ? 1 : 0;
+      return `<path d="M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="1" />`;
+    })
+    .join('');
+
+  const rings = [0.25, 0.5, 0.75, 1]
+    .map((f) => `<circle cx="${cx}" cy="${cy}" r="${(maxRadius * f).toFixed(1)}" fill="none" stroke="#14212b" stroke-width="1" />`)
+    .join('');
+
+  const cardinals = [
+    ['N', 0],
+    ['E', Math.PI / 2],
+    ['S', Math.PI],
+    ['W', (3 * Math.PI) / 2],
+  ]
+    .map(([label, angle]) => {
+      const [x, y] = point(angle, maxRadius + 12);
+      return `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" fill="#5c7885" font-size="10" text-anchor="middle">${label}</text>`;
+    })
+    .join('');
+
+  // Top-left corner, not centered above the ring -- centering it there would
+  // collide with the "N" cardinal label, which sits in that same spot (top
+  // center, just outside the outer ring).
+  const maxLabel = `<text x="4" y="12" fill="#7fa3b3" font-size="9" text-anchor="start">${formatValue(maxValue)}</text>`;
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-rose-chart">
+    ${rings}
+    ${petals}
+    ${cardinals}
+    ${maxLabel}
+  </svg>`;
+}
+
 export function renderSparklineSvg(values, { width = 280, height = 48, color = '#3ddc84' } = {}) {
   if (values.length < 2) {
     return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-sparkline"></svg>`;

@@ -533,22 +533,109 @@ html, body {
   outline-offset: -1px;
 }
 
-.mlpr-stats {
+.mlpr-stats-section {
+  margin-bottom: 28px;
+}
+
+.mlpr-stats-section-title {
+  margin: 0 0 10px;
+  color: #d8f3e6;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.mlpr-tiles-grid {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px 12px;
-  margin: 0;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
 }
 
-.mlpr-stats dt {
+.mlpr-tiles-grid-wide {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.mlpr-tile {
+  background: #0b1116;
+  border: 1px solid #14212b;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.mlpr-tile-label {
   color: #7fa3b3;
+  font-size: 11px;
+  margin-bottom: 4px;
 }
 
-.mlpr-stats dd {
-  margin: 0;
-  text-align: right;
+.mlpr-tile-value {
+  color: #3ddc84;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mlpr-aircraft-tile {
+  background: #0b1116;
+  border: 1px solid #14212b;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.mlpr-aircraft-tile-title {
+  color: #d8f3e6;
+  font-size: 15px;
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.mlpr-aircraft-tile-sub {
+  color: #9fb7c4;
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.mlpr-aircraft-tile-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  font-size: 12px;
   color: #3ddc84;
   font-variant-numeric: tabular-nums;
+}
+
+.mlpr-aircraft-tile .mlpr-empty {
+  margin: 4px 0 0;
+}
+
+.mlpr-chart-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.mlpr-chart-header .mlpr-chart-label {
+  margin: 0;
+}
+
+.mlpr-chart-view-toggle {
+  display: flex;
+  gap: 4px;
+}
+
+.mlpr-chart-view-toggle .mlpr-range-btn {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.mlpr-rose-chart {
+  width: 180px;
+  height: 180px;
+  flex-shrink: 0;
 }
 
 .mlpr-chart-label {

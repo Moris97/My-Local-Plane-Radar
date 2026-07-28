@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm } from './range.js';
+import { distanceKm, bearingDegrees } from './range.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(
@@ -35,4 +35,34 @@ test('distance is symmetric', () => {
 test('Warsaw to London is roughly the well-known ~1450 km great-circle distance', () => {
   const km = distanceKm(52.2297, 21.0122, 51.5074, -0.1278);
   assertClose(km, 1450, 15);
+});
+
+test('bearingDegrees points due north (0°) for a point directly north', () => {
+  assertClose(bearingDegrees(50.0, 20.0, 51.0, 20.0), 0, 0.01);
+});
+
+test('bearingDegrees points due east (90°) for a point directly east on the equator', () => {
+  // Off the equator, "due east" curves along a great circle and isn't
+  // exactly 90° -- the equator is the one latitude where it is, avoiding
+  // picking an arbitrary tolerance for that curvature.
+  assertClose(bearingDegrees(0, 20.0, 0, 21.0), 90, 0.01);
+});
+
+test('bearingDegrees points due south (180°) for a point directly south', () => {
+  assertClose(bearingDegrees(50.0, 20.0, 49.0, 20.0), 180, 0.01);
+});
+
+test('bearingDegrees points due west (270°) for a point directly west on the equator', () => {
+  assertClose(bearingDegrees(0, 20.0, 0, 19.0), 270, 0.01);
+});
+
+test('bearingDegrees is always within [0, 360)', () => {
+  for (const [lat1, lon1, lat2, lon2] of [
+    [52.23, 21.01, 51.51, -0.13],
+    [-33.87, 151.21, 40.71, -74.01],
+    [10, -170, -10, 170],
+  ]) {
+    const bearing = bearingDegrees(lat1, lon1, lat2, lon2);
+    assert.ok(bearing >= 0 && bearing < 360, `expected ${bearing} to be within [0, 360)`);
+  }
 });

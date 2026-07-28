@@ -158,3 +158,66 @@ test('getRegistrationsSince only returns registrations last seen on or after the
   assert.equal(rows.some((r) => r.registration === 'SP-OLD'), false);
   assert.equal(rows.some((r) => r.registration === 'SP-NEW'), true);
 });
+
+test('upsertDailyStats stores unique aircraft/flights counts, defaulting to 0', () => {
+  db.upsertDailyStats('2026-05-01', {
+    maxAircraft: 1,
+    totalMessages: 1,
+    maxRangeKm: 1,
+    uniqueAircraftCount: 12,
+    uniqueFlightsCount: 9,
+  });
+  const row = db.getDailyStats('2026-05-01');
+  assert.equal(row.unique_aircraft_count, 12);
+  assert.equal(row.unique_flights_count, 9);
+
+  db.upsertDailyStats('2026-05-02', { maxAircraft: 1, totalMessages: 1, maxRangeKm: 1 });
+  const defaulted = db.getDailyStats('2026-05-02');
+  assert.equal(defaulted.unique_aircraft_count, 0);
+  assert.equal(defaulted.unique_flights_count, 0);
+});
+
+test('seen_aircraft: hasSeenAircraft/markAircraftSeen/getSeenAircraftCount', () => {
+  const before = db.getSeenAircraftCount();
+  assert.equal(db.hasSeenAircraft('deadbe'), false);
+  db.markAircraftSeen('deadbe');
+  assert.equal(db.hasSeenAircraft('deadbe'), true);
+  assert.equal(db.getSeenAircraftCount(), before + 1);
+  // Marking the same hex again must not double-count.
+  db.markAircraftSeen('deadbe');
+  assert.equal(db.getSeenAircraftCount(), before + 1);
+});
+
+test('seen_flights: hasSeenFlight/markFlightSeen/getSeenFlightsCount', () => {
+  const before = db.getSeenFlightsCount();
+  assert.equal(db.hasSeenFlight('RYR4521'), false);
+  db.markFlightSeen('RYR4521');
+  assert.equal(db.hasSeenFlight('RYR4521'), true);
+  assert.equal(db.getSeenFlightsCount(), before + 1);
+  db.markFlightSeen('RYR4521');
+  assert.equal(db.getSeenFlightsCount(), before + 1);
+});
+
+test('getRegistrationsCount reflects the number of distinct registrations stored', () => {
+  const before = db.getRegistrationsCount();
+  db.upsertRegistration('SP-COUNTME', { typeCode: 'B738', airlineIcao: 'LOT', firstSeenAt: 1, lastSeenAt: 1, timesSeen: 1 });
+  assert.equal(db.getRegistrationsCount(), before + 1);
+  // Re-upserting the same registration must not double-count.
+  db.upsertRegistration('SP-COUNTME', { typeCode: 'B738', airlineIcao: 'LOT', firstSeenAt: 1, lastSeenAt: 2, timesSeen: 2 });
+  assert.equal(db.getRegistrationsCount(), before + 1);
+});
+
+test('getAllAirlinesSummary groups registrations by airline, excluding unmatched ones', () => {
+  db.upsertRegistration('SP-AIR1', { typeCode: 'B738', airlineIcao: 'TESTAIR', firstSeenAt: 100, lastSeenAt: 500, timesSeen: 3 });
+  db.upsertRegistration('SP-AIR2', { typeCode: 'A320', airlineIcao: 'TESTAIR', firstSeenAt: 200, lastSeenAt: 900, timesSeen: 2 });
+  db.upsertRegistration('SP-NOAIR', { typeCode: 'C172', airlineIcao: null, firstSeenAt: 300, lastSeenAt: 300, timesSeen: 1 });
+
+  const summary = db.getAllAirlinesSummary();
+  const entry = summary.find((s) => s.airlineIcao === 'TESTAIR');
+  assert.ok(entry, 'expected a TESTAIR entry');
+  assert.equal(entry.registrationsCount, 2);
+  assert.equal(entry.totalTimesSeen, 5);
+  assert.equal(entry.firstSeenAt, 100);
+  assert.equal(entry.lastSeenAt, 900);
+  assert.equal(summary.some((s) => s.airlineIcao === null), false);
+});

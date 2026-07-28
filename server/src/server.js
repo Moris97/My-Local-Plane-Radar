@@ -13,10 +13,21 @@ import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken,
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange } from './stats-query.js';
 import { rangeStartMs, bucketGranularityForRange } from './time-buckets.js';
-import { getTypeCounts, getAirlineCounts, getNewRegistrationsBuckets, getRegistrationsList } from './stats-registrations.js';
+import {
+  getTypeCounts,
+  getAirlineCounts,
+  getNewRegistrationsBuckets,
+  getNewRegistrationsBucketsByKey,
+  getNewRegistrationsCount,
+  getRegistrationsList,
+} from './stats-registrations.js';
 import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
+import { getTodayStartMs, getDailyUniqueCounts, getRangeSummary } from './stats-history.js';
+import { getSeenAircraftCount, getSeenFlightsCount, getRegistrationsCount, getAllAirlinesSummary } from './db.js';
+import { getAllTimeMaxRangeKm } from './notifications/rules.js';
+import { getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
 
 const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
 
@@ -162,10 +173,70 @@ export async function buildServer() {
     return getNewRegistrationsBuckets(rangeStartMs(range), bucketGranularityForRange(range));
   });
 
+  // Powers the doughnut<->line toggle on the "most common type/airline"
+  // charts: `keys` is the doughnut's own already-fetched top-N list (comma
+  // separated), so this only ever computes a trend for types/airlines
+  // already known to be worth showing, never a long tail of one-offs.
+  const TREND_FIELD_EXTRACTORS = {
+    type: (e) => e.typeCode,
+    airline: (e) => e.airlineIcao,
+  };
+  app.get('/api/stats/registrations-trend', async (request, reply) => {
+    const field = request.query?.field;
+    const extractor = TREND_FIELD_EXTRACTORS[field];
+    if (!extractor) {
+      return reply.code(400).send({ error: 'field must be "type" or "airline"' });
+    }
+    const range = parseStatsRange(request);
+    const keys = String(request.query?.keys ?? '')
+      .split(',')
+      .map((k) => k.trim())
+      .filter(Boolean);
+    if (keys.length === 0) return [];
+    return getNewRegistrationsBucketsByKey(rangeStartMs(range), bucketGranularityForRange(range), extractor, keys);
+  });
+
   // Full list, unfiltered by range -- the point-7 table is "loaded on
   // click" and does its own client-side sorting, same as list.js's live
   // aircraft table.
   app.get('/api/stats/registrations', async () => getRegistrationsList());
+
+  // Same pattern as /api/stats/registrations above, but the aggregated
+  // per-airline view -- see db.js's getAllAirlinesSummary.
+  app.get('/api/stats/all-airlines', async () => getAllAirlinesSummary());
+
+  const VALID_SUMMARY_PERIODS = new Set(['today', 'all']);
+  app.get('/api/stats/summary', async (request, reply) => {
+    const period = request.query?.period;
+    if (!VALID_SUMMARY_PERIODS.has(period)) {
+      return reply.code(400).send({ error: 'period must be "today" or "all"' });
+    }
+
+    const sinceMs = period === 'today' ? getTodayStartMs() : 0;
+    const uniqueCounts = period === 'today'
+      ? getDailyUniqueCounts()
+      : { uniqueAircraftCount: getSeenAircraftCount(), uniqueFlightsCount: getSeenFlightsCount() };
+
+    return {
+      uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
+      uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
+      newRegistrationsCount: getNewRegistrationsCount(sinceMs),
+      registrationsCount: period === 'today' ? null : getRegistrationsCount(),
+      maxRangeKm: period === 'today' ? getRangeSummary().maxRangeKm : getAllTimeMaxRangeKm(),
+      topTypes: getTypeCounts(sinceMs),
+      topAirlines: getAirlineCounts(sinceMs),
+    };
+  });
+
+  app.get('/api/stats/antenna', async () => {
+    const { signalDbfs, peakSignalDbfs } = getLatestSignal();
+    return {
+      altitudeBands: getAltitudeBandStats(),
+      sectors: getSectorStats(),
+      signalDbfs,
+      peakSignalDbfs,
+    };
+  });
 
   app.get('/api/airlines', async () => Object.fromEntries(getAirlines()));
 

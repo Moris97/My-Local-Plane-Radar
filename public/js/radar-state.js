@@ -1,5 +1,5 @@
 const liveAircraft = new Map(); // hex -> latest normalized aircraft
-let liveStats = { aircraftCount: 0, messagesPerSec: null, maxRangeKm: null };
+let liveStats = { aircraftCount: 0, messagesPerSec: null, maxRangeKm: null, maxRangeLastHourKm: null };
 let selectRequestHandler = null;
 const listeners = new Set();
 
