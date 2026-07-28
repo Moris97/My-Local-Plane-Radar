@@ -1018,20 +1018,62 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   ft up to 40k+, on-ground aircraft counted as 0 ft — same "ground = 0"
   convention as the watch list's altitude condition) and a **directional
   coverage rose chart** (`public/js/chart.js`'s new `renderRoseChartSvg`,
-  16-point compass rose, one filled pie-wedge "petal" per sector reaching
-  to a radius proportional to that sector's max range — literally "petals
-  in different directions marking max range," the shape the user asked
-  for, distinguishing it from a spider-chart's straight-edged polygon).
-  Both are running **all-time maxima only** (`altitudeBandIndex`/
-  `sectorIndex` bucket a sample, then only `Math.max` is kept per bucket —
-  same shape as the pre-existing single-scalar `allTimeMaxRangeKm`, just
-  broken down 9-and-16-ways instead of one number), fed from the same
-  per-tick loop as the daily-uniques tracking above, persisted as one small
-  JSON blob (`antennaStats` config key) **only when actually dirty**
-  (`flushAntennaStatsIfDirty` — a no-op, no SD write at all, once a
-  receiver's maxima stop moving after the first weeks). Bearing math
-  (`bearingDegrees`, standard great-circle initial-bearing formula) was
-  added to `server/src/range.js` alongside the pre-existing `distanceKm`.
+  72-sector compass rose — see the redesign note below for why 72 — one
+  filled pie-wedge "petal" per sector reaching to a radius proportional to
+  that sector's range figure). Persisted as one JSON blob (`antennaStats`
+  config key) **only when actually dirty** (`flushAntennaStatsIfDirty` — a
+  no-op, no SD write at all, once a receiver's figures stop moving after the
+  first weeks). Bearing math (`bearingDegrees`, standard great-circle
+  initial-bearing formula) was added to `server/src/range.js` alongside the
+  pre-existing `distanceKm`.
+
+  **Redesigned for the map coverage layer below** (originally shipped as a
+  single running max per band/sector, like the notification engine's
+  pre-existing `allTimeMaxRangeKm`): the user pointed at how Virtual Radar
+  Server's and tar1090's own range-coverage visualizations look — jagged,
+  spiky "starburst" shapes — and asked whether MLPR could do this better.
+  The spikes in both of those come directly from plotting a single running
+  maximum (or raw historical traces) per direction: one MLAT glitch or one
+  unusually lucky contact creates a permanent, visually dominant spike, and
+  neither tool does anything to smooth that out. Per (altitude band,
+  sector) cell, `antenna-stats.js` now retains the **best `TOP_K` (5)
+  samples ever**, not just the single max (`insertIntoTopK`, a small
+  sorted-and-capped array, still O(1)-ish and bounded regardless of how
+  long the receiver runs — hard rule 4 is still satisfied, this is nowhere
+  close to raw position history). Two figures come out of each cell for
+  free: `maxRangeKm` (the single best-ever contact — the same honest
+  "record" figure as before) and `topAvgRangeKm` (the mean of the retained
+  best 5 — outlier-resistant, since one MLAT glitch is diluted against 4
+  realistic samples instead of standing alone). The **Stats rose chart and
+  bar chart now show `topAvgRangeKm`** (bar chart shows both, as two series,
+  same two-color pattern as the pre-existing "Antenna range" history chart)
+  — smoother and more representative than before, a quality improvement
+  independent of the map feature.
+
+  **Sector count**: 16 → 72 (5° each). Reasoning discussed explicitly with
+  the user: too coarse and a single sector "speaks for" a wide swath of real
+  geography at long range (arc length at radius r is r·θ, so a 22.5° sector
+  covers ~10x the ground at 300 km that it does at 30 km) — literally
+  flattening a wedge of real, possibly-varying coverage into one number too
+  coarsely; too fine and most sectors would rarely accumulate enough real
+  contacts for a `top-5` figure to mean anything for a typical home
+  receiver's traffic density. 5° lands around 25–35 km of arc at a strong
+  receiver's realistic max range (~300–400 km) — a reasonable geographic
+  granularity, and still just a few thousand floats total (`BAND_SLOTS ×
+  SECTOR_COUNT × TOP_K`), nowhere near worth optimizing further. An extra,
+  internal-only "unknown altitude" band slot (`UNKNOWN_BAND_SLOT`) preserves
+  a sample's directional information even when it has no altitude data at
+  all (Mode-S-only contacts) — it's included when merging for the "all
+  altitudes" view (`getSectorStats(null)`) but never shown as its own named
+  band, matching what the pre-redesign single sector-only tracking already
+  covered.
+
+  A stored config blob from before this redesign (a different shape) is
+  detected and ignored by `ensureLoaded`'s shape check, starting fresh
+  rather than crashing — same defensive pattern already used elsewhere for
+  persisted config (e.g. `restoreFromSnapshot`'s date guard in
+  `stats-history.js`).
+
   **Signal strength** (current mean/peak, in dBFS) is a separate, much
   simpler live-only reading — `stats.last1min.local.signal`/`peak_signal`
   from readsb's own `stats.json` (verified against readsb's own
@@ -1051,6 +1093,59 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   implementations (registrations, airlines) were factored into one shared
   `loadLazyTable` helper in `stats.js` — worth it once there were genuinely
   two call sites of a ~150-line pattern, not before.
+
+### Reception coverage map layer (Settings → Map, off by default)
+
+A real shape drawn on the map itself (not just the Stats panel's rose
+chart), showing how far the receiver has picked up aircraft in each
+direction — the antenna-stats.js redesign documented above exists
+specifically to feed this well. Two polygons over one shared GeoJSON
+source/two layers (`public/js/app.js`'s `ensureCoverageLayer`, same
+"one source, two layers filtered by a property" shape as the pre-existing
+trail/trail-gap split, forced by the same constraint: `fill-opacity`/
+`line-dasharray` aren't per-feature-expressible within one layer):
+
+- **Fill** (`mlpr-coverage-fill`): the outlier-resistant `topAvgRangeKm`
+  boundary, semi-transparent filled polygon — the primary, "typical
+  excellent reception" shape.
+- **Outline** (`mlpr-coverage-outline`): the honest single-best-ever
+  `maxRangeKm` boundary, thin dashed line only, no fill — deliberately kept
+  as a second, visually distinct layer rather than dropped, so the record
+  contact is still visible without it dominating the whole shape (which is
+  exactly VRS's/tar1090's problem).
+
+**Server** (`GET /api/stats/antenna/coverage?band=all|0..8`,
+`server/src/server.js`): calls `getSectorStats(bandIndex)` at full 72-point
+resolution, then a new `destinationPoint(lat, lon, bearingDeg, distanceKm)`
+in `range.js` (the direct-geodesic problem, inverse of the pre-existing
+`distanceKm`/`bearingDegrees` pair — verified round-trip against them in
+`range.test.js`) turns each (bearing, range) pair into a real lat/lon,
+building two closed GeoJSON-ready rings. **Gated by `requireSettingsAuth`,
+same as `/api/settings`** — every vertex is `home ± bearing ± distance`, so
+the polygon is exactly as revealing of the receiver's exact location as the
+home marker already is; this is not a special case that bypasses that
+access control. A sector with nothing recorded yet resolves to distance 0,
+i.e. `destinationPoint` just returns the home coordinate — the polygon
+"pinches" to the center in that direction, which is the correct, honest
+representation of "no data here yet" (not a special case to guard against).
+
+**Client**: `showCoverage` (default **off** — a heavier, niche feature, not
+something every install wants cluttering the map by default) and
+`coverageBand` (`'all'` or an `ALTITUDE_BANDS` index 0–8) in
+`settings-state.js`, a new "Coverage" fieldset in Settings → Map
+(`settings.js`) with a checkbox + altitude-band `<select>`, both
+per-browser like every other Map-tab setting. Color comes from
+`trail.js`'s existing `colorForAltitude`, fed a representative midpoint
+altitude per band (`COVERAGE_BAND_MIDPOINT_FT` in `app.js`) — reuses the
+same gradient trails already use rather than inventing a second palette;
+"all altitudes" gets a fixed neutral green instead, since there's no single
+altitude to place on that gradient. Re-fetched only when `showCoverage`/
+`coverageBand` actually change (`lastRequestedShowCoverage`/
+`lastRequestedCoverageBand`, same "track what was last applied" pattern as
+`lastRequestedBasemapMode`/`lastRequestedMapTheme`), and the last-fetched
+GeoJSON is cached and reapplied by `ensureCoverageLayer` whenever the style
+resets (`setStyle` on a basemap switch wipes all sources, same reason the
+trail layer already has to re-add itself on `style.load`).
 
 ## Settings access control (`server/src/settings-auth.js`)
 

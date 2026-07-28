@@ -36,6 +36,21 @@ const LABEL_MIN_ZOOM = 7;
 const TRAIL_SOURCE_ID = 'mlpr-trail';
 const TRAIL_GAP_LAYER_ID = 'mlpr-trail-gap';
 
+const COVERAGE_SOURCE_ID = 'mlpr-coverage';
+const COVERAGE_FILL_LAYER_ID = 'mlpr-coverage-fill';
+const COVERAGE_OUTLINE_LAYER_ID = 'mlpr-coverage-outline';
+// Representative altitude (ft) for each antenna-stats.js ALTITUDE_BANDS
+// index -- purely so the coverage layer can pick a color from the same
+// altitude gradient trails already use (trail.js's colorForAltitude) instead
+// of inventing a second palette. The exact number barely matters since
+// colorForAltitude interpolates smoothly; each is just a representative
+// point inside its band.
+const COVERAGE_BAND_MIDPOINT_FT = [2500, 7500, 12500, 17500, 22500, 27500, 32500, 37500, 45000];
+// "All altitudes" has no single representative point to feed the gradient,
+// so it gets the app's own default accent green instead -- reads as
+// "combined", not as a specific rung on the altitude scale.
+const COVERAGE_ALL_COLOR = '#3ddc84';
+
 const map = new maplibregl.Map({
   container: 'map',
   style: BLANK_STYLE,
@@ -133,6 +148,96 @@ function ensureTrailLayer() {
   }
 }
 
+// Reception coverage overlay (Settings -> Map, off by default): one
+// GeoJSON source carrying two polygon features -- "fill" (the outlier-
+// resistant top-5-average boundary, server/src/antenna-stats.js) rendered
+// as a soft filled shape, and "max" (the honest single best-ever contact
+// per direction) rendered as a thin dashed outline around it. Two layers
+// over one source, filtered by a `kind` property -- same shape as the
+// trail/trail-gap split above, and for the same underlying reason
+// (`fill-opacity`/`line-dasharray` aren't things you can vary by feature
+// within one layer). Added *before* ensureTrailLayer() in
+// onBasemapEffectiveModeReady so trails paint on top of this, not under it.
+function ensureCoverageLayer() {
+  if (!map.getSource(COVERAGE_SOURCE_ID)) {
+    map.addSource(COVERAGE_SOURCE_ID, { type: 'geojson', data: coverageGeoJSON });
+  } else {
+    // setStyle() (basemap switch) wipes sources/layers -- re-adding the
+    // source above starts it empty again, so the last-fetched shape needs
+    // to be reapplied rather than waiting for the next settings change.
+    map.getSource(COVERAGE_SOURCE_ID).setData(coverageGeoJSON);
+  }
+
+  if (!map.getLayer(COVERAGE_FILL_LAYER_ID)) {
+    map.addLayer({
+      id: COVERAGE_FILL_LAYER_ID,
+      type: 'fill',
+      source: COVERAGE_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'fill'],
+      paint: {
+        'fill-color': ['get', 'color'],
+        'fill-opacity': 0.16,
+      },
+    });
+  }
+
+  if (!map.getLayer(COVERAGE_OUTLINE_LAYER_ID)) {
+    map.addLayer({
+      id: COVERAGE_OUTLINE_LAYER_ID,
+      type: 'line',
+      source: COVERAGE_SOURCE_ID,
+      filter: ['==', ['get', 'kind'], 'max'],
+      layout: { 'line-join': 'round' },
+      paint: {
+        'line-color': ['get', 'color'],
+        'line-width': 1.5,
+        'line-opacity': 0.55,
+        'line-dasharray': [2, 2],
+      },
+    });
+  }
+}
+
+function coverageColor(band) {
+  return band === 'all' ? COVERAGE_ALL_COLOR : colorForAltitude(COVERAGE_BAND_MIDPOINT_FT[band]);
+}
+
+let coverageGeoJSON = { type: 'FeatureCollection', features: [] };
+let lastRequestedShowCoverage = null;
+let lastRequestedCoverageBand = null;
+
+async function refreshCoverage() {
+  const { showCoverage, coverageBand } = getSettings();
+  lastRequestedShowCoverage = showCoverage;
+  lastRequestedCoverageBand = coverageBand;
+
+  if (!showCoverage) {
+    coverageGeoJSON = { type: 'FeatureCollection', features: [] };
+    map.getSource(COVERAGE_SOURCE_ID)?.setData(coverageGeoJSON);
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/stats/antenna/coverage?band=${coverageBand}`);
+    if (!response.ok) return; // 401 (Settings password set, not logged in) or offline -- leave whatever was last shown
+    const data = await response.json();
+    const color = coverageColor(coverageBand);
+    coverageGeoJSON =
+      data.fillPolygon && data.maxPolygon
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              { type: 'Feature', properties: { kind: 'fill', color }, geometry: { type: 'Polygon', coordinates: [data.fillPolygon] } },
+              { type: 'Feature', properties: { kind: 'max', color }, geometry: { type: 'Polygon', coordinates: [data.maxPolygon] } },
+            ],
+          }
+        : { type: 'FeatureCollection', features: [] }; // no home location configured
+    map.getSource(COVERAGE_SOURCE_ID)?.setData(coverageGeoJSON);
+  } catch {
+    // Offline/unreachable -- leave whatever was last shown rather than flapping.
+  }
+}
+
 function updateAttributionVisibility(mode) {
   // The MapLibre credit stays visible in both modes; only the OSM data
   // credit is online-only (offline mode uses public-domain Natural Earth
@@ -142,6 +247,7 @@ function updateAttributionVisibility(mode) {
 
 function onBasemapEffectiveModeReady(effective) {
   effectiveBasemapMode = effective;
+  ensureCoverageLayer();
   ensureTrailLayer();
   renderTrail();
   updateAttributionVisibility(effective);
@@ -282,6 +388,7 @@ map.on('load', async () => {
   }
   refreshTrailForSettings();
   refreshHomeLocation();
+  refreshCoverage();
 });
 
 // Re-check daylight periodically so an open tab flips itself at sunset/
@@ -320,6 +427,10 @@ onSettingsChange(() => {
   const resolvedTheme = resolveMapTheme(mapTheme);
   if (basemapMode !== lastRequestedBasemapMode || resolvedTheme !== lastRequestedMapTheme) {
     switchBasemap(basemapMode, resolvedTheme);
+  }
+  const { showCoverage, coverageBand } = getSettings();
+  if (showCoverage !== lastRequestedShowCoverage || coverageBand !== lastRequestedCoverageBand) {
+    refreshCoverage();
   }
   // Self-heals a never-succeeded first fetch (e.g. toggled on before the
   // initial map.on('load') request finished, or that request failed) --

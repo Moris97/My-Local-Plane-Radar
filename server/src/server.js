@@ -27,7 +27,8 @@ import { validatePort, resolvePort, setConfiguredPort } from './server-config.js
 import { getTodayStartMs, getDailyUniqueCounts, getRangeSummary } from './stats-history.js';
 import { getSeenAircraftCount, getSeenFlightsCount, getRegistrationsCount, getAllAirlinesSummary } from './db.js';
 import { getAllTimeMaxRangeKm } from './notifications/rules.js';
-import { getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
+import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
+import { destinationPoint } from './range.js';
 
 const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
 
@@ -235,6 +236,42 @@ export async function buildServer() {
       sectors: getSectorStats(),
       signalDbfs,
       peakSignalDbfs,
+    };
+  });
+
+  function closedRing(points) {
+    const ring = points.map((p) => [p.lon, p.lat]);
+    ring.push(ring[0]); // GeoJSON polygons must be a closed ring.
+    return ring;
+  }
+
+  // Gated the same as /api/settings: the polygon this returns is derived
+  // from the receiver's exact home coordinates (each vertex is home +
+  // bearing + distance), so it's just as revealing as the home marker --
+  // same access control, not a special case that bypasses it.
+  app.get('/api/stats/antenna/coverage', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const home = getEffectiveHome();
+    if (!home) return { fillPolygon: null, maxPolygon: null };
+
+    const bandParam = request.query?.band;
+    let bandIndex = null;
+    if (bandParam !== undefined && bandParam !== 'all') {
+      const parsed = Number(bandParam);
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed >= ALTITUDE_BANDS.length) {
+        return reply.code(400).send({ error: `band must be "all" or an integer 0..${ALTITUDE_BANDS.length - 1}` });
+      }
+      bandIndex = parsed;
+    }
+
+    const sectors = getSectorStats(bandIndex);
+    return {
+      // "Fill" (the primary shape) uses the outlier-resistant top-5 average;
+      // "max" is the honest single best-ever contact per direction, meant
+      // to be drawn as a thin outline around the fill rather than its own
+      // filled shape -- see CLAUDE.md for why (VRS's/tar1090's plots are
+      // exactly this max value alone, and that's what makes them spiky).
+      fillPolygon: closedRing(sectors.map((s) => destinationPoint(home.lat, home.lon, s.bearingDeg, s.topAvgRangeKm))),
+      maxPolygon: closedRing(sectors.map((s) => destinationPoint(home.lat, home.lon, s.bearingDeg, s.maxRangeKm))),
     };
   });
 

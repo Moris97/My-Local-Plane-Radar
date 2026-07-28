@@ -4,6 +4,15 @@ import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
 
+// Mirrors server/src/antenna-stats.js's ALTITUDE_BANDS, index for index --
+// only the translated label text lives here, the actual band boundaries are
+// server-side (this is display-only, never sent anywhere; the index itself
+// is what's sent as ?band=).
+const COVERAGE_BAND_LABEL_KEYS = [
+  'coverageBand0', 'coverageBand1', 'coverageBand2', 'coverageBand3', 'coverageBand4',
+  'coverageBand5', 'coverageBand6', 'coverageBand7', 'coverageBand8',
+];
+
 // Used only within the Server tab (see renderServerTab) -- everything else
 // no longer requires a token, so nothing else needs to react to a 401.
 async function authedFetch(url, options, onUnauthorized) {
@@ -113,6 +122,22 @@ function renderSettingsForm(container) {
       <fieldset class="mlpr-settings-group">
         <legend>${t('homeMarker')}</legend>
         <label><input type="checkbox" id="mlpr-show-home-marker" ${settings.showHomeMarker ? 'checked' : ''}> ${t('showHomeMarker')}</label>
+      </fieldset>
+
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('coverage')}</legend>
+        <div class="mlpr-checkbox-row">
+          <label><input type="checkbox" id="mlpr-show-coverage" ${settings.showCoverage ? 'checked' : ''}> ${t('showCoverage')}</label>
+          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('showCoverageHint')}</span></button>
+        </div>
+        <label>${t('coverageBand')}
+          <select id="mlpr-coverage-band">
+            <option value="all" ${settings.coverageBand === 'all' ? 'selected' : ''}>${t('coverageBandAll')}</option>
+            ${COVERAGE_BAND_LABEL_KEYS.map(
+              (key, i) => `<option value="${i}" ${settings.coverageBand === i ? 'selected' : ''}>${t(key)}</option>`,
+            ).join('')}
+          </select>
+        </label>
       </fieldset>
 
     </div>
@@ -343,6 +368,14 @@ function wireDisplaySettings(container) {
 
   container.querySelector('#mlpr-show-home-marker').addEventListener('change', (event) => {
     updateSettings({ showHomeMarker: event.target.checked });
+  });
+
+  container.querySelector('#mlpr-show-coverage').addEventListener('change', (event) => {
+    updateSettings({ showCoverage: event.target.checked });
+  });
+
+  container.querySelector('#mlpr-coverage-band').addEventListener('change', (event) => {
+    updateSettings({ coverageBand: event.target.value === 'all' ? 'all' : Number(event.target.value) });
   });
 
   container.querySelector('#mlpr-fetch-photos').addEventListener('change', (event) => {

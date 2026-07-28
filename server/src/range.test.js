@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees } from './range.js';
+import { distanceKm, bearingDegrees, destinationPoint } from './range.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(
@@ -65,4 +65,38 @@ test('bearingDegrees is always within [0, 360)', () => {
     const bearing = bearingDegrees(lat1, lon1, lat2, lon2);
     assert.ok(bearing >= 0 && bearing < 360, `expected ${bearing} to be within [0, 360)`);
   }
+});
+
+test('destinationPoint travelling due north lands at a higher latitude, same longitude', () => {
+  const { lat, lon } = destinationPoint(50.0, 20.0, 0, 111.19); // ~1 degree of latitude
+  assertClose(lat, 51.0, 0.01);
+  assertClose(lon, 20.0, 0.01);
+});
+
+test('destinationPoint travelling due east on the equator lands at a higher longitude, same latitude', () => {
+  const { lat, lon } = destinationPoint(0, 20.0, 90, 111.19);
+  assertClose(lat, 0, 0.01);
+  assertClose(lon, 21.0, 0.01);
+});
+
+test('destinationPoint with distance 0 returns the starting point unchanged', () => {
+  const { lat, lon } = destinationPoint(50.0, 20.0, 137, 0);
+  assertClose(lat, 50.0, 1e-9);
+  assertClose(lon, 20.0, 1e-9);
+});
+
+test('destinationPoint is the inverse of distanceKm/bearingDegrees: travelling the computed bearing and distance from A to B lands back on B', () => {
+  const a = { lat: 52.2297, lon: 21.0122 };
+  const b = { lat: 51.5074, lon: -0.1278 };
+  const bearing = bearingDegrees(a.lat, a.lon, b.lat, b.lon);
+  const distance = distanceKm(a.lat, a.lon, b.lat, b.lon);
+  const result = destinationPoint(a.lat, a.lon, bearing, distance);
+  assertClose(result.lat, b.lat, 0.01);
+  assertClose(result.lon, b.lon, 0.01);
+});
+
+test('destinationPoint normalizes longitude back into [-180, 180] when crossing the antimeridian', () => {
+  const { lon } = destinationPoint(0, 179.5, 90, 200); // heading east from near +180
+  assert.ok(lon >= -180 && lon <= 180, `expected ${lon} to be within [-180, 180]`);
+  assertClose(lon, -178.7, 0.1);
 });

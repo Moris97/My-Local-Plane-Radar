@@ -218,6 +218,7 @@ export function renderStatsPanel(container) {
         <section class="mlpr-stat-chart">
           <p class="mlpr-chart-label">${t('antennaRangeByAltitude')}</p>
           <div id="mlpr-antenna-chart-bands"></div>
+          <div class="mlpr-chart-legend" id="mlpr-antenna-legend-bands"></div>
         </section>
         <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
           <p class="mlpr-chart-label">${t('antennaCoverageRose')}</p>
@@ -527,20 +528,32 @@ export function renderStatsPanel(container) {
     }
 
     const bandsEl = container.querySelector('#mlpr-antenna-chart-bands');
+    const bandsLegendEl = container.querySelector('#mlpr-antenna-legend-bands');
     const roseEl = container.querySelector('#mlpr-antenna-chart-rose');
     if (!data || data.altitudeBands.every((b) => b.maxRangeKm === 0)) {
       emptyChartMessage(bandsEl);
+      bandsLegendEl.innerHTML = '';
       emptyChartMessage(roseEl);
       return;
     }
 
     bandsEl.innerHTML = renderBarChartSvg(
-      data.altitudeBands.map((b) => ({ bucket: b.label, maxRangeKm: b.maxRangeKm })),
-      [{ key: 'maxRangeKm', color: '#3ddc84' }],
+      data.altitudeBands.map((b) => ({ bucket: b.label, maxRangeKm: b.maxRangeKm, topAvgRangeKm: b.topAvgRangeKm })),
+      [
+        { key: 'maxRangeKm', color: '#3ddc84' },
+        { key: 'topAvgRangeKm', color: '#3d8bdc' },
+      ],
       { formatValue: (v) => formatDistance(v, units), formatBucket: (label) => label },
     );
+    bandsLegendEl.innerHTML =
+      legendItemHtml('#3ddc84', t('chartRangeMax')) + legendItemHtml('#3d8bdc', t('chartRangeTopAvg'));
+    // The rose uses the outlier-resistant top-5 average as its petal radius
+    // (not the single all-time max) -- the whole point of the redesign was
+    // to avoid VRS's/tar1090's spiky single-sample plots; the map coverage
+    // layer (Settings -> Map) is where the max is drawn too, as a separate
+    // thin outline around this same fill.
     roseEl.innerHTML = renderRoseChartSvg(
-      data.sectors.map((s) => ({ label: s.label, value: s.maxRangeKm })),
+      data.sectors.map((s) => ({ value: s.topAvgRangeKm })),
       { formatValue: (v) => formatDistance(v, units) },
     );
   }

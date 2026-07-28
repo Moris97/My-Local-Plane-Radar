@@ -29,6 +29,12 @@ const defaults = {
   // matters here specifically because the project advertises a fully
   // offline mode; every other network call MLPR makes is to its own Pi.
   fetchAircraftPhotos: true,
+  // Reception coverage overlay -- off by default (a niche, heavier feature,
+  // not something every install wants cluttering the map). coverageBand is
+  // 'all' or an antenna-stats.js ALTITUDE_BANDS index (0-8) -- see app.js's
+  // refreshCoverage/ensureCoverageLayer.
+  showCoverage: false,
+  coverageBand: 'all',
 };
 
 function load() {
