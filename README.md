@@ -1,6 +1,6 @@
 # My Local Plane Radar (MLPR)
 
-**Version 1.1** — a self-hosted web interface for a local ADS-B receiver
+**Version 1.2** — a self-hosted web interface for a local ADS-B receiver
 running on Raspberry Pi.
 
 MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wiedehopf/readsb)
