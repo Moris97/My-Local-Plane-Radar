@@ -1,6 +1,6 @@
 # My Local Plane Radar (MLPR)
 
-**Version 1.0** — a self-hosted web interface for a local ADS-B receiver
+**Version 1.1** — a self-hosted web interface for a local ADS-B receiver
 running on Raspberry Pi.
 
 MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wiedehopf/readsb)
@@ -28,17 +28,20 @@ Stats panels, and every Settings tab, with screenshots.
 
 - **Live map** — MapLibre GL JS vector map, aircraft icons that rotate to
   heading, altitude-colored trails, configurable map labels, a pulsing
-  receiver-location marker, online (detailed) or fully offline basemap.
+  receiver-location marker, online (detailed) or fully offline basemap, and
+  an optional reception coverage overlay showing how far your receiver has
+  actually picked up aircraft in each direction and altitude band.
 - **Aircraft details** — click any aircraft for identity, altitude, speed,
   squawk, autopilot targets, signal quality, and (when a registration is
   known) a photo fetched directly from
   [Planespotters.net](https://www.planespotters.net/photo/api)'s free public
   Photo API — disableable in Settings → Aircraft for a fully offline setup.
 - **List** — sortable, searchable table of everything currently in range.
-- **Stats** — live counters plus six history charts (aircraft seen,
-  position coverage, antenna range, new registrations, most common
-  type/airline) and a searchable table of every registration ever seen,
-  over 24h/7d/31d/1y/all-time ranges.
+- **Stats** — live "right now" numbers (nearest/farthest aircraft, rolling
+  max range), today/all-time summaries, history charts with a doughnut ↔
+  line trend toggle, antenna range/signal breakdowns, and searchable tables
+  of every registration and airline ever seen, over 24h/7d/31d/1y/all-time
+  ranges.
 - **Notifications** — push alerts via [ntfy](https://ntfy.sh) for emergency
   squawks (7500/7600/7700), first-time-seen aircraft, new range records,
   and a configurable watch list (by type, registration, or flight number,

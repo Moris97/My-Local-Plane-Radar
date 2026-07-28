@@ -87,33 +87,30 @@ shown above the table.
 
 ![Stats overview](images/stats-panel.png)
 
-A full-screen view (not a side panel, since charts need the room) with
-three live numbers at the top — current aircraft count, messages/sec, and
-this session's max range — plus six charts and a searchable table of every
-registration ever seen. A range selector (24h / 7d / 31d / 1y / all time,
-your last choice is remembered) controls all charts and the table together:
+A full-screen view (not a side panel, since charts need the room), organized
+into sections:
 
-- **Aircraft seen** — average and max simultaneous aircraft, over time.
-- **With / without position** — how many aircraft had a reported position
-  vs. Mode-S-only contacts with no lat/lon.
-- **Antenna range** — the all-time max range record, plus a "top ~10%
-  average" figure per period: the mean of that period's best few-percent of
-  one-minute range samples. This is more representative of typical good
-  reception than the single all-time max, which can be one lucky spike.
-- **New registrations** — first-time-seen aircraft, bucketed over the
-  selected range.
-- **Most common aircraft type** / **Most common airline** — doughnut charts
-  counting *distinct registrations*, not raw message volume, so one
-  aircraft passing overhead every day doesn't dominate the chart. Airline
-  identification is derived from the callsign against
-  [OpenFlights](https://openflights.org/data.html) data (ODbL-licensed);
-  military and general-aviation callsigns are correctly excluded rather
-  than mismatched.
-
-Below the charts, **"All registrations"** loads a full table of every
-registration MLPR has ever tracked (lazy-loaded — it's not fetched until
-you ask for it), sortable, paginated 20 rows at a time, with its own search
-box:
+- **Now** — live numbers: current aircraft count, how many have a reported
+  position, messages/sec, and a rolling last-hour max range, plus two tiles
+  showing the **nearest** and **farthest** aircraft currently in range
+  (callsign, type, altitude, speed, distance) — computed live from your own
+  browser, so it updates instantly with every map update.
+- **Today** and **All time** — aircraft/flights seen, new or total unique
+  registrations, max range, and most-common-type/airline doughnuts for each
+  period.
+- The familiar **range-selected charts** (24h / 7d / 31d / 1y / all time,
+  your last choice is remembered): aircraft seen, with/without position,
+  antenna range, new registrations, and most common type/airline — the
+  latter two doughnuts have a **Doughnut / Line** toggle in their top-right
+  corner, switching to a trend-over-time view for the top 5 types/airlines.
+- **Antenna statistics** — current signal strength (if your receiver has a
+  local SDR, not just a network feed), a range-by-altitude bar chart, and a
+  directional coverage chart showing which compass direction your antenna
+  reaches farthest in. Builds up gradually — a fresh install shows little to
+  nothing at first.
+- **All registrations** and **All airlines** — full, lazy-loaded (not
+  fetched until you ask), sortable, paginated, searchable tables of every
+  registration and airline ever seen:
 
 ![Registrations table, paginated](images/stats-pagination.png)
 
@@ -156,6 +153,14 @@ details, notification messages).
   details.
 - **Receiver location marker**: toggles a pulsing dot at the receiver's
   home location on the map.
+- **Coverage**: off by default. Draws a shape on the map showing how far
+  your receiver has actually picked up aircraft in each direction — a
+  filled area (a robust average of the best reception ever recorded that
+  way, resistant to one lucky contact skewing it) plus a thin dashed
+  outline (the single farthest contact ever recorded in that direction).
+  An altitude-band dropdown lets you look at coverage for a specific
+  altitude range instead of all altitudes combined. Builds up gradually
+  over time, same as the antenna statistics in Stats above.
 
 ### Aircraft tab
 
