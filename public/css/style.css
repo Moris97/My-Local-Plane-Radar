@@ -505,6 +505,12 @@ html, body {
   border-bottom: 1px solid #0f1920;
 }
 
+.mlpr-list-no-position {
+  color: #6f8a97;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+
 .mlpr-list-table tbody tr {
   cursor: pointer;
 }

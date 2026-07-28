@@ -19,6 +19,21 @@ let sortKey = 'flight';
 let sortAsc = true;
 let searchQuery = '';
 
+// Mode-S-only contacts (no ADS-B position, and often none from MLAT either)
+// still show up here -- see app.js's applyAircraftUpdate for why they used
+// to be silently dropped before ever reaching this list. A crossed-out pin
+// next to the callsign is the only visual difference from a positioned
+// row; everything else about the row (altitude, speed, sorting, search)
+// works exactly the same, since none of that data depends on position.
+const NO_POSITION_ICON = (title) => `
+  <svg class="mlpr-list-no-position" viewBox="0 0 24 24" width="14" height="14" fill="none"
+       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" role="img">
+    <title>${title}</title>
+    <path d="M12 21s7-7.58 7-12A7 7 0 0 0 5 9c0 4.42 7 12 7 12z"/>
+    <circle cx="12" cy="9" r="2.25"/>
+    <line x1="4" y1="4" x2="20" y2="20"/>
+  </svg>`;
+
 function formatCell(aircraft, key, units) {
   if (key === 'flight') return aircraft.flight || aircraft.hex;
   if (key === 'altBaro') return aircraft.onGround ? t('onGround') : (formatAltitude(aircraft.altBaro, units) ?? '—');
@@ -136,9 +151,15 @@ export function renderListPanel(container) {
       const row = document.createElement('tr');
       row.dataset.hex = aircraft.hex;
       if (aircraft.hex === selectedHex) row.classList.add('mlpr-list-row-selected');
+      const hasPosition = typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
       for (const col of COLUMNS) {
         const td = document.createElement('td');
-        td.textContent = formatCell(aircraft, col.key, units);
+        if (col.key === 'flight' && !hasPosition) {
+          td.innerHTML = NO_POSITION_ICON(t('noPositionData'));
+          td.append(document.createTextNode(' ' + formatCell(aircraft, col.key, units)));
+        } else {
+          td.textContent = formatCell(aircraft, col.key, units);
+        }
         row.appendChild(td);
       }
       row.addEventListener('click', () => requestSelect(aircraft.hex));

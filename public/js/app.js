@@ -28,6 +28,16 @@ const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
 const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
+// The coverage layer only re-fetches when the setting itself changes (see
+// onSettingsChange below) -- with nothing else driving it, a tab left open
+// with coverage on would show an increasingly stale shape as new farther
+// contacts get recorded server-side, only catching up on a manual reload or
+// toggling the setting off and on. Polled instead of pushed over the
+// existing WebSocket: this is a coarse, slowly-changing shape (antenna-
+// stats.js's per-cell top-5 lists rarely change once an install is a few
+// weeks old), not worth a dedicated push channel the way live aircraft
+// deltas are.
+const COVERAGE_REFRESH_INTERVAL_MS = 15000;
 // Below this zoom, dozens of overlapping labels would be pure noise rather
 // than useful -- matches the "at appropriate zoom levels" behavior other
 // ADS-B radar UIs default to.
@@ -402,6 +412,10 @@ setInterval(async () => {
   if (resolved !== lastRequestedMapTheme) switchBasemap(basemapMode, resolved);
 }, DAYLIGHT_POLL_INTERVAL_MS);
 
+setInterval(() => {
+  if (getSettings().showCoverage) refreshCoverage();
+}, COVERAGE_REFRESH_INTERVAL_MS);
+
 function passesAltitudeFilter(aircraft) {
   if (aircraft.onGround) return true;
   const alt = aircraft.altBaro;
@@ -680,21 +694,47 @@ function resetAll() {
   clearAircraft();
 }
 
+// Mode-S-only contacts (no ADS-B position, and this receiver has no way to
+// MLAT one) still carry real data -- callsign, altitude, squawk -- and
+// tar1090/Virtual Radar Server both list them; MLPR used to silently drop
+// them at this exact point (an early return here, before noteAircraft was
+// ever reached), which meant they never appeared in the List or counted
+// towards any total. Reported live: "why does tar1090 show more aircraft
+// than MLPR's list" (2026-07-28). Fixed by splitting this function's two
+// concerns -- "track this aircraft's data" (noteAircraft, always) and
+// "place/update a map marker" (only when there's a position to place it
+// at) -- which is also just a more honest description of what each half
+// actually does. list.js flags a position-less row instead of showing it
+// identically to a positioned one -- see aircraft-icon.js's noPosition
+// icon there.
 function applyAircraftUpdate(aircraft) {
-  if (typeof aircraft.lat !== 'number' || typeof aircraft.lon !== 'number') {
-    return;
-  }
-
-  const lngLat = [aircraft.lon, aircraft.lat];
   const now = Date.now();
   let state = aircraftState.get(aircraft.hex);
 
   if (!state) {
-    state = { marker: null, lastUpdateAt: now, lastLngLat: lngLat, goneAt: null };
+    state = { marker: null, lastUpdateAt: now, lastLngLat: null, goneAt: null };
     aircraftState.set(aircraft.hex, state);
   }
 
   const wasGone = state.goneAt !== null;
+  state.lastUpdateAt = now;
+  state.lastAircraft = aircraft;
+  state.goneAt = null;
+
+  noteAircraft(aircraft.hex, aircraft);
+
+  if (typeof aircraft.lat !== 'number' || typeof aircraft.lon !== 'number') {
+    // No plottable position right now -- still tracked (noteAircraft above
+    // already made it visible to the List/Stats/etc.), just nothing to put
+    // on the map. If this aircraft previously had a marker (a position
+    // that stopped being reported mid-flight, rare but possible), leave
+    // that marker exactly where it last was rather than snapping it away
+    // or deleting it -- the regular fade/forget timers below retire it on
+    // their own schedule if a real position never comes back.
+    return;
+  }
+
+  const lngLat = [aircraft.lon, aircraft.lat];
 
   if (!state.marker) {
     state.marker = new maplibregl.Marker({ element: createPlaneElement(aircraft) }).setLngLat(lngLat).addTo(map);
@@ -726,19 +766,13 @@ function applyAircraftUpdate(aircraft) {
   setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
   setPlaneLabel(state.marker.getElement(), buildAircraftLabel(aircraft, aircraftLabelFields, units));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
-
-  state.lastUpdateAt = now;
   state.lastLngLat = lngLat;
-  state.lastAircraft = aircraft;
-  state.goneAt = null;
 
   const { trailMode } = getSettings();
   if (trailMode === 'all' || aircraft.hex === selectedHex) {
     recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone);
     renderTrail();
   }
-
-  noteAircraft(aircraft.hex, aircraft);
 
   if (aircraft.hex === selectedHex) {
     showInfoPopup(aircraft.hex);

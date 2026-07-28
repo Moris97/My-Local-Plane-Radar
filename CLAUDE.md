@@ -387,7 +387,29 @@ not a special case that bypasses it.
   **not** `formatCell()`'s display strings — sorting `"1200 ft"` against
   `"On ground"` as text put "on ground" wherever it happened to collate
   alphabetically against numbers-with-units, not at the bottom of the
-  altitude range where it belongs.
+  altitude range where it belongs. **Mode-S-only contacts (no ADS-B
+  position) are shown, flagged with a small crossed-out pin icon next to
+  the callsign** (`NO_POSITION_ICON` in `list.js`) rather than omitted —
+  `app.js`'s `applyAircraftUpdate` used to bail out entirely (before ever
+  calling `noteAircraft`) for any aircraft missing `lat`/`lon`, which meant
+  they never reached the List, Stats, or any total count at all. Reported
+  live as "why does tar1090 show more aircraft than MLPR's list"
+  (2026-07-28) — tar1090/Virtual Radar Server both list these. Fixed by
+  splitting `applyAircraftUpdate`'s two concerns: `noteAircraft` (and the
+  `aircraftState` bookkeeping entry — `lastUpdateAt`/`goneAt`/fade-then-
+  forget timers) now always runs; only the marker-placement half (`new
+  maplibregl.Marker(...)`, trail recording, the info popup, initial
+  map-centering) is still gated on having a real position, since none of
+  that can exist without one. This didn't need new null-guards anywhere
+  else — every existing consumer of `aircraftState` entries
+  (`showInfoPopup`, `selectAndCenter`, `setSelectionHighlight`, the
+  fade/forget tick) already tolerated a `null` marker/`lastLngLat`
+  defensively, so a position-less entry (`marker: null, lastLngLat: null`)
+  just flows through the same machinery a marker fading out already does.
+  A position that's later lost mid-flight (rare) leaves the existing
+  marker exactly where it last was rather than deleting it — the regular
+  fade/forget timers retire it on schedule if a real position never
+  returns.
 - List and Settings are bottom sheets on phones, a side panel on large
   screens; closable via X, Android/iOS back-gesture, click on the overlay,
   or **Escape** (`panels.js`'s top-level `keydown` listener — closes
@@ -1018,8 +1040,8 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   ft up to 40k+, on-ground aircraft counted as 0 ft — same "ground = 0"
   convention as the watch list's altitude condition) and a **directional
   coverage rose chart** (`public/js/chart.js`'s new `renderRoseChartSvg`,
-  72-sector compass rose — see the redesign note below for why 72 — one
-  filled pie-wedge "petal" per sector reaching to a radius proportional to
+  120-sector compass rose — see the redesign note below for the resolution
+  history — one filled pie-wedge "petal" per sector reaching to a radius proportional to
   that sector's range figure). Persisted as one JSON blob (`antennaStats`
   config key) **only when actually dirty** (`flushAntennaStatsIfDirty` — a
   no-op, no SD write at all, once a receiver's figures stop moving after the
@@ -1050,19 +1072,29 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   — smoother and more representative than before, a quality improvement
   independent of the map feature.
 
-  **Sector count**: 16 → 72 (5° each). Reasoning discussed explicitly with
-  the user: too coarse and a single sector "speaks for" a wide swath of real
-  geography at long range (arc length at radius r is r·θ, so a 22.5° sector
-  covers ~10x the ground at 300 km that it does at 30 km) — literally
-  flattening a wedge of real, possibly-varying coverage into one number too
-  coarsely; too fine and most sectors would rarely accumulate enough real
-  contacts for a `top-5` figure to mean anything for a typical home
-  receiver's traffic density. 5° lands around 25–35 km of arc at a strong
-  receiver's realistic max range (~300–400 km) — a reasonable geographic
-  granularity, and still just a few thousand floats total (`BAND_SLOTS ×
-  SECTOR_COUNT × TOP_K`), nowhere near worth optimizing further. An extra,
-  internal-only "unknown altitude" band slot (`UNKNOWN_BAND_SLOT`) preserves
-  a sample's directional information even when it has no altitude data at
+  **Sector count**: 16 → 72 → **120** (3° each), the second bump made after
+  seeing the 72-sector version live on the map: a real contact's wedge was
+  visibly wider than its true track (screenshot evidence, not just theory).
+  Reasoning discussed explicitly with the user both times: too coarse and a
+  single sector "speaks for" a wide swath of real geography at long range
+  (arc length at radius r is r·θ, so a 22.5° sector covers ~10x the ground
+  at 300 km that it does at 30 km) — literally flattening a wedge of real,
+  possibly-varying coverage into one number too coarsely; too fine and most
+  sectors would rarely accumulate enough real contacts for a `top-5` figure
+  to mean anything for a typical home receiver's traffic density. Storage/
+  CPU cost is **not** the limiting factor at any resolution discussed (72,
+  90, 120) — each recorded sample only ever touches one sector regardless
+  of `SECTOR_COUNT`, and `BAND_SLOTS × SECTOR_COUNT × TOP_K` stays a few
+  thousand floats even at 120 — so once the coarser version visibly
+  under-delivered, there was no real reason not to go as fine as still made
+  statistical sense; 120 (3°, ~15–21 km of arc at a strong receiver's
+  realistic max range) is that point. The sparsity concern above is real
+  but self-corrects as more data accumulates over weeks/months, and hits
+  per-band views harder than the "all altitudes" one (which merges across
+  all 10 band slots per sector, so it stays well-populated much sooner).
+  An extra, internal-only "unknown altitude" band slot (`UNKNOWN_BAND_SLOT`)
+  preserves a sample's directional information even when it has no altitude
+  data at
   all (Mode-S-only contacts) — it's included when merging for the "all
   altitudes" view (`getSectorStats(null)`) but never shown as its own named
   band, matching what the pre-redesign single sector-only tracking already
@@ -1139,13 +1171,39 @@ per-browser like every other Map-tab setting. Color comes from
 altitude per band (`COVERAGE_BAND_MIDPOINT_FT` in `app.js`) — reuses the
 same gradient trails already use rather than inventing a second palette;
 "all altitudes" gets a fixed neutral green instead, since there's no single
-altitude to place on that gradient. Re-fetched only when `showCoverage`/
+altitude to place on that gradient. Re-fetched when `showCoverage`/
 `coverageBand` actually change (`lastRequestedShowCoverage`/
 `lastRequestedCoverageBand`, same "track what was last applied" pattern as
-`lastRequestedBasemapMode`/`lastRequestedMapTheme`), and the last-fetched
-GeoJSON is cached and reapplied by `ensureCoverageLayer` whenever the style
-resets (`setStyle` on a basemap switch wipes all sources, same reason the
-trail layer already has to re-add itself on `style.load`).
+`lastRequestedBasemapMode`/`lastRequestedMapTheme`), **and** on a
+`COVERAGE_REFRESH_INTERVAL_MS` (15s) timer while it's on — the first
+shipped version only had the former, which meant a tab left open with
+coverage enabled would show an increasingly stale shape as new farther
+contacts got recorded server-side, only catching up on a manual reload or
+toggling the setting off and back on (reported live, 2026-07-28; this
+class of bug is exactly why it's polled rather than pushed over the
+existing WebSocket in the first place — nothing was driving a refresh at
+all). The last-fetched GeoJSON is cached and reapplied by
+`ensureCoverageLayer` whenever the style resets (`setStyle` on a basemap
+switch wipes all sources, same reason the trail layer already has to
+re-add itself on `style.load`).
+
+**A note on verifying anything in this section**: this sandbox has no
+WebGL (`GL_VENDOR = Disabled`, confirmed multiple ways earlier in
+development), and `new maplibregl.Map(...)` throws *synchronously* inside
+its constructor when that happens — which halts the rest of `app.js`'s
+top-level module evaluation, including every `onSettingsChange`/`setInterval`
+registration below it. A real browser's console only reports the one
+WebGL error and otherwise looks quiet, which reads exactly like "no
+errors, must be fine" — but nothing past that point in the module ever
+ran. This is *not* hypothetical: it's exactly how the missing-periodic-
+refresh bug above shipped in the first place, verified only by checking
+for new console errors after toggling the setting, never by checking that
+the fetch actually happened. Re-verifying this section (or anything else
+in `app.js` reacting to settings/timers) needs the FakeMap/FakeMarker/
+FakePopup stub technique (route-intercept `/vendor/maplibre-gl/
+maplibre-gl.js` and serve a fake implementing just the methods `app.js`
+calls) so the module actually finishes loading — a screenshot or a
+"no new console errors" check alone will not catch a dead reactive path.
 
 ## Settings access control (`server/src/settings-auth.js`)
 

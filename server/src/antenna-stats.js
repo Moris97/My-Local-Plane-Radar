@@ -20,14 +20,24 @@ export const ALTITUDE_BANDS = [
   { label: '40,000+ ft', maxFt: Infinity },
 ];
 
-// 5° per sector: at a strong receiver's realistic max range (roughly
-// 300-400 km), one sector "speaks for" only ~25-35 km of arc -- fine enough
-// that a single sector no longer flattens a wide swath of real geography
-// into one value, without going so fine that most sectors sit at zero for
-// a typical home receiver's traffic density (the user's own tradeoff:
-// resolution vs. having enough real samples per sector to be meaningful).
-// Easy constant to retune later; nothing else hardcodes this number.
-export const SECTOR_COUNT = 72;
+// 3° per sector (raised from an initial 5°/72 sectors after seeing the
+// coarser version live on the map -- a real contact's wedge was visibly
+// wider than the true track). At a strong receiver's realistic max range
+// (roughly 300-400 km), one sector now "speaks for" ~15-21 km of arc.
+// Storage/CPU cost of going finer is not a real constraint here -- each
+// recorded sample still only ever touches one sector regardless of
+// SECTOR_COUNT, and BAND_SLOTS * SECTOR_COUNT * TOP_K stays a few thousand
+// floats at any resolution discussed (72/90/120) -- so this was raised as
+// far as made sense rather than picking a number to save space. The real
+// limit going finer is statistical, not architectural: each (band, sector)
+// cell accumulates fewer real contacts the finer sectors get, so a single-
+// band map view can stay sparse for a while on a new install (though the
+// "all altitudes" view, which merges across all 10 band slots per sector,
+// stays well-populated much sooner). That tradeoff self-corrects as more
+// data accumulates over weeks/months; it doesn't get worse over time the
+// way it would if this were unbounded storage. Easy constant to retune
+// again later; nothing else hardcodes this number.
+export const SECTOR_COUNT = 120;
 
 // One extra internal-only slot for samples with no altitude data at all
 // (Mode-S-only contacts, or a transient decode gap) -- these still carry
