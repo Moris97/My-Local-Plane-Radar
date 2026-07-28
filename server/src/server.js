@@ -81,6 +81,9 @@ export async function buildServer() {
     app.get('/dev/icons', async (request, reply) => {
       reply.type('text/html').send(await readFile(join(devDir, 'icons.html'), 'utf8'));
     });
+    app.get('/dev/icons-map', async (request, reply) => {
+      reply.type('text/html').send(await readFile(join(devDir, 'icons-map.html'), 'utf8'));
+    });
   }
 
   async function requireSettingsAuth(request, reply) {
