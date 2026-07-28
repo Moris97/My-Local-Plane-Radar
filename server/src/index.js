@@ -247,9 +247,14 @@ async function main() {
     }
   }, STATS_HISTORY_SNAPSHOT_INTERVAL_MS);
 
-  setInterval(() => pruneCooldowns(), COOLDOWN_PRUNE_INTERVAL_MS);
-  setInterval(() => pruneTokens(), COOLDOWN_PRUNE_INTERVAL_MS);
-  setInterval(() => prunePendingFirstSeen(), COOLDOWN_PRUNE_INTERVAL_MS);
+  // These three shared one interval constant already but each ran as its
+  // own setInterval -- three timer wakeups an hour for what is really one
+  // "do the hourly pruning" tick. Merged into one.
+  setInterval(() => {
+    pruneCooldowns();
+    pruneTokens();
+    prunePendingFirstSeen();
+  }, COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {
     evictStaleTrails(new Set(getTrackedAircraft().map((aircraft) => aircraft.hex)));
   }, TRAIL_EVICTION_INTERVAL_MS);

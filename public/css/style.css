@@ -494,8 +494,12 @@ html, body {
   padding-bottom: calc(16px + var(--bottom-bar-height) + env(safe-area-inset-bottom));
 }
 
+/* This is the actual answer to what the user is looking at ("No aircraft in
+   range", "No data yet" on an empty chart) -- content, not a secondary
+   hint, even though it reads as one. Brightened from #6f8a97 so it doesn't
+   visually disappear next to genuinely secondary captions. */
 .mlpr-empty {
-  color: #6f8a97;
+  color: #a9c4cf;
 }
 
 .mlpr-list-toolbar {
@@ -1120,7 +1124,10 @@ html, body {
   border-left: 2px solid #245c3c;
   background: rgba(18, 52, 35, 0.35);
   border-radius: 0 4px 4px 0;
-  color: #8fb3a2;
+  /* Brightened from #8fb3a2 -- this is the banner telling the user whether
+     a whole tab is per-browser or shared with everyone on the LAN, worth
+     reading at a glance rather than skimmed past as a footnote. */
+  color: #b9dccb;
   font-size: 11.5px;
   line-height: 1.4;
 }
@@ -1145,6 +1152,18 @@ html, body {
 .mlpr-settings-group input[type='range'] {
   width: 100%;
   margin: 0 0 10px;
+  accent-color: #3ddc84;
+}
+
+/* Radio buttons and checkboxes otherwise render with the browser's own
+   default accent (blue on most platforms), which stood out sharply against
+   this app's dark green/blue/black theme everywhere they appear (Settings'
+   radio groups, the watch list, List's "Configure" checkboxes) -- every
+   other control on the page is deliberately themed, this was the one
+   holdout. `accent-color` is the standard, no-JS way to recolor a native
+   control's checked state without losing platform-native behavior/a11y. */
+input[type='radio'],
+input[type='checkbox'] {
   accent-color: #3ddc84;
 }
 
