@@ -71,3 +71,17 @@ Added to as they come up; picked up in a later stage when relevant.
   elevation angle and drive a PTZ IP camera to point at it (most support
   ONVIF or simple HTTP CGI commands), updated every 1-2s. A visual "wow
   effect" feature. Requested 2026-07-28.
+- **DOM `maplibregl.Marker`-per-aircraft has a performance ceiling** —
+  fine at this project's realistic scale, but a few hundred simultaneous
+  aircraft is where large ADS-B web UIs typically move to a MapLibre
+  symbol layer (one GeoJSON source, `icon-image`/`icon-size`/`icon-rotate`,
+  GPU-composited) instead of one HTML element per aircraft. Explicitly
+  *not* being done now (2026-07-28, during the icon-set/classification
+  work): the current DOM-marker architecture is deliberate (see
+  `aircraft-icon.js`/`style.css` comments — hover, the achromatic selection
+  glow, the plane label, and map↔list cross-highlight are all built on
+  per-marker DOM elements) and switching would mean rebuilding all of
+  those on symbol-layer mechanics (query rendered features for hover/click,
+  a separate layer for the glow, `text-field` for labels). Revisit only if
+  real performance problems show up at this receiver's actual traffic
+  density — this note is so it's obvious where to look if that happens.

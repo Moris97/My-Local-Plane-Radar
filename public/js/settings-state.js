@@ -5,6 +5,13 @@
 // "Settings scope" section for which tab is which.
 const STORAGE_KEY = 'mlpr-settings';
 
+// Single source of truth for the icon-size slider's range/default, shared
+// by settings.js (the actual <input type="range">) and /dev/icons (which
+// must preview the real min/default/max, not made-up fixed sizes).
+export const ICON_SIZE_MIN = 24;
+export const ICON_SIZE_MAX = 64;
+export const ICON_SIZE_DEFAULT = 40;
+
 const defaults = {
   units: 'imperial',
   altitudeFilterMin: null,
@@ -17,7 +24,7 @@ const defaults = {
   trailMode: 'click', // 'click' | 'all'
   shorterTrails: false, // performance option: cap client-side trail length lower than the server default
   showHomeMarker: true, // pulsing dot at the receiver's location -- see app.js's homeMarker
-  aircraftIconSize: 40, // px, side of the .mlpr-plane marker
+  aircraftIconSize: ICON_SIZE_DEFAULT, // px, side of the .mlpr-plane marker
   planeColorMode: 'signalLoss', // 'signalLoss' | 'altitude' | 'speed'
   // Which fields appear in the small map label under each aircraft (empty
   // object/all-false = no label at all). Kept minimal by default (just the

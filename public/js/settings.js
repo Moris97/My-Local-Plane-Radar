@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { getSettings, updateSettings } from './settings-state.js';
+import { getSettings, updateSettings, ICON_SIZE_MIN, ICON_SIZE_MAX } from './settings-state.js';
 import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
@@ -150,7 +150,7 @@ function renderSettingsForm(container) {
           ${t('iconSize')}
           <span id="mlpr-icon-size-value">${settings.aircraftIconSize}px</span>
         </label>
-        <input type="range" id="mlpr-icon-size" min="24" max="64" step="2" value="${settings.aircraftIconSize}">
+        <input type="range" id="mlpr-icon-size" min="${ICON_SIZE_MIN}" max="${ICON_SIZE_MAX}" step="2" value="${settings.aircraftIconSize}">
         <div class="mlpr-radio-group">
           <span class="mlpr-radio-group-label">${t('planeColorMode')}</span>
           <label><input type="radio" name="mlpr-plane-color-mode" value="signalLoss" ${settings.planeColorMode === 'signalLoss' ? 'checked' : ''}> ${t('planeColorModeSignalLoss')}</label>

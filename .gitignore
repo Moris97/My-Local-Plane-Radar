@@ -4,6 +4,11 @@ node_modules/
 *.db-shm
 *.pmtiles
 data/
+# Unlike the root data/ dir (fetched/generated, never committed -- airlines.json,
+# mlpr.db, naturalearth), public/data/ holds small, hand-authored, committed
+# project data (icon-types.json) that ships with the app and is served to the
+# browser -- carve it back out of the blanket data/ ignore above.
+!public/data/
 fixtures/*.json
 .env
 *.log

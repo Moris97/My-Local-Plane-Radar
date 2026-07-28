@@ -1,6 +1,8 @@
 // All icons share a 24x24 viewBox and a single <g fill="..."> wrapper so
 // setPlaneColor keeps working the same way regardless of shape.
-const ICONS = {
+// Exported (only) for /dev/icons' old-vs-new comparison row -- nothing at
+// runtime outside this module reads ICONS directly.
+export const ICONS = {
   // Default/fallback silhouette -- also used for anything we can't
   // specifically classify (large/heavy/high-performance categories, or no
   // category info at all): a swept-wing airliner shape.

@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readFile } from 'node:fs/promises';
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
@@ -43,6 +44,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const publicDir = join(__dirname, '..', '..', 'public');
 const maplibreDistDir = dirname(require.resolve('maplibre-gl/dist/maplibre-gl.js'));
 const mapDataDir = join(__dirname, '..', '..', 'data', 'naturalearth');
+// Deliberately outside publicDir -- fastifyStatic above serves all of
+// public/ unconditionally, so a dev-only page can't live there without a
+// second, NODE_ENV-gated mechanism (see below).
+const devDir = join(__dirname, '..', '..', 'dev');
 
 export async function buildServer() {
   const app = Fastify({ logger: true });
@@ -62,6 +67,21 @@ export async function buildServer() {
     prefix: '/mapdata/',
     decorateReply: false,
   });
+
+  // Icon dev/test tool -- never reachable in production. Registering the
+  // static prefix itself only when NODE_ENV !== 'production' (rather than
+  // relying on the route alone) means /dev/icons-client.js also 404s in
+  // production, not just the page.
+  if (process.env.NODE_ENV !== 'production') {
+    await app.register(fastifyStatic, {
+      root: devDir,
+      prefix: '/dev/',
+      decorateReply: false,
+    });
+    app.get('/dev/icons', async (request, reply) => {
+      reply.type('text/html').send(await readFile(join(devDir, 'icons.html'), 'utf8'));
+    });
+  }
 
   async function requireSettingsAuth(request, reply) {
     if (!isPasswordSet()) return;
