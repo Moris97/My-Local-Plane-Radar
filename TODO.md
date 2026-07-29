@@ -5,7 +5,37 @@ Added to as they come up; picked up in a later stage when relevant.
 
 - **Visual/cosmetic polish** — icon shapes, colors, spacing, general look-and-feel
   pass. Deferred until the app is functionally complete ("na sam koniec",
-  said after Stage 1).
+  said after Stage 1). Icon *shapes* themselves are now done (see the new
+  entry below) — this bullet is left open for whatever colors/spacing
+  polish is still wanted elsewhere in the UI.
+- **New icon set (`public/js/plane-icons.js` + `icon-classify.js`) is not
+  wired into the live map yet** — all 16 classified icons + `tower` were
+  redesigned this round (2026-07-29, extensive render-compare-adjust
+  sessions per icon, see git log), and the classification *algorithm*
+  (`icon-classify.js`'s decision chain: typeCode 'TWR' -> military-table
+  override -> own type table -> ADS-B category -> unknown fallback) is
+  final. Three concrete things still block production use, none of them
+  started:
+  - **Stage 3**: `data/icon-types.json`'s type table is still only a small
+    illustrative sample (37 exact + 17 prefix + 3 military entries) picked
+    to exercise each link of the classification chain — not real coverage
+    of aircraft types that will actually show up on a live receiver feed.
+  - **Stage 4**: a `tools/` cross-check script (doesn't exist yet) to
+    verify the type table against real data, and to confirm the two
+    placeholder military entries (A332/A333 -> `special`) are actually
+    correct rather than illustrative guesses.
+  - **Wiring**: `public/js/app.js` still imports icon rendering
+    (`createPlaneElement`/`setPlaneHeading`/`setPlaneColor`/`setPlaneKind`/
+    `setPlaneLabel`) from the OLD `aircraft-icon.js` module (4 shapes:
+    passenger/light/helicopter/tower) — zero production code references
+    `plane-icons.js` or `icon-classify.js` today, only `/dev/icons` and
+    `/dev/icons-map` (dev-only pages) do. Swapping this over means also
+    carrying across `NON_ROTATING_ICON_IDS` (balloon/tower/drone must
+    never rotate by track) into whatever replaces `setPlaneHeading`.
+    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (an exploratory
+    animated-rotor mechanism for helicopter/drone, confirmed as a nice
+    visual but deliberately not wired in) is a separate, later decision on
+    top of this basic wiring, not a blocker for it.
 - **Notification engine: radius-from-home geofence** — notify when *any*
   aircraft (not just a watched one) enters a distance-from-home radius. The
   watch-list's per-entry altitude condition (below/above threshold) shipped;
