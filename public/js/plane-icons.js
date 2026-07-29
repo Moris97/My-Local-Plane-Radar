@@ -678,12 +678,58 @@ const militaryJetPath = symmetricOutline([
   [12, MJ_TAIL_CONE_Y],
 ]);
 
-// Glider: an almost perfectly straight (unswept), edge-to-edge wing (the
-// longest, thinnest span of any icon here) and a very slim fuselage.
-const gliderPath = wingedOutline({
-  noseY: 4, fuseHalfWidth: 0.5, wingFrontY: 11.8, wingHalfSpan: 12, wingBackY: 12.2,
-  tailHalfSpan: 2, tailY: 19.5, tailTipY: 21,
-});
+// Glider (sailplane), rebuilt against a real reference photo: a rounded
+// nose pod (cockpit bulge, ovalNosePoints -- same technique as
+// cargo_turboprop/cargo_jet's blunt nose, just shallower) tapering to a
+// thin boom before the wing -- unlike every wingedOutline-based icon here,
+// the wing attaches to the already-thin fuselage, not a wide wing root.
+// The wing's leading edge is straight, with the taper entirely on the
+// trailing edge and a short clipped (not pointed) tip, and the tailplane
+// is a rounded rectangle rather than a swept-to-a-point tail. The
+// tailplane's two front (leading-edge) corners get a noticeably bigger
+// round than the two rear (trailing-edge) corners -- requested directly
+// after a first, symmetrically-rounded attempt -- which needs its own
+// inline radius map below rather than symmetricOutlineRounded's single
+// shared radius.
+const GL_FUSE_HALF_WIDTH = 0.5;
+const GL_WING_HALF_SPAN = 11.8;
+const GL_WING_FRONT_Y = 11;
+const GL_WING_BACK_Y = 13;
+const GL_TAIL_HALF_SPAN = 2.3;
+const GL_TAIL_FRONT_Y = 18.8;
+const GL_TAIL_BACK_Y = 20;
+const GL_TAIL_ROUND_FRONT = 0.9;
+const GL_TAIL_ROUND_BACK = 0.35;
+
+const glTailTipFront = [CENTER_X + GL_TAIL_HALF_SPAN, GL_TAIL_FRONT_Y];
+const glTailTipBack = [CENTER_X + GL_TAIL_HALF_SPAN, GL_TAIL_BACK_Y];
+
+const gliderRightPoints = [
+  ...ovalNosePoints(GL_FUSE_HALF_WIDTH, 3, 2.2, 5),        // rounded nose pod
+  [CENTER_X + GL_FUSE_HALF_WIDTH, GL_WING_FRONT_Y],         // wing root LE
+  [CENTER_X + GL_WING_HALF_SPAN, GL_WING_FRONT_Y + 0.8],    // wingtip LE (clipped)
+  [CENTER_X + GL_WING_HALF_SPAN, GL_WING_BACK_Y - 0.8],     // wingtip TE (clipped)
+  [CENTER_X + GL_FUSE_HALF_WIDTH, GL_WING_BACK_Y],          // wing root TE
+  [CENTER_X + 0.4, 17],                                     // thin boom
+  [CENTER_X + 0.45, GL_TAIL_FRONT_Y],                       // tailplane root LE
+  glTailTipFront,
+  glTailTipBack,
+  [CENTER_X + 0.45, GL_TAIL_BACK_Y],                        // tailplane root TE
+  [CENTER_X, 20.8],                                         // tail cone tip
+];
+const glMiddle = gliderRightPoints.slice(1, -1);
+const glLeft = glMiddle.slice().reverse().map(([x, y]) => [2 * CENTER_X - x, y]);
+const glFull = [...gliderRightPoints, ...glLeft];
+const glRadiusByPoint = new Map();
+for (const [x, y] of [glTailTipFront]) {
+  glRadiusByPoint.set(`${x},${y}`, GL_TAIL_ROUND_FRONT);
+  glRadiusByPoint.set(`${2 * CENTER_X - x},${y}`, GL_TAIL_ROUND_FRONT);
+}
+for (const [x, y] of [glTailTipBack]) {
+  glRadiusByPoint.set(`${x},${y}`, GL_TAIL_ROUND_BACK);
+  glRadiusByPoint.set(`${2 * CENTER_X - x},${y}`, GL_TAIL_ROUND_BACK);
+}
+const gliderPath = polyRounded(glFull, glRadiusByPoint);
 
 // Unknown -- deliberately the plainest shape in the set (a straight,
 // unswept wing and almost no tail flare at all): this is the most-shown
