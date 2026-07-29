@@ -1,4 +1,4 @@
-import { getIconPath, getIconSizeMultiplier, ICON_SIZE_MULTIPLIERS, VIEW_BOX } from '/js/plane-icons.js';
+import { getIconPath, getIconSizeMultiplier, ICON_SIZE_MULTIPLIERS, NON_ROTATING_ICON_IDS, VIEW_BOX } from '/js/plane-icons.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
 import { ICON_SIZE_DEFAULT } from '/js/settings-state.js';
 
@@ -46,7 +46,11 @@ function markerElement(kind, aircraft, stage) {
   wrapper.style.width = `${size}px`;
   wrapper.style.height = `${size}px`;
   const inputLabel = aircraft.typeCode ?? (aircraft.category ? `cat ${aircraft.category}` : '(no data)');
-  const rotation = kind === 'tower' ? 0 : aircraft.track;
+  // Demo tracks above are deliberately non-zero even for balloon/drone, to
+  // make it obvious here (not just in a code comment) that
+  // NON_ROTATING_ICON_IDS actually holds -- if this regressed, the balloon
+  // and drone markers below would visibly rotate away from upright.
+  const rotation = NON_ROTATING_ICON_IDS.has(kind) ? 0 : aircraft.track;
   wrapper.innerHTML = `
     <svg viewBox="${VIEW_BOX}" fill="none" style="transform: rotate(${rotation}deg)">
       <path d="${getIconPath(kind)}" fill="currentColor"/>

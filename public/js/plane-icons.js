@@ -786,8 +786,13 @@ const ICON_PATHS = {
   glider: gliderPath,
 
   // Balloon: round envelope + a basket -- deliberately not aircraft-shaped
-  // at all, and symmetric, so rotation by `track` (which balloons rarely
-  // report meaningfully anyway) never looks wrong.
+  // at all. NOT symmetric though (the basket sits below the envelope), so
+  // rotating it by `track` the way every real aircraft icon does looks
+  // actively wrong -- upside down, the basket ends up on top. Caught live
+  // (2026-07-29): `track` on a balloon rarely means anything real anyway
+  // (drift direction, not a nose heading), so this and every other
+  // NON_ROTATING_ICON_IDS entry below must be rendered upright regardless
+  // of whatever track value readsb reports for them -- see that export.
   balloon: combine(
     ellipse(12, 10, 6, 7),
     poly([[10, 19.5], [14, 19.5], [14, 22], [10, 22]]),
@@ -795,7 +800,11 @@ const ICON_PATHS = {
 
   // Drone/quadcopter: a compact X of four short arms plus a small center
   // body -- small and dense on purpose (multiplier 0.8), reads as
-  // "small unmanned thing", not a scaled-down aircraft silhouette.
+  // "small unmanned thing", not a scaled-down aircraft silhouette. Also in
+  // NON_ROTATING_ICON_IDS: a quadcopter has no fixed "nose" the way a
+  // fixed-wing aircraft or helicopter does, so spinning this to match
+  // `track` would be arbitrary rather than meaningful, same reasoning as
+  // balloon/tower.
   drone: combine(
     poly([[9.6, 8.75], [15.25, 14.4], [14.4, 15.25], [8.75, 9.6]]),
     poly([[8.75, 14.4], [14.4, 8.75], [15.25, 9.6], [9.6, 15.25]]),
@@ -815,7 +824,9 @@ const ICON_PATHS = {
 
   // Ground-station beacon (typeCode 'TWR') -- not a real aircraft type at
   // all, kept outside the 16-icon spec on purpose (see CLAUDE.md). Carried
-  // over from the old module, flattened to one <path>.
+  // over from the old module, flattened to one <path>. Also in
+  // NON_ROTATING_ICON_IDS -- a fixed ground structure has no heading at
+  // all, whatever `track` readsb happens to report for it is meaningless.
   tower: combine(
     poly([[12, 2], [12.8, 2], [17, 22], [15.2, 22]]),
     poly([[11.2, 2], [12, 2], [8.8, 22], [7, 22]]),
@@ -836,6 +847,23 @@ export const PLANE_ICON_IDS = [
   'balloon', 'drone', 'ground_vehicle', 'unknown',
   'tower',
 ];
+
+// Icon kinds that must never be rotated by `track`/heading -- unlike every
+// real aircraft here, none of these three have a meaningful "nose
+// direction": a balloon's basket hangs asymmetrically below the envelope
+// (rotating it puts the basket on top, caught live 2026-07-29), a
+// ground-station beacon is a fixed structure with no heading at all, and a
+// quadcopter has no fixed nose to point anywhere in particular. Whatever
+// `track`/`mag_heading` readsb reports for these (if anything) should be
+// ignored for rendering purposes -- always draw them upright. The one
+// consumer of this today is `aircraft-icon.js`'s `setPlaneHeading`, which
+// special-cases 'tower' directly since that's the only one of these three
+// that exists in the OLD (currently live) icon module; this export is the
+// single source of truth to check against instead once this new icon set
+// (still not wired into app.js -- see the top of this file) replaces it,
+// so 'balloon'/'drone' get the same treatment from day one rather than
+// this being rediscovered later.
+export const NON_ROTATING_ICON_IDS = new Set(['tower', 'balloon', 'drone']);
 
 // Size multipliers relative to the user's icon-size slider value -- never a
 // fixed pixel count, so they scale together with that setting. Values taken

@@ -1,4 +1,4 @@
-import { PLANE_ICON_IDS, VIEW_BOX, getIconPath, getIconSizeMultiplier } from '/js/plane-icons.js';
+import { PLANE_ICON_IDS, NON_ROTATING_ICON_IDS, VIEW_BOX, getIconPath, getIconSizeMultiplier } from '/js/plane-icons.js';
 import { ICONS as OLD_ICONS } from '/js/aircraft-icon.js';
 import { colorForAltitude } from '/js/trail.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
@@ -33,19 +33,24 @@ function renderSizeGrid() {
   for (const id of PLANE_ICON_IDS) {
     const pathD = getIconPath(id);
     const multiplier = getIconSizeMultiplier(id);
+    const nonRotating = NON_ROTATING_ICON_IDS.has(id);
     const block = document.createElement('div');
     block.className = 'size-block';
-    block.innerHTML = `<h3>${id} (×${multiplier})</h3>`;
+    block.innerHTML = `<h3>${id} (×${multiplier})${nonRotating ? ' — fixed, never rotates with track' : ''}</h3>`;
     const grid = document.createElement('div');
     grid.className = 'icon-grid';
     for (const size of SIZES) {
       const renderedPx = Math.round(size.px * multiplier);
-      for (const rotation of ROTATIONS) {
+      // Matches setPlaneHeading()'s real behavior: NON_ROTATING_ICON_IDS
+      // always render upright, regardless of whatever track/heading value
+      // is reported -- showing them "rotated" here would misrepresent how
+      // they actually look on the live map.
+      for (const rotation of nonRotating ? [0] : ROTATIONS) {
         grid.appendChild(iconCard({
           pathD,
           sizePx: renderedPx,
           rotationDeg: rotation,
-          label: `${size.label} (${renderedPx}px) · ${rotation}°`,
+          label: nonRotating ? `${size.label} (${renderedPx}px) · fixed` : `${size.label} (${renderedPx}px) · ${rotation}°`,
           bg: currentBg,
         }));
       }
