@@ -91,6 +91,22 @@ function taperPoints(fromX, toX, y0, y1, steps) {
   return pts;
 }
 
+// A smooth, properly oval/rounded nose cap -- samples a quarter-ellipse
+// (nose tip to full fuselage half-width) at several angles, rather than
+// 2-3 hand-placed points, which is what actually reads as "rounded"
+// instead of "faceted" (used by cargo_turboprop's blunt transport nose).
+function ovalNosePoints(fuseHalfWidth, noseTipY, noseDepth, steps) {
+  const pts = [[CENTER_X, noseTipY]];
+  for (let i = 1; i <= steps; i++) {
+    const theta = (Math.PI / 2) * (i / steps);
+    pts.push([
+      CENTER_X + fuseHalfWidth * Math.sin(theta),
+      noseTipY + noseDepth * (1 - Math.cos(theta)),
+    ]);
+  }
+  return pts;
+}
+
 // Like poly(), but corners named in `radiusByPoint` (a Map from "x,y" ->
 // radius) get a small quadratic-curve fillet instead of a sharp point --
 // pulled back `radius` units along each adjoining edge, joined by a
@@ -428,17 +444,101 @@ const bizjetEngineRight = [
   [CENTER_X + 1.2 - 0.7, 15.3 - 0.3],
 ];
 
-// Military transport / cargo family: a wide, constant-width (boxy)
-// fuselage -- deliberately much wider relative to its own wingspan than
-// any airliner, so the fat body (not the wing) dominates the silhouette,
-// plus a short, blunt tail flare (not a sharp taper) for the loadmaster-
-// ramp cue. The two differ from each other only by wing sweep --
-// turboprops have straighter, less-swept wings than jet-powered
-// transports, a real visual cue for this class, not an invented one.
-const cargoTurbopropPath = wingedOutline({
-  noseY: 2.5, fuseHalfWidth: 2.4, wingFrontY: 11.5, wingHalfSpan: 11, wingBackY: 12.5,
-  tailFuseHalfWidth: 2.2, tailHalfSpan: 3.2, tailY: 19.5, tailTipY: 21.5,
-});
+// Military transport turboprop (C-130/A400M/C295/An-26/C-27J/M28 class):
+// rebuilt from scratch against real references, several rounds of direct
+// feedback. A blunt, properly oval nose (ovalNosePoints, not a taper to a
+// point -- transports have a short rounded nose, nothing like a jet's);
+// a practically RECTANGULAR wing (constant chord root-to-tip, minimal
+// sweep) with all 4 corners (root/tip x leading/trailing edge) filleted --
+// an earlier tapered-tip version read as "cut corners", and a later
+// hang-glider-style gently curved sweep was tried and explicitly rejected
+// in favor of reverting to this rectangular-with-rounded-corners version,
+// which is now final; four wing-mounted turboprop nacelles (two per wing,
+// at 1/3 and 2/3 of the way to the tip -- the real cue for this class,
+// most of its reference types are twins but C-130/A400M are quads), each
+// with a thin perpendicular "propeller disc" bar, same visual language as
+// light's nose prop bar; and the same short blunt tail-flare cue (not a
+// sharp taper) for the loadmaster ramp, feeding a straight (unswept),
+// wide T-tail -- turboprops have straighter, less-swept everything than
+// jet-powered transports, the real distinguishing cue for the whole class.
+const CTP_FUSE_HALF_WIDTH = 1.9;
+const CTP_NOSE_TIP_Y = 2.5;
+const CTP_WING_ROOT_LE_Y = 10.0;
+const CTP_WING_HALF_SPAN = 11.0;
+const CTP_WING_SWEEP = 0.4;
+const CTP_WING_CHORD = 3.2; // same depth at root and tip -- no taper
+const CTP_TAIL_HALF_SPAN = 4.5;
+const CTP_TAIL_CHORD = 1.6;
+
+const CTP_WING_TIP_LE_Y = CTP_WING_ROOT_LE_Y + CTP_WING_SWEEP;
+const CTP_WING_TIP_TE_Y = CTP_WING_TIP_LE_Y + CTP_WING_CHORD;
+const CTP_WING_ROOT_TE_Y = CTP_WING_ROOT_LE_Y + CTP_WING_CHORD;
+const CTP_WAIST_END_Y = CTP_WING_ROOT_TE_Y + 1.0;
+const CTP_FLARE_Y = CTP_WAIST_END_Y + 2.5;
+const CTP_TAIL_ROOT_Y = CTP_FLARE_Y + 1.5;
+const CTP_TAIL_TIP_LE_Y = CTP_TAIL_ROOT_Y + 0.6;
+const CTP_TAIL_TIP_TE_Y = CTP_TAIL_TIP_LE_Y + CTP_TAIL_CHORD;
+const CTP_TAIL_ROOT_TE_Y = CTP_TAIL_ROOT_Y + CTP_TAIL_CHORD + 0.3;
+const CTP_TAIL_CONE_Y = CTP_TAIL_ROOT_TE_Y + 1.2;
+
+const ctpWingRootLE = [CENTER_X + CTP_FUSE_HALF_WIDTH, CTP_WING_ROOT_LE_Y];
+const ctpWingTipLE = [CENTER_X + CTP_WING_HALF_SPAN, CTP_WING_TIP_LE_Y];
+const ctpWingTipTE = [CENTER_X + CTP_WING_HALF_SPAN, CTP_WING_TIP_TE_Y];
+const ctpWingRootTE = [CENTER_X + CTP_FUSE_HALF_WIDTH, CTP_WING_ROOT_TE_Y];
+
+const cargoTurbopropOutline = symmetricOutlineRounded([
+  ...ovalNosePoints(CTP_FUSE_HALF_WIDTH, CTP_NOSE_TIP_Y, 2.0, 5),
+  ctpWingRootLE,
+  ctpWingTipLE,
+  ctpWingTipTE,
+  ctpWingRootTE,
+  [CENTER_X + CTP_FUSE_HALF_WIDTH, CTP_WAIST_END_Y],
+  [CENTER_X + CTP_FUSE_HALF_WIDTH * 1.08, CTP_FLARE_Y],
+  [CENTER_X + CTP_FUSE_HALF_WIDTH * 0.9, CTP_TAIL_ROOT_Y],
+  [CENTER_X + CTP_TAIL_HALF_SPAN, CTP_TAIL_TIP_LE_Y],
+  [CENTER_X + CTP_TAIL_HALF_SPAN, CTP_TAIL_TIP_TE_Y],
+  [CENTER_X + CTP_FUSE_HALF_WIDTH * 0.9, CTP_TAIL_ROOT_TE_Y],
+  [CENTER_X, CTP_TAIL_CONE_Y],
+], [ctpWingRootLE, ctpWingTipLE, ctpWingTipTE, ctpWingRootTE], 0.6);
+
+// Wing-mounted turboprop nacelle: a small pod plus a thin perpendicular
+// propeller-disc bar at the front, straddling the wing's own leading edge
+// (poking ahead of it, receding a bit into it) -- centering it entirely
+// behind the LE line buried it invisibly inside the wing's own solid area
+// on an earlier render.
+function turbopropEngineAt(spanFraction) {
+  const offset = CTP_FUSE_HALF_WIDTH + (CTP_WING_HALF_SPAN - CTP_FUSE_HALF_WIDTH) * spanFraction;
+  const leadingEdgeY = CTP_WING_ROOT_LE_Y + (offset - CTP_FUSE_HALF_WIDTH) / (CTP_WING_HALF_SPAN - CTP_FUSE_HALF_WIDTH) * CTP_WING_SWEEP;
+  const halfWidth = 0.7;
+  const barHalfWidth = 1.0;
+  const y0 = leadingEdgeY - 1.0;
+  const y1 = leadingEdgeY + 1.0;
+  const pod = [
+    [CENTER_X + offset - halfWidth, y0 + 0.4],
+    [CENTER_X + offset, y0],
+    [CENTER_X + offset + halfWidth, y0 + 0.4],
+    [CENTER_X + offset + halfWidth, y1],
+    [CENTER_X + offset - halfWidth, y1],
+  ];
+  const bar = [
+    [CENTER_X + offset - barHalfWidth, y0 - 0.15],
+    [CENTER_X + offset + barHalfWidth, y0 - 0.15],
+    [CENTER_X + offset + barHalfWidth, y0 + 0.15],
+    [CENTER_X + offset - barHalfWidth, y0 + 0.15],
+  ];
+  return [pod, bar];
+}
+
+const [ctpEngine1Pod, ctpEngine1Bar] = turbopropEngineAt(1 / 3);
+const [ctpEngine2Pod, ctpEngine2Bar] = turbopropEngineAt(2 / 3);
+
+const cargoTurbopropPath = combine(
+  cargoTurbopropOutline,
+  poly(ctpEngine1Pod), poly(mirrored(ctpEngine1Pod)),
+  poly(ctpEngine1Bar), poly(mirrored(ctpEngine1Bar)),
+  poly(ctpEngine2Pod), poly(mirrored(ctpEngine2Pod)),
+  poly(ctpEngine2Bar), poly(mirrored(ctpEngine2Bar)),
+);
 const cargoJetPath = wingedOutline({
   noseY: 2, fuseHalfWidth: 2.2, wingFrontY: 9, wingHalfSpan: 11.5, wingBackY: 14.5,
   tailFuseHalfWidth: 2, tailHalfSpan: 3.4, tailY: 19.8, tailTipY: 21.6,
