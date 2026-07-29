@@ -74,6 +74,57 @@ function symmetricOutline(rightPoints) {
   return poly([...rightPoints, ...left]);
 }
 
+function distanceBetween(a, b) {
+  return Math.hypot(b[0] - a[0], b[1] - a[1]);
+}
+
+function pointToward(from, to, dist) {
+  const t = dist / distanceBetween(from, to);
+  return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
+}
+
+// Like poly(), but corners named in `radiusByPoint` (a Map from "x,y" ->
+// radius) get a small quadratic-curve fillet instead of a sharp point --
+// pulled back `radius` units along each adjoining edge, joined by a
+// bezier through the original corner. Used sparingly: most corners here
+// are deliberately sharp (that's what reads as an aircraft's edges at
+// 14px), this is only for the couple of "shoulder" corners called out as
+// too blocky in review.
+function polyRounded(points, radiusByPoint) {
+  const n = points.length;
+  const parts = [];
+  points.forEach((curr, i) => {
+    const radius = radiusByPoint.get(`${curr[0]},${curr[1]}`);
+    if (!radius) {
+      parts.push(`${i === 0 ? 'M' : 'L'}${curr[0]},${curr[1]}`);
+      return;
+    }
+    const prev = points[(i - 1 + n) % n];
+    const next = points[(i + 1) % n];
+    const a = pointToward(curr, prev, radius);
+    const b = pointToward(curr, next, radius);
+    parts.push(`${i === 0 ? 'M' : 'L'}${a[0]},${a[1]}`);
+    parts.push(`Q${curr[0]},${curr[1]} ${b[0]},${b[1]}`);
+  });
+  parts.push('Z');
+  return parts.join(' ');
+}
+
+// symmetricOutline() with a few named corners on the right half filleted --
+// automatically filleting their mirrored counterpart on the left half too,
+// so a caller only ever names the right-side coordinate.
+function symmetricOutlineRounded(rightPoints, roundedCorners, radius) {
+  const middle = rightPoints.slice(1, -1);
+  const left = middle.slice().reverse().map(([x, y]) => [2 * CENTER_X - x, y]);
+  const full = [...rightPoints, ...left];
+  const radiusByPoint = new Map();
+  for (const [x, y] of roundedCorners) {
+    radiusByPoint.set(`${x},${y}`, radius);
+    radiusByPoint.set(`${2 * CENTER_X - x},${y}`, radius);
+  }
+  return polyRounded(full, radiusByPoint);
+}
+
 // A generic winged-airframe outline: nose -> shoulder -> wingtip -> wing
 // trailing edge back at the fuselage -> rear fuselage -> tailplane tip ->
 // tail trailing edge -> tail tip. `wingFrontY`/`wingBackY` control sweep
@@ -159,8 +210,19 @@ const nbEngineRight = [
   [CENTER_X + NB_ENGINE_OFFSET - NB_ENGINE_HALF_WIDTH + 0.18, NB_ENGINE_LE_Y + 1.5],
 ];
 
+// The two "shoulder" corners -- nose taper meeting the straight fuselage
+// side, and that side meeting the wing's leading edge -- read as too sharp/
+// blocky at a glance (reported directly against a rendered comparison);
+// both get a small fillet. NB_ROUND_RADIUS is deliberately small -- the
+// point is to take the edge off, not to round the airframe into a blob.
+const NB_ROUND_RADIUS = 0.55;
+const NB_SHOULDER_CORNERS = [
+  [CENTER_X + NB_FUSE_HALF_WIDTH, 6.2],
+  [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y],
+];
+
 const narrowbodyPath = combine(
-  symmetricOutline([
+  symmetricOutlineRounded([
     // Nose is deliberately rounded over three points rather than one sharp
     // apex -- a single nose vertex reads as a missile/dart, not an airliner
     // (visible immediately when compared side by side with real top-down
@@ -168,20 +230,25 @@ const narrowbodyPath = combine(
     [CENTER_X, 1.5],                                  // nose tip
     [CENTER_X + 0.75, 2.1],
     [CENTER_X + 1.35, 3.6],
-    [CENTER_X + NB_FUSE_HALF_WIDTH, 6.2],             // full fuselage width
-    [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y], // wing root leading edge
+    NB_SHOULDER_CORNERS[0],                           // full fuselage width
+    NB_SHOULDER_CORNERS[1],                           // wing root leading edge
     [CENTER_X + NB_WING_HALF_SPAN, NB_WING_TIP_LE_Y], // wingtip leading edge
     [CENTER_X + NB_WING_HALF_SPAN, 17.3],             // wingtip trailing edge (near-pointed tip)
     // Root chord deliberately stops well short of the tailplane: the gap of
     // bare fuselage between wing trailing edge and tailplane ("the waist")
     // is what stops the wing and tail reading as one merged mass.
     [CENTER_X + NB_FUSE_HALF_WIDTH, 15.2],            // wing root trailing edge
-    [CENTER_X + NB_FUSE_HALF_WIDTH, 19.6],            // rear fuselage (waist)
-    [CENTER_X + 4.4, 21.4],                           // tailplane tip
-    [CENTER_X + 4.4, 22.0],
-    [CENTER_X + 0.75, 22.8],
-    [CENTER_X, 23.2],                                 // tail cone
-  ]),
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 19.6],            // rear fuselage (waist) / tailplane root leading edge
+    // Tailplane is a smaller swept trapezoid matching the main wing's own
+    // style (leading-edge sweep out to a near-pointed tip, a longer root
+    // chord than tip chord) rather than the plain diamond first drawn --
+    // called out directly against a reference icon showing a swept
+    // tailplane, not a straight one.
+    [CENTER_X + 7.0, 22.66],                          // tailplane tip leading edge
+    [CENTER_X + 7.0, 23.16],                          // tailplane tip trailing edge
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 21.6],            // tailplane root trailing edge
+    [CENTER_X, 23.6],                                 // tail cone
+  ], NB_SHOULDER_CORNERS, NB_ROUND_RADIUS),
   poly(nbEngineRight),
   poly(mirrored(nbEngineRight)),
 );
