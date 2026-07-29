@@ -125,6 +125,15 @@ function symmetricOutlineRounded(rightPoints, roundedCorners, radius) {
   return polyRounded(full, radiusByPoint);
 }
 
+// Fillets every corner of a standalone small polygon (e.g. an engine
+// nacelle) by the same radius -- unlike symmetricOutlineRounded, there's no
+// separate mirrored copy to account for here since callers already mirror
+// the whole shape via mirrored() before rendering it.
+function polyAllRounded(points, radius) {
+  const radiusByPoint = new Map(points.map(([x, y]) => [`${x},${y}`, radius]));
+  return polyRounded(points, radiusByPoint);
+}
+
 // A generic winged-airframe outline: nose -> shoulder -> wingtip -> wing
 // trailing edge back at the fuselage -> rear fuselage -> tailplane tip ->
 // tail trailing edge -> tail tip. `wingFrontY`/`wingBackY` control sweep
@@ -201,8 +210,12 @@ const NB_ENGINE_LE_Y =
 
 // Nacelle: sits astride the leading edge, protruding further forward than
 // aft (how an underwing pod actually reads from above), tapering slightly
-// at the back.
+// at the back. Corners are filleted too (NB_ENGINE_ROUND_RADIUS) -- a
+// zoomed-in screenshot showed the fuselage-shoulder fillet clearly but the
+// nacelle's own corners were still sharp rectangles, which is what was
+// actually being pointed at.
 const NB_ENGINE_HALF_WIDTH = 0.95;
+const NB_ENGINE_ROUND_RADIUS = 0.35;
 const nbEngineRight = [
   [CENTER_X + NB_ENGINE_OFFSET - NB_ENGINE_HALF_WIDTH, NB_ENGINE_LE_Y - 1.9],
   [CENTER_X + NB_ENGINE_OFFSET + NB_ENGINE_HALF_WIDTH, NB_ENGINE_LE_Y - 1.9],
@@ -243,14 +256,18 @@ const narrowbodyPath = combine(
     // style (leading-edge sweep out to a near-pointed tip, a longer root
     // chord than tip chord) rather than the plain diamond first drawn --
     // called out directly against a reference icon showing a swept
-    // tailplane, not a straight one.
+    // tailplane, not a straight one. Chord depth (root and tip trailing
+    // edges both, plus the tail cone below them) was then deepened a
+    // second time on review -- the shape/sweep was right but read as too
+    // shallow front-to-back; leading edges stay put, only how far each
+    // trailing edge reaches toward the tail changed.
     [CENTER_X + 7.0, 22.66],                          // tailplane tip leading edge
-    [CENTER_X + 7.0, 23.16],                          // tailplane tip trailing edge
-    [CENTER_X + NB_FUSE_HALF_WIDTH, 21.6],            // tailplane root trailing edge
-    [CENTER_X, 23.6],                                 // tail cone
+    [CENTER_X + 7.0, 23.8],                           // tailplane tip trailing edge
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 22.9],            // tailplane root trailing edge
+    [CENTER_X, 23.95],                                // tail cone
   ], NB_SHOULDER_CORNERS, NB_ROUND_RADIUS),
-  poly(nbEngineRight),
-  poly(mirrored(nbEngineRight)),
+  polyAllRounded(nbEngineRight, NB_ENGINE_ROUND_RADIUS),
+  polyAllRounded(mirrored(nbEngineRight), NB_ENGINE_ROUND_RADIUS),
 );
 const widebody2Path = wingedOutline({
   noseY: 0.6, fuseHalfWidth: 1.7, wingFrontY: 8, wingHalfSpan: 12.3, wingBackY: 15.3,
