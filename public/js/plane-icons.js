@@ -539,10 +539,98 @@ const cargoTurbopropPath = combine(
   poly(ctpEngine2Pod), poly(mirrored(ctpEngine2Pod)),
   poly(ctpEngine2Bar), poly(mirrored(ctpEngine2Bar)),
 );
-const cargoJetPath = wingedOutline({
-  noseY: 2, fuseHalfWidth: 2.2, wingFrontY: 9, wingHalfSpan: 11.5, wingBackY: 14.5,
-  tailFuseHalfWidth: 2, tailHalfSpan: 3.4, tailY: 19.8, tailTipY: 21.6,
-});
+// Cargo jet (C-17/C-5M/An-124/IL-76 class): same overall military-transport
+// silhouette language as cargo_turboprop -- high-wing, blunt tail-flare
+// feeding a T-tail -- but the wing is visibly SWEPT (~25 degrees, tip
+// leading edge well aft of the root's) rather than cargo_turboprop's
+// near-rectangular wing, and the four engines are podded turbofans (no
+// propeller-disc bar) instead of turboprop nacelles. Picked from a 5-way
+// render comparison (pointed vs blunt-oval nose, crossed with moderate vs
+// high wing sweep, plus a leaner slim-pod variant) -- the pointed nose +
+// high sweep combination read closest to the An-124/IL-76 reference photos
+// and was picked outright; if this needs retuning again, regenerate that
+// same comparison rather than nudging values blind.
+const CJ_FUSE_HALF_WIDTH = 2.0;
+const CJ_WING_ROOT_LE_Y = 9.5;
+const CJ_WING_SWEEP = 5.0;
+const CJ_WING_HALF_SPAN = 11.2;
+const CJ_WING_ROOT_CHORD = 3.2;
+const CJ_WING_TIP_CHORD = 2.2;
+const CJ_TAIL_SWEEP = 0.9;
+const CJ_TAIL_HALF_SPAN = 4.3;
+const CJ_TAIL_CHORD = 1.8;
+// Podded turbofan half-width -- narrower than it looks at first glance
+// because the pod is drawn long (see jetPodAt below): a big turbofan reads
+// as an elongated pod, not a wide blob.
+const CJ_POD_HALF_WIDTH = 0.8;
+
+const CJ_WING_TIP_LE_Y = CJ_WING_ROOT_LE_Y + CJ_WING_SWEEP;
+const CJ_WING_ROOT_TE_Y = CJ_WING_ROOT_LE_Y + CJ_WING_ROOT_CHORD;
+const CJ_WING_TIP_TE_Y = CJ_WING_TIP_LE_Y + CJ_WING_TIP_CHORD;
+const CJ_WAIST_END_Y = CJ_WING_ROOT_TE_Y + 1.0;
+const CJ_FLARE_Y = CJ_WAIST_END_Y + 2.5;
+const CJ_TAIL_ROOT_Y = CJ_FLARE_Y + 1.5;
+const CJ_TAIL_TIP_LE_Y = CJ_TAIL_ROOT_Y + CJ_TAIL_SWEEP;
+const CJ_TAIL_TIP_TE_Y = CJ_TAIL_TIP_LE_Y + CJ_TAIL_CHORD;
+const CJ_TAIL_ROOT_TE_Y = CJ_TAIL_ROOT_Y + CJ_TAIL_CHORD + 0.3;
+const CJ_TAIL_CONE_Y = CJ_TAIL_ROOT_TE_Y + 1.2;
+
+const cjWingRootLE = [CENTER_X + CJ_FUSE_HALF_WIDTH, CJ_WING_ROOT_LE_Y];
+const cjWingTipLE = [CENTER_X + CJ_WING_HALF_SPAN, CJ_WING_TIP_LE_Y];
+const cjWingTipTE = [CENTER_X + CJ_WING_HALF_SPAN, CJ_WING_TIP_TE_Y];
+const cjWingRootTE = [CENTER_X + CJ_FUSE_HALF_WIDTH, CJ_WING_ROOT_TE_Y];
+
+const cargoJetOutline = symmetricOutlineRounded([
+  // Pointed, tapered nose (unlike cargo_turboprop's blunt oval) -- the
+  // sleeker jet-transport nose that read closest to the picked reference
+  // photos, against the rounder-nosed alternative also compared.
+  [CENTER_X, 2],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH * 0.45, 2.7],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH * 0.8, 4.3],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH, 5.5],
+  cjWingRootLE,
+  cjWingTipLE,
+  cjWingTipTE,
+  cjWingRootTE,
+  [CENTER_X + CJ_FUSE_HALF_WIDTH, CJ_WAIST_END_Y],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH * 1.08, CJ_FLARE_Y],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH * 0.85, CJ_TAIL_ROOT_Y],
+  [CENTER_X + CJ_TAIL_HALF_SPAN, CJ_TAIL_TIP_LE_Y],
+  [CENTER_X + CJ_TAIL_HALF_SPAN, CJ_TAIL_TIP_TE_Y],
+  [CENTER_X + CJ_FUSE_HALF_WIDTH * 0.85, CJ_TAIL_ROOT_TE_Y],
+  [CENTER_X, CJ_TAIL_CONE_Y],
+], [cjWingRootLE, cjWingTipLE, cjWingTipTE, cjWingRootTE], 0.55);
+
+// Podded turbofan astride the wing's leading edge, two per wing (1/3 and
+// 2/3 of the way to the tip, same fraction-of-span placement convention as
+// nacelleAt/turbopropEngineAt) -- no propeller-disc bar, and a longer pod
+// than either of those (a big turbofan is a long cylinder, not a stubby
+// nacelle).
+function jetPodAt(spanFraction) {
+  const offset = CJ_FUSE_HALF_WIDTH + (CJ_WING_HALF_SPAN - CJ_FUSE_HALF_WIDTH) * spanFraction;
+  const leadingEdgeY =
+    CJ_WING_ROOT_LE_Y
+    + ((offset - CJ_FUSE_HALF_WIDTH) / (CJ_WING_HALF_SPAN - CJ_FUSE_HALF_WIDTH)) * CJ_WING_SWEEP;
+  const y0 = leadingEdgeY - 1.3;
+  const y1 = leadingEdgeY + 1.3;
+  return [
+    [CENTER_X + offset - CJ_POD_HALF_WIDTH, y0 + 0.4],
+    [CENTER_X + offset, y0],
+    [CENTER_X + offset + CJ_POD_HALF_WIDTH, y0 + 0.4],
+    [CENTER_X + offset + CJ_POD_HALF_WIDTH, y1 - 0.4],
+    [CENTER_X + offset, y1],
+    [CENTER_X + offset - CJ_POD_HALF_WIDTH, y1 - 0.4],
+  ];
+}
+
+const cjPod1 = jetPodAt(1 / 3);
+const cjPod2 = jetPodAt(2 / 3);
+
+const cargoJetPath = combine(
+  cargoJetOutline,
+  poly(cjPod1), poly(mirrored(cjPod1)),
+  poly(cjPod2), poly(mirrored(cjPod2)),
+);
 
 // Fighter/attack jet: short fuselage, small tail, and a sharply swept
 // (delta-like) wing whose span is large relative to the fuselage length.
