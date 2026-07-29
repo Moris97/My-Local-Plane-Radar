@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLPR – icon type table (dev)</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #0b1116;
+    color: #d8f3e6;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 28px 0 10px; border-bottom: 1px solid #1c2e3a; padding-bottom: 4px; }
+  p.hint { color: #7fa896; margin: 0 0 16px; max-width: 80ch; }
+  code { background: #131b22; padding: 1px 5px; border-radius: 3px; }
+  .summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+  .summary .stat {
+    background: #131b22; border: 1px solid #1c2e3a; border-radius: 6px;
+    padding: 10px 16px; min-width: 120px;
+  }
+  .summary .stat .n { font-size: 22px; font-weight: 700; color: #3ddc84; }
+  .summary .stat .label { font-size: 12px; color: #7fa896; }
+  .note-banner {
+    background: #2a1f0f; border: 1px solid #6b4a12; border-left: 3px solid #e0a83d;
+    border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+    color: #f0d9a8; max-width: 80ch;
+  }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .controls input, .controls select {
+    background: #131b22; color: #d8f3e6; border: 1px solid #2a3f4d;
+    border-radius: 4px; padding: 6px 10px; font: inherit;
+  }
+  .controls input[type="text"] { min-width: 220px; }
+  .controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #9fc9b3; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #1c2e3a; font-size: 13px; }
+  th { color: #9fc9b3; font-weight: 600; position: sticky; top: 0; background: #0b1116; }
+  tr.flagged { background: #241a08; }
+  tr.flagged:hover { background: #2e2109; }
+  tr:hover { background: #131b22; }
+  .code { font: 600 12.5px/1 ui-monospace, Menlo, Consolas, monospace; }
+  .icon-name { color: #3ddc84; }
+  .badge {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+    border-radius: 3px; padding: 1px 6px; margin-left: 6px; vertical-align: middle;
+  }
+  .badge.prefix { background: #1c3a4a; color: #7fd4f0; }
+  .badge.exact { background: #1c3a2a; color: #6fe0a0; }
+  .badge.military { background: #3a1c2e; color: #e07fc0; }
+  .badge.verify { background: #4a3308; color: #f0c04d; }
+  .reason { color: #e0a83d; font-size: 12px; }
+  .table-wrap { max-height: 70vh; overflow-y: auto; margin-bottom: 24px; }
+  .empty { color: #7fa896; padding: 12px 0; }
+</style>
+</head>
+<body>
+  <h1>MLPR icon type table — manual verification view</h1>
+  <p class="hint">
+    Dev-only (NODE_ENV !== 'production'), reads the real
+    <code>public/data/icon-types.json</code> shipped file. Flat listing of
+    every entry for spot-checking, not the classification chain itself
+    (see <code>/dev/icons</code>'s "Classification tester" for that). Rows
+    with a <span class="badge verify">VERIFY</span> badge are the ones
+    flagged in the JSON's own <code>_needsVerification</code> field as
+    lower-confidence designators recalled from general aviation knowledge
+    rather than a canonical source — check those first. See also
+    <a href="/dev/icons" style="color:#3ddc84">/dev/icons</a> for the icon
+    shapes themselves and a live classification-chain tester.
+  </p>
+
+  <div id="general-notes"></div>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="controls">
+    <input type="text" id="search" placeholder="Filter by type code or icon…">
+    <label><input type="checkbox" id="verify-only"> Needs verification only</label>
+  </div>
+
+  <h2>Exact matches</h2>
+  <div class="table-wrap"><table id="exact-table"><thead>
+    <tr><th>Type code</th><th>Icon</th><th></th></tr>
+  </thead><tbody></tbody></table></div>
+
+  <h2>Prefix matches (longest match wins)</h2>
+  <div class="table-wrap"><table id="prefix-table"><thead>
+    <tr><th>Prefix</th><th>Icon</th><th></th></tr>
+  </thead><tbody></tbody></table></div>
+
+  <h2>Military-only overrides</h2>
+  <p class="hint">Consulted only when the aircraft's <code>military</code> dbFlags bit is set, and only for type codes ambiguous between a civilian and government/military airframe sharing one designator.</p>
+  <div class="table-wrap"><table id="military-table"><thead>
+    <tr><th>Type code</th><th>Icon</th><th></th></tr>
+  </thead><tbody></tbody></table></div>
+
+  <script type="module" src="/dev/icon-types-client.js"></script>
+</body>
+</html>

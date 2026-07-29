@@ -14,15 +14,28 @@ Added to as they come up; picked up in a later stage when relevant.
   sessions per icon, see git log), and the classification *algorithm*
   (`icon-classify.js`'s decision chain: typeCode 'TWR' -> military-table
   override -> own type table -> ADS-B category -> unknown fallback) is
-  final. Three concrete things still block production use, none of them
-  started:
-  - **Stage 3**: `data/icon-types.json`'s type table is still only a small
-    illustrative sample (37 exact + 17 prefix + 3 military entries) picked
-    to exercise each link of the classification chain — not real coverage
-    of aircraft types that will actually show up on a live receiver feed.
+  final. Three concrete things still block production use:
+  - **Stage 3** (mostly done, 2026-07-29): `data/icon-types.json` expanded
+    from Stage 1/2's ~30-entry illustrative sample to 246 entries (216
+    exact + 27 prefix + 3 military-only), hand-composed from general
+    aviation/ICAO-designator knowledge for realistic Central/Eastern
+    European receiver traffic (mainline/regional airliners, common GA/
+    bizjet/helicopter types -- helicopter had ZERO entries before this
+    pass -- and NATO/Polish military types). Structural coverage is
+    genuinely broader now, but ~30 of those entries are explicitly
+    lower-confidence designators recalled from memory rather than a
+    verified source, listed in the JSON's own new `_needsVerification`
+    field and viewable/filterable at `/dev/icon-types` (new dev page,
+    "Needs verification only" checkbox) -- still needs a pass against real
+    receiver data or a canonical source before every entry can be trusted.
+    A structural regression test (`public/js/icon-classify.test.js`) now
+    checks every table entry resolves to a real icon id and every prefix
+    is >=3 chars, plus spot-checks the classification chain end-to-end
+    against the real shipped table.
   - **Stage 4**: a `tools/` cross-check script (doesn't exist yet) to
-    verify the type table against real data, and to confirm the two
-    placeholder military entries (A332/A333 -> `special`) are actually
+    verify the type table against real data -- this is what should
+    eventually clear the `_needsVerification` list above, plus confirm the
+    two placeholder military entries (A332/A333 -> `special`) are actually
     correct rather than illustrative guesses.
   - **Wiring**: `public/js/app.js` still imports icon rendering
     (`createPlaneElement`/`setPlaneHeading`/`setPlaneColor`/`setPlaneKind`/
