@@ -740,6 +740,24 @@ const unknownPath = wingedOutline({
   tailFuseHalfWidth: 0.9, tailHalfSpan: 1.2, tailY: 19, tailTipY: 20.5,
 });
 
+// Helicopter's rotor blades kept as their own named path (see
+// SPINNING_ROTOR_ICON_IDS/getIconRotorPaths below) -- getIconPath()
+// still returns blades+body combined as one static path, unchanged, but
+// a future live-map renderer that wants to spin just the blades needs
+// them separable from the hub/mast/cabin/boom/skid.
+const HELICOPTER_ROTOR_CENTER = [12, 11];
+const helicopterBladesPath = combine(
+  poly([[6.84, 4.85], [18.15, 16.16], [17.16, 17.15], [5.85, 5.84]]), // rotor blade A
+  poly([[5.85, 16.16], [17.16, 4.85], [18.15, 5.84], [6.84, 17.15]]), // rotor blade B
+);
+const helicopterStaticPath = combine(
+  ellipse(HELICOPTER_ROTOR_CENTER[0], HELICOPTER_ROTOR_CENTER[1], 1, 1), // rotor hub
+  poly([[11.3, 11], [12.7, 11], [12.7, 13.2], [11.3, 13.2]]), // mast
+  poly([[12, 7.5], [14.35, 11.8], [13.85, 15.3], [10.15, 15.3], [9.65, 11.8]]), // cabin
+  poly([[10.8, 15.3], [13.2, 15.3], [12.5, 21.8], [11.5, 21.8]]), // tail boom
+  poly([[9.3, 21.2], [14.7, 21.2], [14.7, 22.6], [9.3, 22.6]]), // skid
+);
+
 const ICON_PATHS = {
   narrowbody: narrowbodyPath,
   widebody2: widebody2Path,
@@ -773,15 +791,7 @@ const ICON_PATHS = {
   // tips onto the tail boom); and the cabin narrowed from its original
   // shoulder half-width (2.8 -> 2.35, bottom half-width scaled down by the
   // same ratio) after a 6-way width comparison.
-  helicopter: combine(
-    poly([[6.84, 4.85], [18.15, 16.16], [17.16, 17.15], [5.85, 5.84]]), // rotor blade A
-    poly([[5.85, 16.16], [17.16, 4.85], [18.15, 5.84], [6.84, 17.15]]), // rotor blade B
-    ellipse(12, 11, 1, 1), // rotor hub
-    poly([[11.3, 11], [12.7, 11], [12.7, 13.2], [11.3, 13.2]]), // mast
-    poly([[12, 7.5], [14.35, 11.8], [13.85, 15.3], [10.15, 15.3], [9.65, 11.8]]), // cabin
-    poly([[10.8, 15.3], [13.2, 15.3], [12.5, 21.8], [11.5, 21.8]]), // tail boom
-    poly([[9.3, 21.2], [14.7, 21.2], [14.7, 22.6], [9.3, 22.6]]), // skid
-  ),
+  helicopter: combine(helicopterStaticPath, helicopterBladesPath),
 
   glider: gliderPath,
 
@@ -864,6 +874,70 @@ export const PLANE_ICON_IDS = [
 // so 'balloon'/'drone' get the same treatment from day one rather than
 // this being rediscovered later.
 export const NON_ROTATING_ICON_IDS = new Set(['tower', 'balloon', 'drone']);
+
+// Icon kinds whose rotor/propeller could be rendered as a genuinely
+// spinning (CSS-animated) part on the live map, instead of the plain
+// static silhouette every icon here is today. Explored 2026-07-29 as a
+// visual demo (blurred disc + a thin blade bar spinning on top, both
+// filled with currentColor so recoloring still works -- see the
+// dev-only demo pages built alongside this) after the user asked "can
+// this look good" for helicopter/drone specifically. It does: a soft
+// rotating blur reads immediately as "engine running" in a way the
+// static shape never can.
+//
+// This is a DESIGN-ONLY checkpoint, not a live feature -- nothing in
+// aircraft-icon.js/app.js consumes this yet, and it deliberately isn't
+// being wired in now (see the top of this file: the whole new icon set
+// stays in isolation on /dev/icons until it's complete). Recorded here
+// so the mechanism doesn't have to be rediscovered when that wiring
+// happens:
+//
+// - Kept deliberately narrow (helicopter + drone only, NOT light or
+//   cargo_turboprop, which also have propeller cues) because the
+//   performance case for animating every marker of a kind rests on
+//   that kind's *realistic simultaneous count* on a home receiver being
+//   small -- true for helicopters and drones, not necessarily true for
+//   light GA traffic, which can be the majority of local contacts near
+//   a small airfield. Revisit light/cargo_turboprop separately, on
+//   their own traffic-density merits, don't just fold them in here.
+// - Each entry needs its icon split into a STATIC sub-path (rendered
+//   as today, motionless) and one or more ROTOR sub-paths (rendered as
+//   separate SVG elements, each `fill="currentColor"` so it still
+//   recolors with the rest of the marker, wrapped in a `<g>` that gets
+//   a CSS `rotate` keyframe animation) plus the rotor's center point to
+//   rotate around and a suggested blurred-disc radius for the swept-area
+//   effect. `getIconRotorPaths()` below returns exactly that shape.
+// - `helicopter` is fully worked out (one rotor, centered on the hub --
+//   see HELICOPTER_ROTOR_CENTER/helicopterBladesPath/helicopterStaticPath
+//   above). `drone` is deliberately NOT filled in below yet: none of the
+//   6 candidate shapes discussed so far has been picked, and a drone
+//   needs FOUR separate rotor centers (one per arm tip, not one shared
+//   hub like a helicopter) plus a small propeller-bar shape at each tip
+//   that doesn't exist in any candidate's static outline today -- that's
+//   new geometry, not just a split of what's already there. Fill this in
+//   once a final drone shape is chosen.
+// - Confirmed-good spin rate from the demo: 0.5s per revolution
+//   (SUGGESTED_SPIN_DURATION_S below) -- a touch slower than the first
+//   "medium" pick (0.4s) the user tried, after a direct side-by-side.
+export const SPINNING_ROTOR_ICON_IDS = new Set(['helicopter', 'drone']);
+export const SUGGESTED_SPIN_DURATION_S = 0.5;
+
+const ROTOR_PATHS = {
+  helicopter: {
+    staticPath: helicopterStaticPath,
+    rotorPath: helicopterBladesPath,
+    rotorCenters: [HELICOPTER_ROTOR_CENTER],
+    suggestedDiscRadius: 7.2,
+  },
+};
+
+// Returns null for any kind not yet worked out above (including 'drone'
+// today, and every kind outside SPINNING_ROTOR_ICON_IDS) -- callers must
+// treat that as "render the plain static getIconPath() result", not an
+// error.
+export function getIconRotorPaths(kind) {
+  return ROTOR_PATHS[kind] ?? null;
+}
 
 // Size multipliers relative to the user's icon-size slider value -- never a
 // fixed pixel count, so they scale together with that setting. Values taken
