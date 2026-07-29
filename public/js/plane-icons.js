@@ -819,6 +819,36 @@ const helicopterStaticPath = combine(
   poly([[9.3, 21.2], [14.7, 21.2], [14.7, 22.6], [9.3, 22.6]]), // skid
 );
 
+// Drone's arms + center body, kept as their own named const for the same
+// reason as helicopterStaticPath above: getIconPath() still returns this
+// combined with nothing extra (the shipped icon has no propellers drawn at
+// all, just the X-arm silhouette), but SPINNING_ROTOR_ICON_IDS/
+// getIconRotorPaths() below need the tip positions separable to attach a
+// spinning propeller-bar element at each one.
+const droneStaticPath = combine(
+  poly([[9.6, 8.75], [15.25, 14.4], [14.4, 15.25], [8.75, 9.6]]),
+  poly([[8.75, 14.4], [14.4, 8.75], [15.25, 9.6], [9.6, 15.25]]),
+  poly([[10.8, 10.8], [13.2, 10.8], [13.2, 13.2], [10.8, 13.2]]),
+);
+// One rotor per arm tip -- unlike the helicopter's single shared hub, a
+// quadcopter has no one shared center, so each tip gets its own small
+// 2-blade bar (a thin bar, not the helicopter's long diagonal blades --
+// there isn't room for anything longer this close to the body/other
+// rotors) rotating around its own point.
+const DRONE_ROTOR_TIPS = [
+  [14.825, 14.825], [9.175, 9.175], [14.825, 9.175], [9.175, 14.825],
+];
+const DRONE_BLADE_HALF_LENGTH = 1.5;
+const DRONE_BLADE_HALF_WIDTH = 0.16;
+function droneBladeAt([cx, cy]) {
+  return poly([
+    [cx - DRONE_BLADE_HALF_LENGTH, cy - DRONE_BLADE_HALF_WIDTH],
+    [cx + DRONE_BLADE_HALF_LENGTH, cy - DRONE_BLADE_HALF_WIDTH],
+    [cx + DRONE_BLADE_HALF_LENGTH, cy + DRONE_BLADE_HALF_WIDTH],
+    [cx - DRONE_BLADE_HALF_LENGTH, cy + DRONE_BLADE_HALF_WIDTH],
+  ]);
+}
+
 const ICON_PATHS = {
   narrowbody: narrowbodyPath,
   widebody2: widebody2Path,
@@ -876,11 +906,7 @@ const ICON_PATHS = {
   // fixed-wing aircraft or helicopter does, so spinning this to match
   // `track` would be arbitrary rather than meaningful, same reasoning as
   // balloon/tower.
-  drone: combine(
-    poly([[9.6, 8.75], [15.25, 14.4], [14.4, 15.25], [8.75, 9.6]]),
-    poly([[8.75, 14.4], [14.4, 8.75], [15.25, 9.6], [9.6, 15.25]]),
-    poly([[10.8, 10.8], [13.2, 10.8], [13.2, 13.2], [10.8, 13.2]]),
-  ),
+  drone: droneStaticPath,
 
   // Ground vehicle -- deliberately NOT aircraft-shaped, so it reads
   // immediately as "not a plane" even at 14px. Rebuilt from a plain box
@@ -1006,15 +1032,13 @@ export const NON_ROTATING_ICON_IDS = new Set(['tower', 'balloon', 'drone']);
 //   a CSS `rotate` keyframe animation) plus the rotor's center point to
 //   rotate around and a suggested blurred-disc radius for the swept-area
 //   effect. `getIconRotorPaths()` below returns exactly that shape.
-// - `helicopter` is fully worked out (one rotor, centered on the hub --
-//   see HELICOPTER_ROTOR_CENTER/helicopterBladesPath/helicopterStaticPath
-//   above). `drone` is deliberately NOT filled in below yet: none of the
-//   6 candidate shapes discussed so far has been picked, and a drone
-//   needs FOUR separate rotor centers (one per arm tip, not one shared
-//   hub like a helicopter) plus a small propeller-bar shape at each tip
-//   that doesn't exist in any candidate's static outline today -- that's
-//   new geometry, not just a split of what's already there. Fill this in
-//   once a final drone shape is chosen.
+// - `helicopter` has one rotor group (2 blades sharing the hub at
+//   HELICOPTER_ROTOR_CENTER, spinning together as a unit); `drone` has
+//   FOUR independent rotor groups, one per arm tip (DRONE_ROTOR_TIPS),
+//   each its own small 2-blade bar -- no shared hub the way a helicopter
+//   has one. `rotors` below is an array for exactly this reason: each
+//   entry is one independently-spinning group with its own center, so a
+//   multi-rotor kind is just more entries, not a different shape.
 // - Confirmed-good spin rate from the demo: 0.5s per revolution
 //   (SUGGESTED_SPIN_DURATION_S below) -- a touch slower than the first
 //   "medium" pick (0.4s) the user tried, after a direct side-by-side.
@@ -1024,16 +1048,25 @@ export const SUGGESTED_SPIN_DURATION_S = 0.5;
 const ROTOR_PATHS = {
   helicopter: {
     staticPath: helicopterStaticPath,
-    rotorPath: helicopterBladesPath,
-    rotorCenters: [HELICOPTER_ROTOR_CENTER],
-    suggestedDiscRadius: 7.2,
+    rotors: [
+      { center: HELICOPTER_ROTOR_CENTER, bladePath: helicopterBladesPath, suggestedDiscRadius: 7.2 },
+    ],
+  },
+  drone: {
+    staticPath: droneStaticPath,
+    rotors: DRONE_ROTOR_TIPS.map((tip) => ({
+      center: tip,
+      bladePath: droneBladeAt(tip),
+      suggestedDiscRadius: DRONE_BLADE_HALF_LENGTH,
+    })),
   },
 };
 
-// Returns null for any kind not yet worked out above (including 'drone'
-// today, and every kind outside SPINNING_ROTOR_ICON_IDS) -- callers must
-// treat that as "render the plain static getIconPath() result", not an
-// error.
+// Returns null for any kind not worked out above (every kind outside
+// SPINNING_ROTOR_ICON_IDS) -- callers must treat that as "render the plain
+// static getIconPath() result", not an error. Shape:
+// `{ staticPath, rotors: [{ center: [x, y], bladePath, suggestedDiscRadius }] }`
+// -- each `rotors` entry spins independently around its own `center`.
 export function getIconRotorPaths(kind) {
   return ROTOR_PATHS[kind] ?? null;
 }

@@ -82,6 +82,18 @@
     padding: 4px 8px;
   }
   code { background: #0b1116; padding: 1px 5px; border-radius: 3px; }
+  .rotor-demo-row { display: flex; flex-wrap: wrap; gap: 20px; }
+  .rotor-demo-card svg { display: block; }
+  .rotor-demo-card .blur-disc { filter: blur(1.3px); }
+  .rotor-demo-card .rotor {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: mlpr-dev-rotor-spin var(--spin-duration, 0.5s) linear infinite;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .rotor-demo-card .rotor { animation: none; }
+  }
+  @keyframes mlpr-dev-rotor-spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
@@ -114,6 +126,19 @@
     <h2>Altitude palette preview</h2>
     <p class="hint">Same gradient the map trails/coverage layer use, applied to a single icon via <code>color</code>/<code>currentColor</code>.</p>
     <div class="palette-strip" id="palette-strip"></div>
+  </section>
+
+  <section>
+    <h2>Spinning-rotor demo (dev tool only, not wired into the live map)</h2>
+    <p class="hint">
+      <code>getIconRotorPaths()</code>'s static/rotor split, rendered with a
+      real CSS spin (<code>SUGGESTED_SPIN_DURATION_S</code>) instead of a
+      still shape. This does <b>not</b> change <code>getIconPath()</code>'s
+      shipped single-<code>&lt;path&gt;</code> output and is not consumed by
+      <code>app.js</code> -- see CLAUDE.md/TODO.md on why the whole new icon
+      set stays isolated here until wiring is a separate, later decision.
+    </p>
+    <div class="rotor-demo-row" id="rotor-demo-row"></div>
   </section>
 
   <section>

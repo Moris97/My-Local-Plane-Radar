@@ -32,10 +32,13 @@ Added to as they come up; picked up in a later stage when relevant.
     `/dev/icons-map` (dev-only pages) do. Swapping this over means also
     carrying across `NON_ROTATING_ICON_IDS` (balloon/tower/drone must
     never rotate by track) into whatever replaces `setPlaneHeading`.
-    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (an exploratory
-    animated-rotor mechanism for helicopter/drone, confirmed as a nice
-    visual but deliberately not wired in) is a separate, later decision on
-    top of this basic wiring, not a blocker for it.
+    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (a finished-but-not-live
+    animated-rotor mechanism for helicopter/drone — both fully worked out
+    now, including drone's 4 independent per-arm rotors added 2026-07-29;
+    demoed with a real CSS spin on `/dev/icons`'s "Spinning-rotor demo"
+    section) is a separate, later decision on top of this basic wiring, not
+    a blocker for it — it still doesn't touch `getIconPath()`'s shipped
+    single-`<path>` output or `app.js`.
 - **Notification engine: radius-from-home geofence** — notify when *any*
   aircraft (not just a watched one) enters a distance-from-home radius. The
   watch-list's per-entry altitude condition (below/above threshold) shipped;

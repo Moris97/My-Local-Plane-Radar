@@ -1,4 +1,7 @@
-import { PLANE_ICON_IDS, NON_ROTATING_ICON_IDS, VIEW_BOX, getIconPath, getIconSizeMultiplier } from '/js/plane-icons.js';
+import {
+  PLANE_ICON_IDS, NON_ROTATING_ICON_IDS, VIEW_BOX, getIconPath, getIconSizeMultiplier,
+  SPINNING_ROTOR_ICON_IDS, SUGGESTED_SPIN_DURATION_S, getIconRotorPaths,
+} from '/js/plane-icons.js';
 import { ICONS as OLD_ICONS } from '/js/aircraft-icon.js';
 import { colorForAltitude } from '/js/trail.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
@@ -102,6 +105,37 @@ function renderPalette() {
   }
 }
 
+function rotorDemoSvg(kind, sizePx) {
+  const { staticPath, rotors } = getIconRotorPaths(kind);
+  // The CSS ".rotor" class rotates around `transform-box: fill-box` +
+  // `transform-origin: center` -- i.e. the bounding box of each <g>'s own
+  // blade path, which is exactly `center` by construction (both
+  // helicopterBladesPath and droneBladeAt() are built symmetric around
+  // their rotor center), so no per-instance inline transform-origin is
+  // needed here.
+  const rotorEls = rotors.map(({ center: [cx, cy], bladePath, suggestedDiscRadius }) => `
+    <circle class="blur-disc" cx="${cx}" cy="${cy}" r="${suggestedDiscRadius}" fill="currentColor" opacity="0.22"></circle>
+    <g class="rotor"><path d="${bladePath}" fill="currentColor"/></g>
+  `).join('');
+  return `<svg viewBox="${VIEW_BOX}" width="${sizePx}" height="${sizePx}" fill="none">
+    ${rotorEls}
+    <path d="${staticPath}" fill="currentColor"/>
+  </svg>`;
+}
+
+function renderRotorDemo() {
+  const container = document.getElementById('rotor-demo-row');
+  container.innerHTML = '';
+  for (const kind of SPINNING_ROTOR_ICON_IDS) {
+    const card = document.createElement('div');
+    card.className = 'icon-card rotor-demo-card';
+    card.dataset.bg = currentBg;
+    card.style.setProperty('--spin-duration', `${SUGGESTED_SPIN_DURATION_S}s`);
+    card.innerHTML = `${rotorDemoSvg(kind, 96)}<div class="label">${kind} (${SUGGESTED_SPIN_DURATION_S}s/rev)</div>`;
+    container.appendChild(card);
+  }
+}
+
 function applyBg(bg) {
   currentBg = bg;
   for (const el of document.querySelectorAll('.icon-card')) el.dataset.bg = bg;
@@ -135,5 +169,6 @@ loadIconTypes().finally(() => {
   renderSizeGrid();
   renderOldVsNew();
   renderPalette();
+  renderRotorDemo();
   renderClassifyResult();
 });
