@@ -21,10 +21,12 @@
 //   drift off their marker position as the size slider moves.
 // - Differences between the three widebody sizes are carried by fuselage
 //   length/wing span proportion (widebody3 additionally gets a small
-//   tail-mounted third-engine bump -- an accurate trijet silhouette cue,
-//   not "counting nacelles"; widebody4 gets a nose hump, the 747
-//   upper-deck cue) -- deliberately NOT by drawing more wing-mounted engine
-//   blobs, which stops reading as anything at 14px.
+//   tail-mounted third-engine bump -- an accurate trijet silhouette cue;
+//   widebody4 gets a nose hump, the 747 upper-deck cue). The distinction
+//   between them must never come down to *counting* wing nacelles, which
+//   stops being legible at 14px -- an icon may still draw engine pods for
+//   realism (narrowbody does), they just can't be what tells two icons
+//   apart.
 //
 // First draft of the fixed-wing shapes drew the fuselage and wing as two
 // separate crossing polygons (mirroring the old aircraft-icon.js's
@@ -93,10 +95,77 @@ function wingedOutline({
   ]);
 }
 
-const narrowbodyPath = wingedOutline({
-  noseY: 1, fuseHalfWidth: 1, wingFrontY: 9, wingHalfSpan: 11, wingBackY: 15,
-  tailHalfSpan: 4, tailY: 20, tailTipY: 22,
-});
+// Mirrors a right-side point list to the left (x -> 24 - x), for parts that
+// come in symmetric pairs but aren't part of the main outline (engine pods).
+// The point order is *reversed* as well, which is load-bearing: mirroring x
+// alone flips the polygon's winding direction, and a subpath wound opposite
+// to the outline it overlaps cancels against it under the default nonzero
+// fill rule -- i.e. the engine punches a hole through the wing instead of
+// merging with it. Hit for real the first time the narrowbody nacelles were
+// drawn; reversing here restores the original winding.
+function mirrored(points) {
+  return points.map(([x, y]) => [2 * CENTER_X - x, y]).reverse();
+}
+
+// narrowbody is authored explicitly rather than via wingedOutline: it's the
+// reference airliner shape the whole set is judged against, so it gets a
+// wide constant-width fuselage, a properly triangular wing (long root
+// chord tapering to an almost-pointed tip) set aft of mid-fuselage with
+// only ~8 degrees of sweep, and two wing-mounted engine nacelles --
+// none of which the generic helper can express.
+//
+// ENGINE_SPAN_FRACTION places each nacelle one third of the way from the
+// fuselage side to the wingtip, and the nacelle's position along the wing's
+// leading edge is *derived* from that fraction (see NB_ENGINE_LE_Y) rather
+// than eyeballed, so the pods stay glued to the leading edge if the span or
+// sweep is ever retuned.
+const NB_FUSE_HALF_WIDTH = 1.7;
+const NB_WING_HALF_SPAN = 11.2;
+const NB_WING_ROOT_LE_Y = 11;
+const NB_WING_TIP_LE_Y = 12.3;
+const ENGINE_SPAN_FRACTION = 1 / 3;
+
+const NB_ENGINE_OFFSET =
+  NB_FUSE_HALF_WIDTH + (NB_WING_HALF_SPAN - NB_FUSE_HALF_WIDTH) * ENGINE_SPAN_FRACTION;
+const NB_ENGINE_LE_Y =
+  NB_WING_ROOT_LE_Y
+  + ((NB_ENGINE_OFFSET - NB_FUSE_HALF_WIDTH) / (NB_WING_HALF_SPAN - NB_FUSE_HALF_WIDTH))
+    * (NB_WING_TIP_LE_Y - NB_WING_ROOT_LE_Y);
+
+// Nacelle: sits astride the leading edge, protruding further forward than
+// aft (how an underwing pod actually reads from above), tapering slightly
+// at the back.
+const NB_ENGINE_HALF_WIDTH = 0.95;
+const nbEngineRight = [
+  [CENTER_X + NB_ENGINE_OFFSET - NB_ENGINE_HALF_WIDTH, NB_ENGINE_LE_Y - 1.9],
+  [CENTER_X + NB_ENGINE_OFFSET + NB_ENGINE_HALF_WIDTH, NB_ENGINE_LE_Y - 1.9],
+  [CENTER_X + NB_ENGINE_OFFSET + NB_ENGINE_HALF_WIDTH - 0.18, NB_ENGINE_LE_Y + 1.5],
+  [CENTER_X + NB_ENGINE_OFFSET - NB_ENGINE_HALF_WIDTH + 0.18, NB_ENGINE_LE_Y + 1.5],
+];
+
+const narrowbodyPath = combine(
+  symmetricOutline([
+    // Nose is deliberately rounded over three points rather than one sharp
+    // apex -- a single nose vertex reads as a missile/dart, not an airliner
+    // (visible immediately when compared side by side with real top-down
+    // airliner silhouettes).
+    [CENTER_X, 1.5],                                  // nose tip
+    [CENTER_X + 0.75, 2.1],
+    [CENTER_X + 1.35, 3.6],
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 6.2],             // full fuselage width
+    [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y], // wing root leading edge
+    [CENTER_X + NB_WING_HALF_SPAN, NB_WING_TIP_LE_Y], // wingtip leading edge
+    [CENTER_X + NB_WING_HALF_SPAN, 12.9],             // wingtip trailing edge (near-pointed tip)
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 16.6],            // wing root trailing edge
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 19.4],            // rear fuselage
+    [CENTER_X + 4.6, 21.4],                           // tailplane tip
+    [CENTER_X + 4.6, 22.0],
+    [CENTER_X + 0.75, 22.7],
+    [CENTER_X, 23.1],                                 // tail cone
+  ]),
+  poly(nbEngineRight),
+  poly(mirrored(nbEngineRight)),
+);
 const widebody2Path = wingedOutline({
   noseY: 0.6, fuseHalfWidth: 1.7, wingFrontY: 8, wingHalfSpan: 12.3, wingBackY: 15.3,
   tailHalfSpan: 5, tailY: 21, tailTipY: 23.2,
