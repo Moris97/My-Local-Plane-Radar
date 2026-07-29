@@ -109,20 +109,36 @@ function mirrored(points) {
 
 // narrowbody is authored explicitly rather than via wingedOutline: it's the
 // reference airliner shape the whole set is judged against, so it gets a
-// wide constant-width fuselage, a properly triangular wing (long root
-// chord tapering to an almost-pointed tip) set aft of mid-fuselage with
-// only ~8 degrees of sweep, and two wing-mounted engine nacelles --
-// none of which the generic helper can express.
+// wide constant-width fuselage, a properly triangular swept wing, and two
+// wing-mounted engine nacelles -- none of which the generic helper can
+// express.
+//
+// The wing geometry below was picked by rendering a grid of sweep/chord
+// variants side by side against a real top-down airliner silhouette and
+// choosing from them -- the same approach the trail altitude gradient was
+// tuned with, and for the same reason: guessing numbers here converges
+// slowly and badly. If this needs retuning again, regenerate that
+// comparison rather than nudging values one at a time.
+//
+// Two failed attempts worth not repeating. (1) An almost perpendicular
+// leading edge (~8 degrees) put the wingtip *ahead* of the root chord's
+// midpoint and read as a straight wing with a forward-swept trailing edge.
+// (2) Steeper sweep alone, but with the root chord running back to y=18.6,
+// left barely a unit of bare fuselage between the wing and the tailplane,
+// so the whole rear half filled in as one solid diamond. Both the sweep
+// (~39 degrees, tip landing aft of even the root trailing edge) and the
+// short root chord that leaves a visible fuselage "waist" ahead of the
+// tail are load-bearing -- neither alone is enough.
 //
 // ENGINE_SPAN_FRACTION places each nacelle one third of the way from the
 // fuselage side to the wingtip, and the nacelle's position along the wing's
 // leading edge is *derived* from that fraction (see NB_ENGINE_LE_Y) rather
 // than eyeballed, so the pods stay glued to the leading edge if the span or
-// sweep is ever retuned.
+// sweep is ever retuned -- as it just was.
 const NB_FUSE_HALF_WIDTH = 1.7;
 const NB_WING_HALF_SPAN = 11.2;
-const NB_WING_ROOT_LE_Y = 11;
-const NB_WING_TIP_LE_Y = 12.3;
+const NB_WING_ROOT_LE_Y = 9.2;
+const NB_WING_TIP_LE_Y = 16.9;
 const ENGINE_SPAN_FRACTION = 1 / 3;
 
 const NB_ENGINE_OFFSET =
@@ -155,13 +171,16 @@ const narrowbodyPath = combine(
     [CENTER_X + NB_FUSE_HALF_WIDTH, 6.2],             // full fuselage width
     [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y], // wing root leading edge
     [CENTER_X + NB_WING_HALF_SPAN, NB_WING_TIP_LE_Y], // wingtip leading edge
-    [CENTER_X + NB_WING_HALF_SPAN, 12.9],             // wingtip trailing edge (near-pointed tip)
-    [CENTER_X + NB_FUSE_HALF_WIDTH, 16.6],            // wing root trailing edge
-    [CENTER_X + NB_FUSE_HALF_WIDTH, 19.4],            // rear fuselage
-    [CENTER_X + 4.6, 21.4],                           // tailplane tip
-    [CENTER_X + 4.6, 22.0],
-    [CENTER_X + 0.75, 22.7],
-    [CENTER_X, 23.1],                                 // tail cone
+    [CENTER_X + NB_WING_HALF_SPAN, 17.3],             // wingtip trailing edge (near-pointed tip)
+    // Root chord deliberately stops well short of the tailplane: the gap of
+    // bare fuselage between wing trailing edge and tailplane ("the waist")
+    // is what stops the wing and tail reading as one merged mass.
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 15.2],            // wing root trailing edge
+    [CENTER_X + NB_FUSE_HALF_WIDTH, 19.6],            // rear fuselage (waist)
+    [CENTER_X + 4.4, 21.4],                           // tailplane tip
+    [CENTER_X + 4.4, 22.0],
+    [CENTER_X + 0.75, 22.8],
+    [CENTER_X, 23.2],                                 // tail cone
   ]),
   poly(nbEngineRight),
   poly(mirrored(nbEngineRight)),
