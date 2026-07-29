@@ -306,6 +306,50 @@ const widebody4Path = combine(
   polyAllRounded(mirrored(nacelleAt(2 / 3)), NB_ENGINE_ROUND_RADIUS),
 );
 
+// Light single-engine GA (Cessna 152/172 class), rebuilt against a real
+// top-down reference rather than the generic wingedOutline dart: three
+// things that helper can't express, all visible in the reference.
+// (1) A distinct wide "cabin pod" -- fuselage jumps from the nose taper to
+// a cabin width and *stays* that width all the way through the wing root,
+// front and back, rather than tapering smoothly like an airliner fuselage.
+// (2) The wing is only very slightly swept (leading edge nearly
+// perpendicular to the fuselage) but still tapers to a narrower tip chord
+// -- unlike narrowbody's wing, sweep and taper are independent knobs here.
+// (3) A long, thin tail boom, noticeably thinner than the cabin, carrying
+// a small tapered tailplane echoing the main wing's own shape.
+const LT_FUSE_HALF_WIDTH = 1.0;
+const LT_BOOM_HALF_WIDTH = 0.45;
+const LT_WING_HALF_SPAN = 10.3;
+// Root chord deepened from an initial 3.1 (7.3->10.4) to 4.8 (7.0->11.8) --
+// first render read as a thin blade across the fuselage, not the sturdy
+// rectangular-ish wing a Cessna actually has; tip chord widened to match
+// (1.2 -> 2.0) so the taper reads as "slightly narrower at the tip", not
+// "the wing evaporates toward the tip".
+const LT_WING_ROOT_LE_Y = 7.0;
+const LT_WING_TIP_LE_Y = 7.8;
+const LT_WING_TIP_TE_Y = 9.8;
+const LT_WING_ROOT_TE_Y = 11.8;
+const LT_TAIL_HALF_SPAN = 4.3;
+
+const lightPath = combine(
+  symmetricOutline([
+    [CENTER_X, 2.6],                                   // nose tip
+    [CENTER_X + 0.6, 3.4],
+    [CENTER_X + LT_FUSE_HALF_WIDTH, 4.6],              // cabin shoulder reached
+    [CENTER_X + LT_FUSE_HALF_WIDTH, LT_WING_ROOT_LE_Y], // wing root leading edge (still cabin width)
+    [CENTER_X + LT_WING_HALF_SPAN, LT_WING_TIP_LE_Y],  // wingtip leading edge (near-perpendicular)
+    [CENTER_X + LT_WING_HALF_SPAN, LT_WING_TIP_TE_Y],  // wingtip trailing edge (tapered tip)
+    [CENTER_X + LT_FUSE_HALF_WIDTH, LT_WING_ROOT_TE_Y], // wing root trailing edge (still cabin width)
+    [CENTER_X + LT_BOOM_HALF_WIDTH, 12.2],             // cabin ends, boom begins
+    [CENTER_X + LT_BOOM_HALF_WIDTH, 18.3],             // long thin tail boom
+    [CENTER_X + LT_TAIL_HALF_SPAN, 18.9],              // tailplane tip leading edge
+    [CENTER_X + LT_TAIL_HALF_SPAN, 19.8],              // tailplane tip trailing edge
+    [CENTER_X + LT_BOOM_HALF_WIDTH, 20.3],             // tailplane root trailing edge
+    [CENTER_X, 21.0],                                  // tail cone
+  ]),
+  ellipse(12, 1.9, 0.9, 0.9),                          // nose prop
+);
+
 // Bizjet: wing root pushed well aft (low, rear-mounted wing) and a plain
 // tapered tail (no flare) since its tail feature is the separate T-tail
 // piece below -- both real bizjet cues (Learjet/Citation/Challenger/
@@ -366,15 +410,7 @@ const ICON_PATHS = {
   widebody3: widebody3Path,
   widebody4: widebody4Path,
 
-  // Light single-engine GA: same outline technique, unswept wing, short
-  // fuselage, plus a small nose-prop dot.
-  light: combine(
-    wingedOutline({
-      noseY: 3, fuseHalfWidth: 0.7, wingFrontY: 8.3, wingHalfSpan: 9.5, wingBackY: 9.7,
-      tailHalfSpan: 2.6, tailY: 18.5, tailTipY: 20,
-    }),
-    ellipse(12, 2.2, 1, 1),
-  ),
+  light: lightPath,
 
   bizjet: combine(bizjetBody, bizjetFin, bizjetStabilizer),
 
