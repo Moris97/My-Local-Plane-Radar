@@ -22,10 +22,7 @@
 // - widebody2 and widebody3 are, by explicit request, the exact same
 //   silhouette as narrowbody -- only ICON_SIZE_MULTIPLIERS (1.25x) tells
 //   them apart visually. widebody4 reuses that same silhouette too, but
-//   with a second, same-size engine nacelle per wing (see widebody4Path) --
-//   real four-engine jumbos are this icon's whole reason to exist, so
-//   nacelle count is deliberately what distinguishes *this* one icon, not
-//   a general license to start counting nacelles elsewhere in the set.
+//   with a second, same-size engine nacelle per wing (see widebody4Path).
 //
 // First draft of the fixed-wing shapes drew the fuselage and wing as two
 // separate crossing polygons (mirroring the old aircraft-icon.js's
@@ -37,12 +34,12 @@
 // built by `wingedOutline()`/`symmetricOutline()` -- a solid dart/delta
 // shape, which is what every real minimal top-down airplane glyph actually
 // is. A single <path> can still hold multiple "M ... Z" subpaths for the
-// handful of icons that layer on a small extra cue (widebody3's tail
-// engine, widebody4's nose hump, special's dorsal disc) -- those
-// embellishments are wound the same direction as the main outline
-// (poly()'s point order is consistently nose-side-first/clockwise
-// throughout this file) so they union with it under the default nonzero
-// fill rule instead of any risk of cancelling out as a hole.
+// handful of icons that layer on a small extra cue (widebody4's second
+// nacelle, special's dorsal disc) -- those embellishments are wound the
+// same direction as the main outline (poly()'s point order is consistently
+// nose-side-first/clockwise throughout this file) so they union with it
+// under the default nonzero fill rule instead of any risk of cancelling
+// out as a hole.
 
 export const VIEW_BOX = '0 0 24 24';
 const CENTER_X = 12;
@@ -300,12 +297,7 @@ const widebody3Path = narrowbodyPath;
 // widebody4 reuses the same bare outline too, but with a second nacelle per
 // wing (four-engine jumbos -- 747/A380/A340/Il-96 -- are exactly this
 // icon's real-world examples) at 1/3 and 2/3 of the way out to the
-// wingtip, i.e. fuselage-engine-engine-wingtip at even spacing. This is a
-// deliberate, requested exception to this file's usual "never distinguish
-// widebodies by nacelle count" rule (see the file-level comment above) --
-// that rule is about *reading* two icons apart at 14px, which two same-
-// size, evenly-spaced nacelles on the one icon that's supposed to have
-// four engines doesn't violate.
+// wingtip, i.e. fuselage-engine-engine-wingtip at even spacing.
 const widebody4Path = combine(
   narrowbodyOutline,
   polyAllRounded(nacelleAt(1 / 3), NB_ENGINE_ROUND_RADIUS),
