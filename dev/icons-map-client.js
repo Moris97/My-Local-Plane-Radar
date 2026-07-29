@@ -1,4 +1,4 @@
-import { getIconPath, getIconSizeMultiplier, ICON_SIZE_MULTIPLIERS, NON_ROTATING_ICON_IDS, VIEW_BOX } from '/js/plane-icons.js';
+import { getIconPath, getIconSizeMultiplier, NON_ROTATING_ICON_IDS, VIEW_BOX } from '/js/plane-icons.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
 import { ICON_SIZE_DEFAULT } from '/js/settings-state.js';
 
@@ -90,8 +90,6 @@ async function main() {
     }
     map.fitBounds(bounds, { padding: 80, duration: 0 });
   });
-
-  console.log('Icon size multipliers in use:', ICON_SIZE_MULTIPLIERS);
 }
 
 main();

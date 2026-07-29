@@ -65,11 +65,16 @@ never an error.
 
 ### Icon shapes
 
-MLPR currently draws four icon shapes, picked from the aircraft's reported
-category and type: passenger/airliner, light GA (Cessna-class), helicopter,
-and ground station (readsb's own antenna, if it reports one). More shapes
-(glider, balloon, drone/UAS, and others) are planned as the ADS-B category
-data is used more fully — see the project's `TODO.md`.
+MLPR draws 17 hand-drawn icon shapes, picked from the aircraft's reported
+type code (falling back to its ADS-B category when no type is known):
+several airliner sizes (narrow-body, and three widebody variants for
+twin/tri/quad-engine jets), light GA, business jets, cargo turboprops and
+jets, military jets, special-mission aircraft, helicopters, gliders,
+balloons, drones, ground vehicles, plus a ground-station icon for a
+receiver's own antenna if it reports one, and a generic fallback for
+anything that can't be classified more specifically. Size varies a little
+by type too — a widebody airliner draws larger than a light aircraft even
+at the same icon-size setting.
 
 ![Aircraft icon shapes](images/icon-gallery.png)
 
@@ -116,12 +121,12 @@ into sections:
 
 ## Settings
 
-Settings is organized into five tabs. A banner at the top of each tab tells
+Settings is organized into six tabs. A banner at the top of each tab tells
 you its scope: most tabs apply **only to this browser** (stored locally,
 so your phone and laptop can have different preferences), while
-**Notifications** and **Server** are **shared by everyone** on the radar
-(stored on the Pi, since they affect what gets sent and how the app is
-reached).
+**Notifications**, **Server**, and **Smart Home** are **shared by
+everyone** on the radar (stored on the Pi, since they affect what gets
+sent and how the app is reached).
 
 ### General tab
 
@@ -182,7 +187,9 @@ details, notification messages).
 ![Notifications settings](images/settings-notifications.png)
 
 Turns on push notifications for interesting events, delivered via
-[ntfy](https://ntfy.sh) (see [setup below](#setting-up-push-notifications-ntfy)):
+[ntfy](https://ntfy.sh) (see [setup below](#setting-up-push-notifications-ntfy)).
+First-time-seen and watch-list events can *also* trigger a smart-home
+automation at the same time — see the [Smart Home tab](#smart-home-tab).
 
 - **Squawk alerts** — an aircraft sets an emergency squawk code: 7500
   (hijack), 7600 (radio failure), 7700 (general emergency). Each code can
@@ -214,6 +221,33 @@ Turns on push notifications for interesting events, delivered via
   (e.g. if auto-detection picked up the wrong value, or your receiver
   doesn't report a location) — this feeds range calculations, the home
   marker, and the "automatic" map theme's sunrise/sunset calculation.
+
+### Smart Home tab
+
+Protected by the same Security setting as the Server tab, since a broker
+username/password is a real infrastructure credential, not a routine
+display preference.
+
+- **Enable smart-home (MQTT) notifications** — publishes a message
+  whenever a first-time-seen or watch-list notification fires, for a home
+  automation system (tested against [Home Assistant](https://www.home-assistant.io/))
+  to react to.
+- **Broker URL** — e.g. `mqtt://192.168.1.50:1883`, or `mqtts://host:8883`
+  for a TLS connection. Username/password are optional, depending on your
+  broker's configuration.
+- **Topic prefix** — defaults to `mlpr`. Events publish to
+  `<prefix>/events/first_seen` and `<prefix>/events/watchlist`;
+  availability (whether MLPR is currently connected) to `<prefix>/status`.
+- **Test connection** — verifies the broker accepts the given address/
+  credentials before you save them.
+
+Each event is a JSON message with the aircraft's hex, flight, registration,
+type, altitude, ground speed, and position (when known) — for a watch-list
+event, also which watch-list entry matched. See
+[Setting up push notifications](#setting-up-push-notifications-ntfy) for
+the equivalent phone-notification setup; smart-home and ntfy are two
+independent, simultaneous delivery channels for the same underlying
+first-seen/watch-list events.
 
 ## Setting up push notifications (ntfy)
 

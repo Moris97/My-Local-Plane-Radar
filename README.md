@@ -26,11 +26,14 @@ Stats panels, and every Settings tab, with screenshots.
 
 ## Features
 
-- **Live map** — MapLibre GL JS vector map, aircraft icons that rotate to
-  heading, altitude-colored trails, configurable map labels, a pulsing
-  receiver-location marker, online (detailed) or fully offline basemap, and
-  an optional reception coverage overlay showing how far your receiver has
-  actually picked up aircraft in each direction and altitude band.
+- **Live map** — MapLibre GL JS vector map, aircraft drawn as one of 17
+  hand-drawn shapes picked from the aircraft's actual type/category
+  (airliners by size, GA, bizjets, helicopters, gliders, drones, ground
+  vehicles, and more) rotating to heading, altitude-colored trails,
+  configurable map labels, a pulsing receiver-location marker, online
+  (detailed) or fully offline basemap, and an optional reception coverage
+  overlay showing how far your receiver has actually picked up aircraft in
+  each direction and altitude band.
 - **Aircraft details** — click any aircraft for identity, altitude, speed,
   squawk, autopilot targets, signal quality, and (when a registration is
   known) a photo fetched directly from
@@ -46,6 +49,10 @@ Stats panels, and every Settings tab, with screenshots.
   squawks (7500/7600/7700), first-time-seen aircraft, new range records,
   and a configurable watch list (by type, registration, or flight number,
   with an optional altitude condition).
+- **Smart home (MQTT)** — first-time-seen and watch-list events also
+  publish a structured MQTT message for Home Assistant (or any other
+  MQTT-speaking system) to react to — e.g. dim the lights and change their
+  color when a watched aircraft type appears nearby.
 - **Runs entirely on a Raspberry Pi 3** — 1 GB RAM, no Docker, no native
   dependencies, SD-card-friendly (batched writes, no raw position history).
 
