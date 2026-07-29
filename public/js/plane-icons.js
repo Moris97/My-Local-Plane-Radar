@@ -229,6 +229,9 @@ const nbEngineRight = [
 // both get a small fillet. NB_ROUND_RADIUS is deliberately small -- the
 // point is to take the edge off, not to round the airframe into a blob.
 const NB_ROUND_RADIUS = 0.55;
+// Tailplane half-span ("width" -- see the point list below for the
+// width/height convention this project uses from here on).
+const NB_TAIL_HALF_SPAN = 5.6;
 const NB_SHOULDER_CORNERS = [
   [CENTER_X + NB_FUSE_HALF_WIDTH, 6.2],
   [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y],
@@ -260,9 +263,13 @@ const narrowbodyPath = combine(
     // edges both, plus the tail cone below them) was then deepened a
     // second time on review -- the shape/sweep was right but read as too
     // shallow front-to-back; leading edges stay put, only how far each
-    // trailing edge reaches toward the tail changed.
-    [CENTER_X + 7.0, 22.66],                          // tailplane tip leading edge
-    [CENTER_X + 7.0, 23.8],                           // tailplane tip trailing edge
+    // trailing edge reaches toward the tail changed. Narrowed a third time
+    // (NB_TAIL_HALF_SPAN 7.0 -> 5.6): "width" = left-right span with the
+    // nose pointing up (icon x-axis), "height"/"depth" = nose-to-tail
+    // extent (icon y-axis) -- the ask was narrower only, so just the tip
+    // points' x moves; every y-coordinate here is untouched.
+    [CENTER_X + NB_TAIL_HALF_SPAN, 22.66],            // tailplane tip leading edge
+    [CENTER_X + NB_TAIL_HALF_SPAN, 23.8],             // tailplane tip trailing edge
     [CENTER_X + NB_FUSE_HALF_WIDTH, 22.9],            // tailplane root trailing edge
     [CENTER_X, 23.95],                                // tail cone
   ], NB_SHOULDER_CORNERS, NB_ROUND_RADIUS),
