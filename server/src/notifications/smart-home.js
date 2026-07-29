@@ -93,9 +93,14 @@ function aircraftFields(aircraft) {
 // of inspecting the payload -- see rules.js's two call sites. Flat payload
 // (not nested under an `aircraft` key) so HA's Jinja templates can read
 // `trigger.payload_json.typeCode` directly.
+// Returns whether the event was actually handed to a connected socket --
+// `false` covers "smart home disabled", "no client configured", and "client
+// exists but the broker connection is currently down" alike. Used by
+// /dev/smart-home-test (see server.js) to tell a real user whether their
+// test event went anywhere, not just fire-and-forget silently.
 export function publishSmartHomeEvent({ reason, aircraft, matchedEntry }) {
   const settings = getSmartHomeSettings();
-  if (!settings.enabled || !client) return;
+  if (!settings.enabled || !client) return false;
 
   const payload = {
     reason,
@@ -110,7 +115,16 @@ export function publishSmartHomeEvent({ reason, aircraft, matchedEntry }) {
   // Never retained -- this is a discrete occurrence ("a watched aircraft
   // just appeared"), not persistent state; a retained message here would
   // make every fresh HA subscription immediately re-fire the last event.
-  client.publish(`${settings.topicPrefix}/events/${reason}`, JSON.stringify(payload));
+  return client.publish(`${settings.topicPrefix}/events/${reason}`, JSON.stringify(payload));
+}
+
+// Whether the persistent connection is currently up -- surfaced via
+// GET /api/notifications/smart-home so the Settings tab and
+// /dev/smart-home-test can both show real connection state, not just
+// "enabled" (which only reflects the saved setting, not whether the
+// broker is actually reachable right now).
+export function isSmartHomeConnected() {
+  return client?.connected ?? false;
 }
 
 // Settings UI's "test connection" button: a SEPARATE, temporary connection

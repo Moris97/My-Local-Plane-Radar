@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLPR – smart-home test event</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #0b1116;
+    color: #d8f3e6;
+    max-width: 640px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.hint { color: #7fa896; margin: 0 0 16px; max-width: 74ch; }
+  code { background: #131b22; padding: 1px 5px; border-radius: 3px; }
+  fieldset {
+    border: 1px solid #1c2e3a; border-radius: 6px; padding: 16px; margin-bottom: 16px;
+  }
+  legend { color: #9fc9b3; padding: 0 6px; }
+  label { display: block; margin-bottom: 10px; font-size: 13px; color: #d8f3e6; }
+  input, select {
+    display: block; width: 100%; box-sizing: border-box; margin-top: 4px;
+    background: #0b1116; color: #d8f3e6; border: 1px solid #2a3f4d;
+    border-radius: 4px; padding: 6px 8px; font: inherit;
+  }
+  input[type="checkbox"] { display: inline-block; width: auto; margin: 0 6px 0 0; vertical-align: middle; }
+  .row { display: flex; gap: 12px; }
+  .row > label { flex: 1; }
+  .presets { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  button {
+    background: #16232d; color: #d8f3e6; border: 1px solid #2a3f4d;
+    border-radius: 4px; padding: 7px 14px; cursor: pointer; font: inherit;
+  }
+  button.primary { background: #245c3c; border-color: #3ddc84; font-weight: 600; }
+  button:hover { border-color: #3ddc84; }
+  .status-banner {
+    background: #131b22; border: 1px solid #1c2e3a; border-radius: 6px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+  }
+  .status-banner .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+  .dot.on { background: #3ddc84; }
+  .dot.off { background: #e05a5a; }
+  pre#payload-preview {
+    background: #131b22; border: 1px solid #1c2e3a; border-radius: 6px;
+    padding: 10px 14px; font-size: 12px; overflow-x: auto; color: #9fc9b3;
+  }
+  #result { margin-top: 10px; font-size: 13px; }
+  #result.ok { color: #3ddc84; }
+  #result.error { color: #e07f7f; }
+  .mlpr-gate { max-width: 320px; }
+  .mlpr-gate input { margin-bottom: 10px; }
+  .mlpr-gate-error { color: #e07f7f; font-size: 13px; }
+</style>
+</head>
+<body>
+  <h1>Smart-home test event</h1>
+  <p class="hint">
+    Fires a real event through the <b>actual configured</b> smart-home
+    connection (unlike Settings' "Test connection", which only checks the
+    broker is reachable) -- lets you verify Home Assistant automations
+    without waiting for a genuine first-seen/watch-list match.
+    <b>Available in production</b> (like <code>/dev/icon_verify</code>):
+    it's only useful once smart-home is actually configured on a real
+    deployment.
+  </p>
+
+  <div id="gate-container"></div>
+
+  <div id="main-container" style="display:none">
+    <div id="status-banner" class="status-banner">…</div>
+
+    <div class="presets">
+      <button type="button" data-preset="landing">Preset: A380 landing (watch-list)</button>
+      <button type="button" data-preset="firstseen">Preset: new registration (first-seen)</button>
+    </div>
+
+    <fieldset>
+      <legend>Event</legend>
+      <label>Reason
+        <select id="f-reason">
+          <option value="first_seen">first_seen</option>
+          <option value="watchlist">watchlist</option>
+        </select>
+      </label>
+      <div id="watchlist-fields" style="display:none">
+        <div class="row">
+          <label>Matched type
+            <select id="f-matched-type">
+              <option value="type">type</option>
+              <option value="registration">registration</option>
+              <option value="flight">flight</option>
+            </select>
+          </label>
+          <label>Matched value <input type="text" id="f-matched-value"></label>
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Aircraft</legend>
+      <div class="row">
+        <label>Hex (required) <input type="text" id="f-hex"></label>
+        <label>Flight <input type="text" id="f-flight"></label>
+      </div>
+      <div class="row">
+        <label>Registration <input type="text" id="f-registration"></label>
+        <label>Type code <input type="text" id="f-typecode"></label>
+      </div>
+      <div class="row">
+        <label>Altitude (ft) <input type="number" id="f-altitude"></label>
+        <label>Ground speed (kt) <input type="number" id="f-speed"></label>
+      </div>
+      <div class="row">
+        <label>Lat <input type="number" step="0.0001" id="f-lat"></label>
+        <label>Lon <input type="number" step="0.0001" id="f-lon"></label>
+      </div>
+      <label><input type="checkbox" id="f-onground"> On ground</label>
+    </fieldset>
+
+    <p><b>Will publish to:</b> <code id="topic-preview">…</code></p>
+    <pre id="payload-preview"></pre>
+
+    <div class="mlpr-home-actions" style="margin-top:14px">
+      <button type="button" class="primary" id="send-btn">Send test event</button>
+    </div>
+    <p id="result"></p>
+  </div>
+
+  <script type="module" src="/js/smart-home-test-client.js"></script>
+</body>
+</html>

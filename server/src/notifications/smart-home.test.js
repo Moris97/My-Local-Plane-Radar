@@ -201,3 +201,27 @@ test('shutdownSmartHome publishes retained "offline" and disconnects the persist
 test('shutdownSmartHome is a no-op when no client is connected', () => {
   assert.doesNotThrow(() => smartHome.shutdownSmartHome());
 });
+
+test('publishSmartHomeEvent returns false when smart home is disabled', () => {
+  updateSmartHomeSettings({ enabled: false });
+  const result = smartHome.publishSmartHomeEvent({ reason: 'first_seen', aircraft: aircraftFixture() });
+  assert.equal(result, false);
+});
+
+test('publishSmartHomeEvent returns whatever the client publish reported (connected -> true)', () => {
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
+  smartHome.reconfigureSmartHome();
+  const result = smartHome.publishSmartHomeEvent({ reason: 'first_seen', aircraft: aircraftFixture() });
+  assert.equal(result, true);
+});
+
+test('isSmartHomeConnected reflects the persistent client state', () => {
+  assert.equal(smartHome.isSmartHomeConnected(), false, 'nothing configured yet');
+
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
+  smartHome.reconfigureSmartHome();
+  assert.equal(smartHome.isSmartHomeConnected(), true);
+
+  smartHome.shutdownSmartHome();
+  assert.equal(smartHome.isSmartHomeConnected(), false);
+});

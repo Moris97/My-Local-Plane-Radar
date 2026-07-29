@@ -10,7 +10,7 @@ import { toWireAircraftList } from './wire.js';
 import { getEffectiveHome, setManualHome, clearManualHome } from './home.js';
 import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic, getSmartHomeSettings, updateSmartHomeSettings } from './notifications/settings.js';
 import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
-import { reconfigureSmartHome, testSmartHomeConnection } from './notifications/smart-home.js';
+import { reconfigureSmartHome, testSmartHomeConnection, publishSmartHomeEvent, isSmartHomeConnected } from './notifications/smart-home.js';
 import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange } from './stats-query.js';
@@ -100,6 +100,15 @@ export async function buildServer() {
   // the gated static mount.
   app.get('/dev/icon_verify', async (request, reply) => {
     reply.type('text/html').send(await readFile(join(devDir, 'icon_verify.html'), 'utf8'));
+  });
+
+  // Same reasoning as /dev/icon_verify above: deliberately NOT gated by
+  // NODE_ENV -- this is a tool for testing a real, already-configured
+  // smart-home connection (real broker, real Home Assistant automations),
+  // which only exists on a real deployment, not a dev machine. Its client
+  // script lives under public/js/ (always served) for the same reason.
+  app.get('/dev/smart-home-test', async (request, reply) => {
+    reply.type('text/html').send(await readFile(join(devDir, 'smart-home-test.html'), 'utf8'));
   });
 
   async function requireSettingsAuth(request, reply) {
@@ -379,7 +388,12 @@ export async function buildServer() {
   // broker credentials are a real infrastructure secret, a different kind
   // of sensitive than a random ntfy topic string. Deliberate decision, not
   // an inconsistency.
-  app.get('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async () => getSmartHomeSettings());
+  app.get('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async () => ({
+    ...getSmartHomeSettings(),
+    // Runtime state, not a saved setting -- lets the UI show "enabled but
+    // not currently connected" instead of just echoing back the toggle.
+    connected: isSmartHomeConnected(),
+  }));
 
   app.put('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
@@ -428,6 +442,26 @@ export async function buildServer() {
       username: body.username ?? settings.username,
       password: body.password ?? settings.password,
     });
+  });
+
+  // Fires a real event through the REAL persistent connection (unlike
+  // /test above, which opens its own temporary one) -- lets a user verify
+  // their Home Assistant automations without waiting for a genuine
+  // first-seen/watch-list match. See /dev/smart-home-test, which is the
+  // one and only caller of this in practice.
+  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist']);
+  app.post('/api/notifications/smart-home/send-test-event', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const body = request.body ?? {};
+    if (!VALID_TEST_EVENT_REASONS.has(body.reason)) {
+      return reply.code(400).send({ error: 'reason must be "first_seen" or "watchlist"' });
+    }
+    const aircraft = body.aircraft ?? {};
+    if (!aircraft.hex) {
+      return reply.code(400).send({ error: 'aircraft.hex is required' });
+    }
+
+    const sent = publishSmartHomeEvent({ reason: body.reason, aircraft, matchedEntry: body.matchedEntry });
+    return { sent, enabled: getSmartHomeSettings().enabled, connected: isSmartHomeConnected() };
   });
 
   const wss = new WebSocketServer({ noServer: true });

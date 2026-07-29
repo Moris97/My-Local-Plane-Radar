@@ -1205,6 +1205,25 @@ A PUT to `/api/notifications/smart-home` calls `reconfigureSmartHome()`
 immediately, so toggling the feature or changing the broker takes effect
 without a restart, same as every other setting in this app.
 
+**`/dev/smart-home-test`** (added 2026-07-29, requested after the user's
+first live Home Assistant test): a form to fire a real event through the
+**actual configured connection** without waiting for a genuine first-seen/
+watch-list match — lets HA automations be iterated on quickly. Distinct
+from Settings' own "Test connection" (which opens a separate, temporary
+socket just to check the broker is reachable): this one calls the real
+`publishSmartHomeEvent()`, through the real persistent client, so a
+success here means the event genuinely went out over the wire. New
+`POST /api/notifications/smart-home/send-test-event` (gated the same as
+the rest of smart-home) returns `{sent, enabled, connected}` so the page
+can distinguish "disabled" from "enabled but broker unreachable" instead
+of a silent no-op. **Available in production, like `/dev/icon_verify`** —
+same reasoning: a dev machine has no real broker/HA to test against, only
+a real deployment does. Two quick-fill presets (a watch-list-style "A380
+landing", a first-seen-style "new registration") plus a live JSON payload
+preview so the exact topic/body about to be sent is visible before
+clicking. Reuses `settings-auth.js` directly (same `sessionStorage` token
+Settings' own gated tabs use) rather than inventing a second auth flow.
+
 ## Advanced statistics (Stage 7)
 
 The Stats view (`public/js/stats.js`) has six charts plus a lazily-loaded
