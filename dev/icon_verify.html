@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MLPR – icon verification (live data)</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font: 14px/1.5 system-ui, sans-serif;
+    background: #0b1116;
+    color: #d8f3e6;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.hint { color: #7fa896; margin: 0 0 16px; max-width: 80ch; }
+  code { background: #131b22; padding: 1px 5px; border-radius: 3px; }
+  .summary { display: flex; gap: 24px; flex-wrap: wrap; margin-bottom: 20px; }
+  .summary .stat {
+    background: #131b22; border: 1px solid #1c2e3a; border-radius: 6px;
+    padding: 10px 16px; min-width: 120px;
+  }
+  .summary .stat .n { font-size: 22px; font-weight: 700; color: #3ddc84; }
+  .summary .stat.warn .n { color: #e0a83d; }
+  .summary .stat .label { font-size: 12px; color: #7fa896; }
+  .controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .controls input, .controls select {
+    background: #131b22; color: #d8f3e6; border: 1px solid #2a3f4d;
+    border-radius: 4px; padding: 6px 10px; font: inherit;
+  }
+  .controls input[type="text"] { min-width: 220px; }
+  .controls label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #9fc9b3; }
+  table { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+  th, td { text-align: left; padding: 5px 10px; border-bottom: 1px solid #1c2e3a; font-size: 13px; vertical-align: middle; }
+  th { color: #9fc9b3; font-weight: 600; position: sticky; top: 0; background: #0b1116; cursor: pointer; user-select: none; }
+  th:hover { color: #d8f3e6; }
+  th.sorted::after { content: ' \25BE'; color: #3ddc84; }
+  tr:hover { background: #131b22; }
+  tr.unresolved { background: #241a08; }
+  tr.unresolved:hover { background: #2e2109; }
+  tr.fallback { background: #1a1f24; }
+  .code { font: 600 12.5px/1 ui-monospace, Menlo, Consolas, monospace; }
+  .icon-cell { display: flex; align-items: center; gap: 8px; }
+  .icon-cell svg { display: block; color: #3ddc84; flex: none; }
+  .badge {
+    display: inline-block; font-size: 10.5px; font-weight: 700; letter-spacing: 0.02em;
+    border-radius: 3px; padding: 1px 6px; vertical-align: middle;
+  }
+  .badge.exact, .badge.military-exact, .badge.military-prefix { background: #1c3a2a; color: #6fe0a0; }
+  .badge.prefix { background: #1c3a4a; color: #7fd4f0; }
+  .badge.category { background: #2a2c1c; color: #cfd46f; }
+  .badge.unknown { background: #4a3308; color: #f0c04d; }
+  .table-wrap { max-height: 72vh; overflow-y: auto; margin-bottom: 24px; }
+  .empty { color: #7fa896; padding: 12px 0; }
+</style>
+</head>
+<body>
+  <h1>MLPR icon verification — real aircraft, real classification</h1>
+  <p class="hint">
+    Every registration MLPR's receiver has ever recorded a type code for
+    (<code>GET /api/stats/registrations</code>, same source as the Stats
+    view's own registrations table), run through the real classification
+    chain (<code>icon-classify.js</code>) against the real shipped
+    <code>data/icon-types.json</code>. This is <b>Stage 4</b>'s real-data
+    cross-check, running against this receiver's own traffic rather than
+    guesses. <b>Available in production</b> (unlike <code>/dev/icons</code>
+    and <code>/dev/icon-types</code>, which are dev-only) since it needs
+    real accumulated data to be useful at all. Rows classified via the ADS-B
+    category fallback or landing on <code>unknown</code> are highlighted —
+    those are the ones worth adding to <code>icon-types.json</code>.
+    Note: the military-only overrides table can't be exercised here (this
+    page has no per-registration military-flag data), so a tanker/AWACS
+    sharing a civilian type code will show its civilian classification, not
+    <code>special</code>. Same reason there's no separate "category
+    fallback" bucket here: the ADS-B <code>category</code> field also
+    isn't stored per registration, so every row below either hits the type
+    table (exact/prefix) or falls straight through to <code>unknown</code>
+    — there's no middle stage to show.
+  </p>
+
+  <div class="summary" id="summary"></div>
+
+  <div class="controls">
+    <input type="text" id="search" placeholder="Filter by type code, registration, or icon…">
+    <label><input type="checkbox" id="needs-attention-only"> Unresolved only (unknown)</label>
+  </div>
+
+  <div class="table-wrap"><table id="verify-table"><thead>
+    <tr>
+      <th data-sort="typeCode">Type</th>
+      <th data-sort="registration">Registration</th>
+      <th data-sort="icon">Assigned icon</th>
+      <th data-sort="stage">Stage</th>
+      <th data-sort="timesSeen">Times seen</th>
+      <th data-sort="lastSeenAt">Last seen</th>
+    </tr>
+  </thead><tbody></tbody></table></div>
+
+  <script type="module" src="/js/icon-verify-client.js"></script>
+</body>
+</html>

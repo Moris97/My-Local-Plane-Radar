@@ -89,6 +89,18 @@ export async function buildServer() {
     });
   }
 
+  // Icon verification against REAL receiver data -- deliberately NOT
+  // gated behind the NODE_ENV check above (it's the one dev/ page meant
+  // to be used in production: it's only useful once a receiver has
+  // actually accumulated real registrations to classify, which a dev
+  // machine never has). Its client script lives under public/js/ (always
+  // served, no gate) rather than dev/ (gated) for exactly this reason --
+  // only the HTML shell is read from dev/ here, via readFile rather than
+  // the gated static mount.
+  app.get('/dev/icon_verify', async (request, reply) => {
+    reply.type('text/html').send(await readFile(join(devDir, 'icon_verify.html'), 'utf8'));
+  });
+
   async function requireSettingsAuth(request, reply) {
     if (!isPasswordSet()) return;
     if (!isValidToken(request.headers['x-mlpr-settings-token'])) {
