@@ -142,6 +142,16 @@ git pull && sudo systemctl restart mlpr@$(whoami).service   # update to the late
   wire up readsb's aircraft database automatically; if that step failed
   (shown in the install output), see the `--db-file` note in
   [CLAUDE.md](./CLAUDE.md).
+- **Want to see which airlines aren't recognized in the Stats registrations
+  table?** MLPR logs a warning the first time it sees an airline-style
+  callsign whose ICAO prefix isn't in its airline database (a fetch of
+  [OpenFlights](https://openflights.org/data.php)' data, which has some
+  gaps for smaller/regional carriers). Check for it with:
+  ```
+  journalctl -u mlpr@$(whoami).service | grep "airline-lookup"
+  ```
+  Each distinct prefix is only logged once per service run, not once per
+  aircraft, so this won't be spammed with repeats.
 - **Still stuck** — open an
   [issue](https://github.com/Moris97/My-Local-Plane-Radar/issues) with what
   you tried and the relevant `journalctl` output.

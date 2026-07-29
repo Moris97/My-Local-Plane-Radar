@@ -204,7 +204,15 @@ html, body {
   cursor: pointer;
 }
 
-#mlpr-attribution {
+/* Fixed-positioning owner for the whole bottom-left corner stack (credits
+   "i" button + map attribution) -- previously this was all on
+   #mlpr-attribution directly, moved up here so the "i" button and the
+   attribution naturally stack vertically (column, so the button sits right
+   above the attribution regardless of the attribution's own height, which
+   varies between offline mode's short text and online mode's full
+   OpenFreeMap/OpenMapTiles/OpenStreetMap credit) rather than needing a
+   hardcoded pixel offset between two independently-positioned elements. */
+#mlpr-corner-info {
   position: fixed;
   /* Left, not right -- the List panel now reaches the true screen bottom
      (see .mlpr-panel-fill below) and, on desktop, docks to the *right*
@@ -226,6 +234,20 @@ html, body {
      vs. side-panel layout. */
   bottom: calc(var(--bottom-bar-height) + 4px);
   z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  max-width: calc(100vw - 12px);
+}
+
+@media (min-width: 720px) {
+  #mlpr-corner-info {
+    bottom: max(6px, env(safe-area-inset-bottom));
+  }
+}
+
+#mlpr-attribution {
   font: 10px/1.4 system-ui, sans-serif;
   background: rgba(5, 7, 10, 0.6);
   padding: 1px 6px;
@@ -235,7 +257,7 @@ html, body {
      much longer than the offline-mode text ever was -- this box has no
      intrinsic width limit and is left-anchored, so on a narrow phone it
      could otherwise run off the right edge of the screen instead of wrapping. */
-  max-width: calc(100vw - 12px);
+  max-width: 100%;
   white-space: normal;
   text-align: left;
   /* The plain-text parts of the credit ("©", "Data from") sit outside the
@@ -256,14 +278,67 @@ html, body {
   color: #bcd7e8;
 }
 
-@media (min-width: 720px) {
-  #mlpr-attribution {
-    bottom: max(6px, env(safe-area-inset-bottom));
-  }
-}
-
 #mlpr-osm-attribution.hidden {
   display: none;
+}
+
+/* The credits toggle reuses .mlpr-info-icon's own circular "i" look
+   (Settings' hint icons) but is its own click-toggled panel, not that
+   class's hover tooltip -- the credits list needs real links inside it,
+   and a <button> can't reliably contain nested interactive content
+   (an inner <a> inside a <button> is invalid HTML and unreliable for
+   clicks/keyboard across browsers), so the panel is a sibling <div>
+   instead, shown/hidden by panels.js on click rather than CSS :hover. */
+.mlpr-credits-panel {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  margin-bottom: 8px;
+  width: 280px;
+  max-width: 70vw;
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  font: 400 12px/1.4 system-ui, sans-serif;
+  padding: 10px 12px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.mlpr-credits-panel.hidden {
+  display: none;
+}
+
+#mlpr-credits-heading {
+  display: block;
+  color: #d8f3e6;
+  margin-bottom: 6px;
+}
+
+.mlpr-credits-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.mlpr-credits-list li {
+  margin: 3px 0;
+}
+
+.mlpr-credits-panel a {
+  color: #7fd8a8;
+  text-decoration: none;
+}
+
+.mlpr-credits-panel a:hover {
+  text-decoration: underline;
+}
+
+.mlpr-credits-byline {
+  margin: 8px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid #1c2e3a;
+  color: #7fa3b3;
 }
 
 .mlpr-chart-attribution {

@@ -26,9 +26,28 @@
 </head>
 <body>
 <div id="map"></div>
-<div id="mlpr-attribution">
-  <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre</a>
-  <span id="mlpr-osm-attribution" class="hidden"> · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
+<div id="mlpr-corner-info">
+  <button type="button" id="mlpr-credits-toggle" class="mlpr-info-icon" aria-expanded="false" aria-controls="mlpr-credits-panel">i</button>
+  <div id="mlpr-credits-panel" class="mlpr-credits-panel hidden" role="dialog">
+    <strong id="mlpr-credits-heading"></strong>
+    <ul class="mlpr-credits-list">
+      <li><a href="https://github.com/wiedehopf/readsb" target="_blank" rel="noopener">readsb</a> (wiedehopf fork)</li>
+      <li><a href="https://fastify.dev/" target="_blank" rel="noopener">Fastify</a></li>
+      <li><a href="https://github.com/fastify/fastify-static" target="_blank" rel="noopener">@fastify/static</a></li>
+      <li><a href="https://github.com/websockets/ws" target="_blank" rel="noopener">ws</a></li>
+      <li><a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre GL JS</a></li>
+      <li><a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a>, <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> &amp; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></li>
+      <li><a href="https://www.naturalearthdata.com/" target="_blank" rel="noopener">Natural Earth</a></li>
+      <li><a href="https://openflights.org/data.php" target="_blank" rel="noopener">OpenFlights</a></li>
+      <li><a href="https://github.com/wiedehopf/tar1090-db" target="_blank" rel="noopener">tar1090-db</a> (Mictronics)</li>
+      <li><a href="https://www.planespotters.net/" target="_blank" rel="noopener">Planespotters.net</a></li>
+    </ul>
+    <p class="mlpr-credits-byline">MLPR by Maurycy Kaczmarek</p>
+  </div>
+  <div id="mlpr-attribution">
+    <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre</a>
+    <span id="mlpr-osm-attribution" class="hidden"> · <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> © <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a></span>
+  </div>
 </div>
 
 <div id="panel-overlay" class="hidden"></div>

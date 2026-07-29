@@ -122,6 +122,48 @@ document.documentElement.lang = getLanguage();
 closeBtn.setAttribute('aria-label', t('close'));
 modalCloseBtn.setAttribute('aria-label', t('close'));
 
+// Bottom-left "i" credits button (index.html's #mlpr-corner-info) -- a
+// click-toggled panel, not a CSS :hover tooltip like Settings' own
+// .mlpr-info-icon hints, because this one's content is real links
+// (nested <a> inside a <button> is invalid HTML and unreliable for
+// clicks/keyboard focus across browsers) and needs to work reliably on
+// touch too, where hover doesn't really apply. Wired up here rather than
+// in app.js for the same reason as the lang/aria-label setup just above --
+// this module runs regardless of whether the WebGL-dependent map ever
+// comes up.
+{
+  const creditsToggle = document.getElementById('mlpr-credits-toggle');
+  const creditsPanel = document.getElementById('mlpr-credits-panel');
+  creditsToggle.setAttribute('aria-label', t('creditsLabel'));
+  document.getElementById('mlpr-credits-heading').textContent = t('specialThanksTo');
+
+  function closeCreditsPanel() {
+    creditsPanel.classList.add('hidden');
+    creditsToggle.setAttribute('aria-expanded', 'false');
+  }
+
+  creditsToggle.addEventListener('click', (event) => {
+    event.stopPropagation();
+    const isOpen = !creditsPanel.classList.contains('hidden');
+    if (isOpen) {
+      closeCreditsPanel();
+    } else {
+      creditsPanel.classList.remove('hidden');
+      creditsToggle.setAttribute('aria-expanded', 'true');
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    if (creditsPanel.classList.contains('hidden')) return;
+    if (creditsPanel.contains(event.target) || event.target === creditsToggle) return;
+    closeCreditsPanel();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !creditsPanel.classList.contains('hidden')) closeCreditsPanel();
+  });
+}
+
 for (const btn of barButtons) {
   const entry = PANELS[btn.dataset.panel] ?? FULLSCREEN_MODALS[btn.dataset.panel];
   const label = btn.querySelector('.mlpr-bar-btn-label');
