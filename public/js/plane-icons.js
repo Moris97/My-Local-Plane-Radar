@@ -79,6 +79,18 @@ function pointToward(from, to, dist) {
   return [from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t];
 }
 
+// A handful of straight-line points interpolating a fuselage's half-width
+// from `fromX` to `toX` over `y0`..`y1` -- a gradual multi-point taper
+// instead of one sharp step (used by `light`'s cabin-to-boom narrowing).
+function taperPoints(fromX, toX, y0, y1, steps) {
+  const pts = [];
+  for (let i = 1; i <= steps; i++) {
+    const t = i / steps;
+    pts.push([fromX + (toX - fromX) * t, y0 + (y1 - y0) * t]);
+  }
+  return pts;
+}
+
 // Like poly(), but corners named in `radiusByPoint` (a Map from "x,y" ->
 // radius) get a small quadratic-curve fillet instead of a sharp point --
 // pulled back `radius` units along each adjoining edge, joined by a
@@ -317,7 +329,7 @@ const widebody4Path = combine(
 // -- unlike narrowbody's wing, sweep and taper are independent knobs here.
 // (3) A long, thin tail boom, noticeably thinner than the cabin, carrying
 // a small tapered tailplane echoing the main wing's own shape.
-const LT_FUSE_HALF_WIDTH = 1.0;
+const LT_FUSE_HALF_WIDTH = 1.3;
 const LT_BOOM_HALF_WIDTH = 0.45;
 const LT_WING_HALF_SPAN = 10.3;
 // Root chord deepened from an initial 3.1 (7.3->10.4) to 4.8 (7.0->11.8) --
@@ -330,24 +342,50 @@ const LT_WING_TIP_LE_Y = 7.8;
 const LT_WING_TIP_TE_Y = 9.8;
 const LT_WING_ROOT_TE_Y = 11.8;
 const LT_TAIL_HALF_SPAN = 4.3;
+// Cabin stays full width a bit past the wing's trailing edge (the "under
+// the wing" plateau asked for directly), then narrows to the boom width
+// gradually over LT_TAPER_LEN -- picked from a rendered width/taper-length
+// comparison grid, "very long taper" being the longest of those.
+const LT_PLATEAU_END_Y = LT_WING_ROOT_TE_Y + 0.6;
+const LT_TAPER_LEN = 4.2;
+
+// Nose "propeller": a thin bar ("-"), not a circle -- a circle doesn't
+// read as a propeller at all. Width is 1/3 of the full wingspan, per the
+// same fraction-of-span convention nacelles use elsewhere in this file.
+// Sits below (not right at) the very tip: moving it down off the tip is
+// what reveals a small triangular nose cone poking out ahead of it,
+// rather than the bar swallowing the tip entirely.
+const LT_PROP_HALF_WIDTH = LT_WING_HALF_SPAN / 3;
+const LT_PROP_Y = 2.7;
+const LT_PROP_THICKNESS = 0.5;
+const lightPropBar = poly([
+  [CENTER_X - LT_PROP_HALF_WIDTH, LT_PROP_Y - LT_PROP_THICKNESS / 2],
+  [CENTER_X + LT_PROP_HALF_WIDTH, LT_PROP_Y - LT_PROP_THICKNESS / 2],
+  [CENTER_X + LT_PROP_HALF_WIDTH, LT_PROP_Y + LT_PROP_THICKNESS / 2],
+  [CENTER_X - LT_PROP_HALF_WIDTH, LT_PROP_Y + LT_PROP_THICKNESS / 2],
+]);
 
 const lightPath = combine(
   symmetricOutline([
-    [CENTER_X, 2.6],                                   // nose tip
-    [CENTER_X + 0.6, 3.4],
+    [CENTER_X, 2.05],                                  // nose tip (small cone ahead of the prop bar)
+    [CENTER_X + LT_FUSE_HALF_WIDTH * 0.6, 3.4],
     [CENTER_X + LT_FUSE_HALF_WIDTH, 4.6],              // cabin shoulder reached
     [CENTER_X + LT_FUSE_HALF_WIDTH, LT_WING_ROOT_LE_Y], // wing root leading edge (still cabin width)
     [CENTER_X + LT_WING_HALF_SPAN, LT_WING_TIP_LE_Y],  // wingtip leading edge (near-perpendicular)
     [CENTER_X + LT_WING_HALF_SPAN, LT_WING_TIP_TE_Y],  // wingtip trailing edge (tapered tip)
     [CENTER_X + LT_FUSE_HALF_WIDTH, LT_WING_ROOT_TE_Y], // wing root trailing edge (still cabin width)
-    [CENTER_X + LT_BOOM_HALF_WIDTH, 12.2],             // cabin ends, boom begins
+    [CENTER_X + LT_FUSE_HALF_WIDTH, LT_PLATEAU_END_Y], // cabin width plateau continues just past the wing
+    ...taperPoints(
+      CENTER_X + LT_FUSE_HALF_WIDTH, CENTER_X + LT_BOOM_HALF_WIDTH,
+      LT_PLATEAU_END_Y, LT_PLATEAU_END_Y + LT_TAPER_LEN, 4,
+    ),                                                  // gradual taper down to boom width
     [CENTER_X + LT_BOOM_HALF_WIDTH, 18.3],             // long thin tail boom
     [CENTER_X + LT_TAIL_HALF_SPAN, 18.9],              // tailplane tip leading edge
     [CENTER_X + LT_TAIL_HALF_SPAN, 19.8],              // tailplane tip trailing edge
     [CENTER_X + LT_BOOM_HALF_WIDTH, 20.3],             // tailplane root trailing edge
     [CENTER_X, 21.0],                                  // tail cone
   ]),
-  ellipse(12, 1.9, 0.9, 0.9),                          // nose prop
+  lightPropBar,
 );
 
 // Bizjet: wing root pushed well aft (low, rear-mounted wing) and a plain
