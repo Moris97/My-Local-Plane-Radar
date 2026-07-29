@@ -715,15 +715,24 @@ const ICON_PATHS = {
   // widebody2/widebody3 above.
   special: widebody2Path,
 
-  // Helicopter -- carried over from the old module, flattened from
-  // per-element <rect transform="rotate(...)"> into absolute coordinates
-  // (a <path>'s subpaths can't carry their own transform), same silhouette.
+  // Helicopter -- carried over from the old module (per-element <rect
+  // transform="rotate(...)">, flattened here into absolute coordinates
+  // since a <path>'s subpaths can't carry their own transform), then
+  // tuned in two rounds against rendered comparisons: the rotor assembly
+  // (blades/hub/mast) shifted down by 2 units from its original position
+  // (which sat right at the cabin's nose, an unrealistically far-forward
+  // mount) so the hub lands over the cabin's shoulder instead -- picked as
+  // the middle of a 3-option "sweet spot" range (a smaller shift still read
+  // as too far forward, a bigger one started dragging the blades' lower
+  // tips onto the tail boom); and the cabin narrowed from its original
+  // shoulder half-width (2.8 -> 2.35, bottom half-width scaled down by the
+  // same ratio) after a 6-way width comparison.
   helicopter: combine(
-    poly([[6.84, 2.85], [18.15, 14.16], [17.16, 15.15], [5.85, 3.84]]), // rotor blade A
-    poly([[5.85, 14.16], [17.16, 2.85], [18.15, 3.84], [6.84, 15.15]]), // rotor blade B
-    ellipse(12, 9, 1, 1), // rotor hub
-    poly([[11.3, 9], [12.7, 9], [12.7, 11.2], [11.3, 11.2]]), // mast
-    poly([[12, 7.5], [14.8, 11.8], [14.2, 15.3], [9.8, 15.3], [9.2, 11.8]]), // cabin
+    poly([[6.84, 4.85], [18.15, 16.16], [17.16, 17.15], [5.85, 5.84]]), // rotor blade A
+    poly([[5.85, 16.16], [17.16, 4.85], [18.15, 5.84], [6.84, 17.15]]), // rotor blade B
+    ellipse(12, 11, 1, 1), // rotor hub
+    poly([[11.3, 11], [12.7, 11], [12.7, 13.2], [11.3, 13.2]]), // mast
+    poly([[12, 7.5], [14.35, 11.8], [13.85, 15.3], [10.15, 15.3], [9.65, 11.8]]), // cabin
     poly([[10.8, 15.3], [13.2, 15.3], [12.5, 21.8], [11.5, 21.8]]), // tail boom
     poly([[9.3, 21.2], [14.7, 21.2], [14.7, 22.6], [9.3, 22.6]]), // skid
   ),
