@@ -632,12 +632,51 @@ const cargoJetPath = combine(
   poly(cjPod2), poly(mirrored(cjPod2)),
 );
 
-// Fighter/attack jet: short fuselage, small tail, and a sharply swept
-// (delta-like) wing whose span is large relative to the fuselage length.
-const militaryJetPath = wingedOutline({
-  noseY: 3, fuseHalfWidth: 0.9, wingFrontY: 9, wingHalfSpan: 11.5, wingBackY: 16,
-  tailHalfSpan: 2.5, tailY: 17.5, tailTipY: 19,
-});
+// Fighter/attack jet (F-16 style): reference types (icon-types.json's exact
+// table) span both conventional swept-wing fighters (F-16/F-15/F-35) and
+// canard-delta fighters (Typhoon/Rafale), so this one icon has to read as
+// "fighter jet" generically rather than nailing one type exactly. Picked
+// after two rejected directions: a canard-delta shape modeled closely on a
+// Gripen reference photo (wing root trailing edge blended/curved into the
+// fuselage where it should have met it at a near-right-angle -- rejected
+// once for that, and the LERX-kink + separate intake bulge + twin
+// separated tailplane-stub rebuild that followed was rejected outright as
+// "pokraczne" -- too many competing small details for 24x24). This is
+// variant A from the first 4-way comparison (F-16/F/A-18/delta/delta+
+// canard): a modest single LERX kink in the leading edge, a trapezoidal
+// wing (straighter trailing edge, not a full delta), narrowing to one slim
+// tailcone with a single small tailplane -- built the same way as every
+// other fixed-wing icon here (one continuous smooth symmetricOutline, no
+// separate subpaths), which is what actually reads cleanly at this size.
+const MJ_FUSE_HALF_WIDTH = 0.8;
+const MJ_LERX_HALF_WIDTH = 1.6;
+const MJ_LERX_Y = 9.0;
+const MJ_WING_HALF_SPAN = 8.0;
+const MJ_WING_LE_Y = 12.5;
+const MJ_WING_TE_Y = 13.7;
+const MJ_WING_ROOT_TE_Y = 14.0;
+const MJ_TAIL_HALF_SPAN = 3.2;
+const MJ_TAIL_TIP_LE_Y = 19.0;
+const MJ_TAIL_TIP_TE_Y = 19.8;
+const MJ_TAIL_ROOT_TE_Y = 19.2;
+const MJ_TAIL_CONE_Y = 20.2;
+
+const militaryJetPath = symmetricOutline([
+  [12, 3],
+  [12 + MJ_FUSE_HALF_WIDTH * 0.5, 4.5],
+  [12 + MJ_FUSE_HALF_WIDTH, 6.5],
+  [12 + MJ_LERX_HALF_WIDTH, MJ_LERX_Y],                 // LERX kink
+  [12 + MJ_WING_HALF_SPAN, MJ_WING_LE_Y],                // wingtip leading edge
+  [12 + MJ_WING_HALF_SPAN - 0.5, MJ_WING_TE_Y],          // wingtip trailing edge
+  [12 + MJ_FUSE_HALF_WIDTH, MJ_WING_ROOT_TE_Y],          // wing root TE
+  [12 + MJ_FUSE_HALF_WIDTH, 15.5],
+  [12 + MJ_FUSE_HALF_WIDTH * 0.5, 17.0],
+  [12 + MJ_FUSE_HALF_WIDTH * 0.25, 18.2],
+  [12 + MJ_TAIL_HALF_SPAN, MJ_TAIL_TIP_LE_Y],            // tailplane tip LE
+  [12 + MJ_TAIL_HALF_SPAN - 0.4, MJ_TAIL_TIP_TE_Y],      // tailplane tip TE
+  [12 + MJ_FUSE_HALF_WIDTH * 0.25, MJ_TAIL_ROOT_TE_Y],   // tailplane root TE
+  [12, MJ_TAIL_CONE_Y],
+]);
 
 // Glider: an almost perfectly straight (unswept), edge-to-edge wing (the
 // longest, thinnest span of any icon here) and a very slim fuselage.
