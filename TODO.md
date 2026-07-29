@@ -8,13 +8,45 @@ Added to as they come up; picked up in a later stage when relevant.
   said after Stage 1). Icon *shapes* themselves are now done (see the new
   entry below) — this bullet is left open for whatever colors/spacing
   polish is still wanted elsewhere in the UI.
-- **New icon set (`public/js/plane-icons.js` + `icon-classify.js`) is not
-  wired into the live map yet** — all 16 classified icons + `tower` were
-  redesigned this round (2026-07-29, extensive render-compare-adjust
-  sessions per icon, see git log), and the classification *algorithm*
+- **New icon set (`public/js/plane-icons.js` + `icon-classify.js`) is now
+  wired into the live map** (2026-07-29) — all 16 classified icons + `tower`
+  were redesigned this round (extensive render-compare-adjust sessions per
+  icon, see git log), and the classification *algorithm*
   (`icon-classify.js`'s decision chain: typeCode 'TWR' -> military-table
   override -> own type table -> ADS-B category -> unknown fallback) is
-  final. Three concrete things still block production use:
+  final and now live:
+  - **Wiring (done)**: `public/js/app.js` now imports icon rendering from
+    a new `public/js/aircraft-icon-live.js` adapter (same
+    `createPlaneElement`/`setPlaneHeading`/`setPlaneColor`/`setPlaneKind`/
+    `setPlaneLabel` call shape the old module had, so `app.js`'s call sites
+    barely changed) instead of the OLD `aircraft-icon.js` (4 shapes:
+    passenger/light/helicopter/tower). `icon-types.json` is loaded once
+    (`await loadIconTypes()`) inside `map.on('load', ...)`, before the
+    first queued snapshot is ever classified. `NON_ROTATING_ICON_IDS`
+    (balloon/tower/drone never rotate by track) is wired into the new
+    `setPlaneHeading`. Each marker also gets a per-kind size multiplier
+    (`plane-icons.js`'s `ICON_SIZE_MULTIPLIERS`, e.g. a widebody reads
+    1.25x, a drone 0.8x) layered on top of the user's own icon-size slider
+    -- applied as an inline `--mlpr-plane-size` override per marker
+    (`aircraft-icon-live.js`'s `refreshMarkerSize`), refreshed on a kind
+    change and whenever the base slider setting changes
+    (`app.js`'s `onSettingsChange`). The OLD `aircraft-icon.js` module
+    itself is untouched on disk -- still used by `/dev/icons`' own
+    old-vs-new comparison row, just no longer imported by `app.js`.
+    Verified in a real browser (this sandbox has no WebGL, so the actual
+    map can't render here -- see the note further down about that) via a
+    standalone DOM harness exercising `aircraft-icon-live.js` directly:
+    classification, per-kind size, `NON_ROTATING_ICON_IDS` rotation
+    behavior, color/label preservation across a kind change, and the
+    settings-driven resize path all confirmed correct.
+    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (an animated-rotor
+    mechanism for helicopter/drone, both fully worked out, demoed with a
+    real CSS spin on `/dev/icons`'s "Spinning-rotor demo" section)
+    deliberately was **not** part of this wiring pass -- still a separate,
+    later decision, since it needs multiple SVG elements per marker plus a
+    running CSS animation, which `getIconPath()`'s single-`<path>`
+    contract and `aircraft-icon-live.js`'s current DOM structure don't
+    support yet.
   - **Stage 3** (mostly done, 2026-07-29): `data/icon-types.json` expanded
     from Stage 1/2's ~30-entry illustrative sample to 246 entries (216
     exact + 27 prefix + 3 military-only), hand-composed from general
@@ -25,33 +57,38 @@ Added to as they come up; picked up in a later stage when relevant.
     genuinely broader now, but ~30 of those entries are explicitly
     lower-confidence designators recalled from memory rather than a
     verified source, listed in the JSON's own new `_needsVerification`
-    field and viewable/filterable at `/dev/icon-types` (new dev page,
-    "Needs verification only" checkbox) -- still needs a pass against real
-    receiver data or a canonical source before every entry can be trusted.
-    A structural regression test (`public/js/icon-classify.test.js`) now
-    checks every table entry resolves to a real icon id and every prefix
-    is >=3 chars, plus spot-checks the classification chain end-to-end
-    against the real shipped table.
-  - **Stage 4**: a `tools/` cross-check script (doesn't exist yet) to
-    verify the type table against real data -- this is what should
-    eventually clear the `_needsVerification` list above, plus confirm the
-    two placeholder military entries (A332/A333 -> `special`) are actually
-    correct rather than illustrative guesses.
-  - **Wiring**: `public/js/app.js` still imports icon rendering
-    (`createPlaneElement`/`setPlaneHeading`/`setPlaneColor`/`setPlaneKind`/
-    `setPlaneLabel`) from the OLD `aircraft-icon.js` module (4 shapes:
-    passenger/light/helicopter/tower) — zero production code references
-    `plane-icons.js` or `icon-classify.js` today, only `/dev/icons` and
-    `/dev/icons-map` (dev-only pages) do. Swapping this over means also
-    carrying across `NON_ROTATING_ICON_IDS` (balloon/tower/drone must
-    never rotate by track) into whatever replaces `setPlaneHeading`.
-    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (a finished-but-not-live
-    animated-rotor mechanism for helicopter/drone — both fully worked out
-    now, including drone's 4 independent per-arm rotors added 2026-07-29;
-    demoed with a real CSS spin on `/dev/icons`'s "Spinning-rotor demo"
-    section) is a separate, later decision on top of this basic wiring, not
-    a blocker for it — it still doesn't touch `getIconPath()`'s shipped
-    single-`<path>` output or `app.js`.
+    field and viewable/filterable at `/dev/icon-types` (dev-only page,
+    "Needs verification only" checkbox). A structural regression test
+    (`public/js/icon-classify.test.js`) checks every table entry resolves
+    to a real icon id and every prefix is >=3 chars, plus spot-checks the
+    classification chain end-to-end against the real shipped table.
+    Closing the remaining `_needsVerification` entries is now an ongoing,
+    receiver-driven process rather than a one-time task -- see
+    `/dev/icon_verify` below.
+  - **Stage 4 (a standalone `tools/` cross-check script): deliberately
+    skipped**, per explicit decision 2026-07-29 -- `/dev/icon_verify`
+    (below) covers the same need as a live page instead, which is more
+    useful day-to-day than an offline script would have been. Revisit only
+    if a scripted/CI-friendly version is ever wanted on top of it.
+  - **`/dev/icon_verify`** (new, 2026-07-29): unlike every other `/dev/*`
+    page, this one is **deliberately available in production** (registered
+    outside `server.js`'s NODE_ENV dev-tool gate) since it's only useful
+    once a receiver has actually accumulated real traffic. Runs every
+    registration `GET /api/stats/registrations` has ever recorded a type
+    code for through the real `classifyIconKind()` chain against the real
+    shipped `icon-types.json`, in a sortable/filterable table with an icon
+    swatch per row, highlighting unresolved (`unknown`) entries -- this is
+    Stage 4's real-data cross-check, running against this receiver's own
+    traffic instead of guesses (and the reason Stage 4's standalone script
+    was skipped above). Can't exercise the military-only override table or
+    the ADS-B-category fallback stage (no per-registration military-flag
+    or category data in that endpoint) -- documented on the page itself,
+    not a bug.
+  - Still worth doing eventually: let this receiver run for a while, then
+    use `/dev/icon_verify` to find real `unknown`/misclassified entries and
+    fold fixes back into `data/icon-types.json` -- this is now the
+    practical path to clearing the `_needsVerification` list, replacing
+    the originally-planned standalone Stage 4 script.
 - **Notification engine: radius-from-home geofence** — notify when *any*
   aircraft (not just a watched one) enters a distance-from-home radius. The
   watch-list's per-entry altitude condition (below/above threshold) shipped;

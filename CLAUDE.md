@@ -686,13 +686,62 @@ not a special case that bypasses it.
   module-level `activePopupHex` (kept in sync everywhere `activePopup` is
   cleared) is what lets `showInfoPopup` tell "same aircraft, just
   refresh in place" apart from "different aircraft, need a new popup".
+- **Aircraft icon shapes and classification** (`public/js/plane-icons.js` +
+  `icon-classify.js`, wired into the live map 2026-07-29): 17 hand-drawn
+  top-down silhouettes (`PLANE_ICON_IDS` — narrowbody/widebody2/3/4, light,
+  bizjet, cargo_turboprop, cargo_jet, military_jet, special, helicopter,
+  glider, balloon, drone, ground_vehicle, unknown, plus `tower` for
+  typeCode `'TWR'` ground-station beacons, outside the 16-icon spec), each
+  a single `<path fill="currentColor">` in a shared 24x24 viewBox so a
+  marker can be recolored without touching its shape. `icon-classify.js`'s
+  `classifyIconKind(aircraft)` picks one via a fixed-order chain (typeCode
+  `'TWR'` → military-table override → own type table, `data/
+  icon-types.json`, exact-then-longest-prefix → ADS-B `category` field →
+  `'unknown'` fallback) — this algorithm is final; only the type table's
+  real-world coverage is still growing (see `/dev/icon-types` and
+  `/dev/icon_verify` below). `NON_ROTATING_ICON_IDS` (balloon/tower/drone —
+  none of the three have a meaningful "nose direction": a balloon's basket
+  hangs asymmetrically below the envelope, a ground beacon has no heading
+  at all, a quadcopter has no fixed nose) must always render upright
+  regardless of `track`. `public/js/aircraft-icon-live.js` is the
+  production adapter `app.js` actually imports — it wraps
+  `classifyIconKind`/`getIconPath` behind the same `createPlaneElement`/
+  `setPlaneKind`/`setPlaneHeading`/`setPlaneColor`/`setPlaneLabel` shape an
+  older, simpler 4-shape module (`aircraft-icon.js`, still on disk but only
+  used by `/dev/icons`' own old-vs-new comparison row, not by `app.js`
+  anymore) already had, so swapping the import was most of the work.
+  `icon-types.json` is fetched once (`await loadIconTypes()`) inside
+  `app.js`'s `map.on('load', ...)`, before the first queued snapshot is
+  ever classified. A dev-only `/dev/icons` page exists for browsing every
+  shape/rotation/size combination and a live classification-chain tester;
+  `/dev/icon-types` (also dev-only) is a filterable table over every
+  `icon-types.json` entry, flagging lower-confidence designators via the
+  JSON's own `_needsVerification` field. `/dev/icon_verify` is different
+  from both — **available in production** (not NODE_ENV-gated, since it
+  needs a receiver's real accumulated traffic to be useful at all) — it
+  runs every registration this install has actually seen
+  (`GET /api/stats/registrations`) through the real classification chain,
+  highlighting unresolved (`unknown`) results: the practical, ongoing way
+  to find gaps in `icon-types.json` against this receiver's own traffic,
+  in place of a separate offline verification script (considered, then
+  deliberately not built — the live page does the same job better).
 - **Icon size is user-adjustable** (`aircraftIconSize` in `settings-state.js`,
   default 40px, a Settings → Aircraft slider, range 24–64px) — applied via a
-  single CSS custom property (`--mlpr-plane-size`, set on `documentElement`
-  by `app.js`'s `applyIconSize`) rather than touching every marker element
-  individually, so every currently-rendered marker resizes live as the
-  slider moves. The popup offset above is derived from this setting, not
-  hardcoded, so it keeps clearing the marker at any size.
+  CSS custom property (`--mlpr-plane-size`). `app.js`'s `applyIconSize` sets
+  it at `documentElement` level as a cheap fallback/base value, but each
+  marker also gets its own inline override
+  (`aircraft-icon-live.js`'s `refreshMarkerSize`, an element's own inline
+  custom-property value always wins over an inherited one) equal to the
+  slider value times that icon kind's own multiplier
+  (`plane-icons.js`'s `ICON_SIZE_MULTIPLIERS` — e.g. a widebody reads
+  1.25x bigger, a drone 0.8x smaller — so scale differences between
+  aircraft types are visible on the map itself, not just in the `/dev/icons`
+  gallery). Refreshed on a kind change and whenever the slider itself
+  changes (`app.js`'s `onSettingsChange`, looping every tracked marker same
+  as it already does for color/label). The popup offset above is derived
+  from the plain slider value, not the per-kind multiplier — a known,
+  accepted imprecision for a scaled-up/down marker rather than something
+  worth complicating the offset math over.
 - **Marker color has three mutually-exclusive modes** (`planeColorMode` in
   `settings-state.js`, Settings → Aircraft, default `signalLoss`):
   `signalLoss` fades an aircraft from fresh green to stale red the longer it
@@ -804,7 +853,7 @@ photo fetch, and is the piece wired into `panels.js`.
   **and dashed** (`GAP_COLOR` in `trail.js` is a fixed neutral grey,
   deliberately identical in both map themes). After 5 minutes with no
   update, give up on it returning.
-- **Map label under each aircraft** (`public/js/aircraft-icon.js`'s
+- **Map label under each aircraft** (`public/js/aircraft-icon-live.js`'s
   `setPlaneLabel`, built by `app.js`'s `buildAircraftLabel`): configurable
   per-field in Settings → Aircraft (`aircraftLabelFields` in
   `settings-state.js` — flight/hex, type, altitude, speed, default just
@@ -834,7 +883,7 @@ photo fetch, and is the piece wired into `panels.js`.
     `setSelectionHighlight`, called from `selectAircraft`/
     `deselectAircraft`): a soft, breathing, **achromatic** halo
     (`.mlpr-plane-glow`, a background `div` sibling of `<svg>` placed
-    *before* it in `aircraft-icon.js`'s markup so it paints behind —
+    *before* it in `aircraft-icon-live.js`'s markup so it paints behind —
     plain DOM order, no `z-index` needed) — white on the dark map theme,
     black on light, via the same `#map.mlpr-map-theme-*` classes the
     label uses. A background glow (not a filter on the icon) because

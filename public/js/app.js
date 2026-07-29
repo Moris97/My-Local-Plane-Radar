@@ -1,4 +1,5 @@
-import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind, setPlaneLabel } from './aircraft-icon.js';
+import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind, setPlaneLabel, refreshMarkerSize } from './aircraft-icon-live.js';
+import { loadIconTypes } from './icon-classify.js';
 import { applyBasemapMode, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails, colorForAltitude } from './trail.js';
 import { colorForElapsed, colorForSpeed } from './aircraft-color.js';
@@ -391,6 +392,11 @@ map.on('zoom', updateLabelZoomVisibility);
 
 map.on('load', async () => {
   updateLabelZoomVisibility();
+  // Awaited before anything below can classify a single aircraft --
+  // classifyIconKind() still resolves without it (falls through to the
+  // ADS-B category fallback / 'unknown'), but every real type-table hit
+  // would be missed for whichever aircraft happen to arrive in the gap.
+  await loadIconTypes();
   const initialSettings = getSettings();
   setShorterTrails(initialSettings.shorterTrails);
   applyIconSize(initialSettings.aircraftIconSize);
@@ -470,6 +476,11 @@ onSettingsChange(() => {
       // Same idea for labels -- toggling a field checkbox should relabel
       // every marker immediately, not wait for its next position update.
       setPlaneLabel(state.marker.getElement(), buildAircraftLabel(state.lastAircraft, aircraftLabelFields, units));
+      // And for size -- dragging the icon-size slider should rescale every
+      // marker immediately, each still respecting its own per-kind
+      // multiplier (aircraft-icon-live.js), not just resetting the
+      // :root-level fallback applyIconSize() already updated above.
+      refreshMarkerSize(state.marker.getElement());
     }
   }
   refreshTrailForSettings();
