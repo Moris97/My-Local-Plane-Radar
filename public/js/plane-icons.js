@@ -731,14 +731,75 @@ for (const [x, y] of [glTailTipBack]) {
 }
 const gliderPath = polyRounded(glFull, glRadiusByPoint);
 
-// Unknown -- deliberately the plainest shape in the set (a straight,
-// unswept wing and almost no tail flare at all): this is the most-shown
-// icon of all, and must read as "a generic, unclassified aircraft", not be
-// mistaken for any real classified category.
-const unknownPath = wingedOutline({
-  noseY: 3, fuseHalfWidth: 0.9, wingFrontY: 11, wingHalfSpan: 9.5, wingBackY: 11.6,
-  tailFuseHalfWidth: 0.9, tailHalfSpan: 1.2, tailY: 19, tailTipY: 20.5,
+// Unknown -- the most-shown icon of all (fallback for anything
+// unclassified), so it has to read as "generic airplane" without leaning
+// toward any specific classified category. Rebuilt in several rounds after
+// the original plain wingedOutline() dart (same simple technique as
+// military_jet/glider) was judged too basic: takes narrowbody's own
+// construction instead (a true swept trapezoidal wing with independent
+// root/tip chords, a rounded oval nose, filleted shoulder corners) but
+// slimmer and with no nacelles, so it doesn't misclassify as a specific
+// airliner. The rear fuselage also gently TAPERS toward the tail (several
+// points narrowing smoothly, like a real boat-tail) instead of one sudden
+// width change -- an early version of that taper went straight into the
+// tailplane with no boom run and a too-small, backwards-shallow tailplane
+// (root chord shallower than tip chord); fixed by adding a straight boom
+// section before the tail and properly deepening the root chord past the
+// tip chord.
+const UNK_FUSE_HALF_WIDTH = 1.35;
+const UNK_NOSE_DEPTH = 3.0;
+const UNK_SHOULDER_RADIUS = 0.45;
+const UNK_WING_ROOT_LE_Y = 8.2;
+const UNK_WING_HALF_SPAN = 10.3;
+const UNK_WING_SWEEP = 4.2;
+const UNK_WING_ROOT_CHORD = 4.0;
+const UNK_WING_TIP_CHORD = 1.9;
+const UNK_TAIL_BOOM_HALF_WIDTH = 0.55;
+const UNK_WAIST_GAP = 3.6;
+const UNK_BOOM_EXTENSION = 1.8;
+const UNK_TAIL_HALF_SPAN = 4.5;
+const UNK_TAIL_SWEEP = 2.2;
+const UNK_TAIL_ROOT_CHORD = 2.6;
+const UNK_TAIL_TIP_CHORD = 1.6;
+const UNK_CONE_EXTENSION = 2.2;
+
+const UNK_WING_TIP_LE_Y = UNK_WING_ROOT_LE_Y + UNK_WING_SWEEP;
+const UNK_WING_ROOT_TE_Y = UNK_WING_ROOT_LE_Y + UNK_WING_ROOT_CHORD;
+const UNK_WING_TIP_TE_Y = UNK_WING_TIP_LE_Y + UNK_WING_TIP_CHORD;
+const UNK_TAPER_END_Y = UNK_WING_ROOT_TE_Y + UNK_WAIST_GAP;
+const UNK_BOOM_END_Y = UNK_TAPER_END_Y + UNK_BOOM_EXTENSION;
+const UNK_TAIL_ROOT_LE_Y = UNK_BOOM_END_Y;
+const UNK_TAIL_TIP_LE_Y = UNK_TAIL_ROOT_LE_Y + UNK_TAIL_SWEEP;
+const UNK_TAIL_ROOT_TE_Y = UNK_TAIL_ROOT_LE_Y + UNK_TAIL_ROOT_CHORD;
+const UNK_TAIL_TIP_TE_Y = UNK_TAIL_TIP_LE_Y + UNK_TAIL_TIP_CHORD;
+
+const unkShoulder1 = [CENTER_X + UNK_FUSE_HALF_WIDTH, UNK_WING_ROOT_LE_Y - 1.5];
+const unkWingRootLE = [CENTER_X + UNK_FUSE_HALF_WIDTH, UNK_WING_ROOT_LE_Y];
+
+// Gentle 3-point taper from the wing-root fuselage width down to the
+// (narrower) tail-boom width, like a real fuselage boat-tail.
+const unkTaperPoints = [1, 2, 3].map((i) => {
+  const t = i / 3;
+  return [
+    CENTER_X + UNK_FUSE_HALF_WIDTH + (UNK_TAIL_BOOM_HALF_WIDTH - UNK_FUSE_HALF_WIDTH) * t,
+    UNK_WING_ROOT_TE_Y + (UNK_TAPER_END_Y - UNK_WING_ROOT_TE_Y) * t,
+  ];
 });
+
+const unknownPath = symmetricOutlineRounded([
+  ...ovalNosePoints(UNK_FUSE_HALF_WIDTH, 2, UNK_NOSE_DEPTH, 5),
+  unkShoulder1,
+  unkWingRootLE,
+  [CENTER_X + UNK_WING_HALF_SPAN, UNK_WING_TIP_LE_Y],
+  [CENTER_X + UNK_WING_HALF_SPAN, UNK_WING_TIP_TE_Y],
+  [CENTER_X + UNK_FUSE_HALF_WIDTH, UNK_WING_ROOT_TE_Y],
+  ...unkTaperPoints,
+  [CENTER_X + UNK_TAIL_BOOM_HALF_WIDTH, UNK_BOOM_END_Y], // straight boom run before the tail
+  [CENTER_X + UNK_TAIL_HALF_SPAN, UNK_TAIL_TIP_LE_Y],
+  [CENTER_X + UNK_TAIL_HALF_SPAN, UNK_TAIL_TIP_TE_Y],
+  [CENTER_X + UNK_TAIL_BOOM_HALF_WIDTH, UNK_TAIL_ROOT_TE_Y],
+  [CENTER_X, UNK_TAIL_ROOT_TE_Y + UNK_CONE_EXTENSION],
+], [unkShoulder1, unkWingRootLE], UNK_SHOULDER_RADIUS);
 
 // Helicopter's rotor blades kept as their own named path (see
 // SPINNING_ROTOR_ICON_IDS/getIconRotorPaths below) -- getIconPath()
@@ -821,14 +882,35 @@ const ICON_PATHS = {
     poly([[10.8, 10.8], [13.2, 10.8], [13.2, 13.2], [10.8, 13.2]]),
   ),
 
-  // Ground vehicle: a small boxy shape with two wheel bumps -- deliberately
-  // NOT aircraft-shaped, so it reads immediately as "not a plane" even at
-  // 14px.
-  ground_vehicle: combine(
-    poly([[9.5, 8], [14.5, 8], [14.5, 17], [9.5, 17]]),
-    ellipse(10, 17.5, 1, 1),
-    ellipse(14, 17.5, 1, 1),
-  ),
+  // Ground vehicle -- deliberately NOT aircraft-shaped, so it reads
+  // immediately as "not a plane" even at 14px. Rebuilt from a plain box
+  // with two rear wheel bumps into a rounded-rectangle body after a 6-way
+  // comparison (box+wheel-count variants, a tapered "car" body, a chevron/
+  // arrow, a cab+flatbed truck shape); corner radius picked all the way up
+  // to where it reads as a full pill/capsule (radius = half the short
+  // side), with small wheel marks mostly flush against the edge rather
+  // than prominent bumps sticking out.
+  ground_vehicle: (() => {
+    const halfW = 2.4;
+    const halfH = 4.5;
+    const cornerR = 2.4;
+    const wheelR = 0.45;
+    const wheelInset = 0.15;
+    const rect = [
+      [CENTER_X - halfW, 12 - halfH],
+      [CENTER_X + halfW, 12 - halfH],
+      [CENTER_X + halfW, 12 + halfH],
+      [CENTER_X - halfW, 12 + halfH],
+    ];
+    const radiusByPoint = new Map(rect.map(([x, y]) => [`${x},${y}`, cornerR]));
+    return combine(
+      polyRounded(rect, radiusByPoint),
+      ellipse(CENTER_X - halfW + wheelInset, 12 - halfH + 2, wheelR, wheelR),
+      ellipse(CENTER_X + halfW - wheelInset, 12 - halfH + 2, wheelR, wheelR),
+      ellipse(CENTER_X - halfW + wheelInset, 12 + halfH - 2, wheelR, wheelR),
+      ellipse(CENTER_X + halfW - wheelInset, 12 + halfH - 2, wheelR, wheelR),
+    );
+  })(),
 
   unknown: unknownPath,
 
