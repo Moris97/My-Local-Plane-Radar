@@ -915,19 +915,36 @@ const ICON_PATHS = {
   unknown: unknownPath,
 
   // Ground-station beacon (typeCode 'TWR') -- not a real aircraft type at
-  // all, kept outside the 16-icon spec on purpose (see CLAUDE.md). Carried
-  // over from the old module, flattened to one <path>. Also in
+  // all, kept outside the 16-icon spec on purpose (see CLAUDE.md). Also in
   // NON_ROTATING_ICON_IDS -- a fixed ground structure has no heading at
   // all, whatever `track` readsb happens to report for it is meaningless.
-  tower: combine(
-    poly([[12, 2], [12.8, 2], [17, 22], [15.2, 22]]),
-    poly([[11.2, 2], [12, 2], [8.8, 22], [7, 22]]),
-    poly([[6.5, 21], [17.5, 21], [17.5, 22.4], [6.5, 22.4]]),
-    poly([[9.3, 8], [14.7, 8], [14.7, 9], [9.3, 9]]),
-    poly([[8.5, 14], [15.5, 14], [15.5, 15], [8.5, 15]]),
-    poly([[7.7, 18.5], [16.3, 18.5], [16.3, 19.5], [7.7, 19.5]]),
-    ellipse(12, 1.2, 1, 1),
-  ),
+  // Rebuilt as a modern ATC control tower, side elevation rather than
+  // top-down (unlike every real aircraft icon here, this one never
+  // rotates, so it's free to be drawn as a recognizable elevation instead
+  // of a top-down abstraction) -- the original shape (carried over from
+  // the old module: two diverging legs, cross braces, a ball on top) read
+  // as an old radio/broadcast lattice mast, not a control tower. Picked
+  // after two rounds: a stepped two-tier cab (a wider lower observation
+  // deck below a narrower control-room tier) over five other cab styles,
+  // then a gently tapered base (wide at the ground, narrowing up to the
+  // shaft) over five other base treatments -- a real concrete tower's
+  // flared structural base, not a narrow shaft with a short flare right at
+  // the bottom.
+  tower: symmetricOutline([
+    [12, 3],           // antenna tip
+    [12.25, 3],
+    [12.25, 4.6],       // antenna base / cab roof center
+    [14, 5.2],          // upper (control room) tier
+    [14.4, 7],
+    [15.6, 7.6],        // lower (observation deck) tier, wider
+    [15.9, 9.4],
+    [13, 10],           // shaft top, tucked back in below the cab
+    [13.25, 12.875],    // base taper, gradually widening toward the ground
+    [13.5, 15.75],
+    [13.75, 18.625],
+    [14, 21.5],
+    [12, 21.5],         // ground, center
+  ]),
 };
 
 // Every id from the icon spec (in the order given), plus 'tower' at the
