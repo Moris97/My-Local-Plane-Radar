@@ -388,20 +388,45 @@ const lightPath = combine(
   lightPropBar,
 );
 
-// Bizjet: wing root pushed well aft (low, rear-mounted wing) and a plain
-// tapered tail (no flare) since its tail feature is the separate T-tail
-// piece below -- both real bizjet cues (Learjet/Citation/Challenger/
-// Gulfstream commonly have exactly this low-rear-wing + T-tail layout).
+// Bizjet (Learjet/Citation/Challenger/Gulfstream class): a genuinely
+// slender fuselage with a small, centered-to-slightly-aft swept wing (not
+// a big delta -- a wide wing was the first attempt here and got called an
+// "SR-71" on sight against a reference photo), a small swept tailplane
+// merged into the one continuous outline (same technique as narrowbody's
+// tail, just smaller), and a pair of rear FUSELAGE-mounted engine pods
+// (not wing-mounted) sitting just ahead of the tailplane root, close in
+// against the boom -- the real distinguishing cue for this whole class.
+// Every number here came out of several rounds of render-compare-adjust
+// against real reference photos, not a single guess -- if this needs
+// retuning again, use that same loop rather than nudging blind.
 const bizjetBody = symmetricOutline([
-  [CENTER_X, 2],
-  [CENTER_X + 0.9, 8],
-  [CENTER_X + 9, 16],
-  [CENTER_X + 0.9, 18],
-  [CENTER_X + 0.6, 21],
-  [CENTER_X, 21.6],
+  [CENTER_X, 1.2],                    // nose tip
+  [CENTER_X + 0.4, 2.8],
+  [CENTER_X + 0.8, 5.3],               // slender fuselage width reached
+  [CENTER_X + 0.8, 7.8],                // wing root leading edge
+  [CENTER_X + 6.0, 10.1],               // wingtip leading edge
+  [CENTER_X + 5.8, 11.1],               // wingtip trailing edge (tapered)
+  [CENTER_X + 0.8, 11.3],               // wing root trailing edge
+  [CENTER_X + 0.8, 11.8],               // brief waist plateau
+  [CENTER_X + 0.5, 13.0],               // taper to boom width
+  [CENTER_X + 0.5, 14.8],               // tail root leading edge
+  [CENTER_X + 3.8, 16.9],               // tailplane tip leading edge
+  [CENTER_X + 3.6, 17.7],               // tailplane tip trailing edge
+  [CENTER_X + 0.5, 17.0],               // tailplane root trailing edge
+  [CENTER_X, 18.0],                     // tail cone
 ]);
-const bizjetFin = poly([[11.6, 19], [12.4, 19], [12.4, 21.4], [11.6, 21.4]]);
-const bizjetStabilizer = poly([[9, 19.3], [15, 19.3], [15, 18.6], [9, 18.6]]);
+// Fuselage-mounted engine pod -- pointed front and back, unlike the
+// wing-leading-edge nacelles elsewhere in this file (nacelleAt()); those
+// sit astride a wing's leading edge, these sit alongside the fuselage
+// itself, close against the boom, just ahead of the tailplane root.
+const bizjetEngineRight = [
+  [CENTER_X + 1.2 - 0.7, 12.3 + 0.3],
+  [CENTER_X + 1.2, 12.3],
+  [CENTER_X + 1.2 + 0.7, 12.3 + 0.3],
+  [CENTER_X + 1.2 + 0.7, 15.3 - 0.3],
+  [CENTER_X + 1.2, 15.3],
+  [CENTER_X + 1.2 - 0.7, 15.3 - 0.3],
+];
 
 // Military transport / cargo family: a wide, constant-width (boxy)
 // fuselage -- deliberately much wider relative to its own wingspan than
@@ -450,7 +475,7 @@ const ICON_PATHS = {
 
   light: lightPath,
 
-  bizjet: combine(bizjetBody, bizjetFin, bizjetStabilizer),
+  bizjet: combine(bizjetBody, poly(bizjetEngineRight), poly(mirrored(bizjetEngineRight))),
 
   cargo_turboprop: cargoTurbopropPath,
   cargo_jet: cargoJetPath,
