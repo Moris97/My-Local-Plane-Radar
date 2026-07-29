@@ -708,9 +708,12 @@ const ICON_PATHS = {
   cargo_jet: cargoJetPath,
   military_jet: militaryJetPath,
 
-  // Special-mission (AWACS/tanker/recon): a widebody2 airframe plus a
-  // dorsal disc -- the one unmistakable cue no other icon in this set has.
-  special: combine(widebody2Path, ellipse(12, 10.3, 3.4, 1.5)),
+  // Special-mission (tanker/AWACS-derivative airframes sharing a civilian
+  // type code, see icon-types.json's military table): same silhouette as
+  // widebody2, no dorsal-disc cue -- requested directly, same "reuse the
+  // shape, size multiplier alone tells them apart" precedent as
+  // widebody2/widebody3 above.
+  special: widebody2Path,
 
   // Helicopter -- carried over from the old module, flattened from
   // per-element <rect transform="rotate(...)"> into absolute coordinates
