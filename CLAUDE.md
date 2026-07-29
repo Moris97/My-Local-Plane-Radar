@@ -1110,13 +1110,100 @@ it can read the notifications.
 Deferred to later (see `TODO.md`): a general radius-from-home geofence
 (independent of the watch list — "notify for *any* aircraft entering this
 radius", not just watched ones). Web Push is deferred for good (needs a
-secure context, awkward over plain HTTP on a LAN) — ntfy is the only delivery
-channel for now.
+secure context, awkward over plain HTTP on a LAN). ntfy is the only *push*
+delivery channel — see the next section for a second, independent channel
+(MQTT/smart-home) that exists alongside it, not instead of it.
 
 **Known rough edge**: on a fresh install (empty `seen_aircraft` table), every
 aircraft currently in range will fire a "first seen" notification. Not fixed
 — mention it if the user is surprised by a notification burst right after
 first setup.
+
+## Smart home / MQTT integration
+
+Implemented 2026-07-29, tested against Home Assistant. A **third**,
+independent notification channel alongside ntfy (not a generalization of
+it): ntfy wants a human-readable `title`/`message` for a push notification,
+this wants a machine-readable JSON event for a home-automation rule engine
+to act on — e.g. dim the lights and change their color when a watched
+aircraft type (a landing A380, say) is picked up nearby. Deliberately wired
+to only two of `rules.js`'s four notification rules — **first-seen and
+watch-list matches**, not squawk emergencies or range records — an explicit
+scope decision (not an oversight) made when this was speced; extending it
+to squawk/range-record later is one more `publishSmartHomeEvent()` call
+site in `rules.js`, not a design change.
+
+**Hand-rolled MQTT client (`server/src/notifications/mqtt-client.js`), not
+the `mqtt` npm package** — deliberated explicitly with the user before
+building. A *full* MQTT client (QoS 1/2 ack tracking, subscriptions, MQTT 5,
+WebSocket transport) is genuinely more than "a few dozen lines" and would
+justify a dependency; but MLPR only ever needs to **publish, QoS 0,
+fire-and-forget** (losing one event because the broker was briefly
+unreachable is an acceptable failure mode — the same trade-off already made
+for ntfy delivery), which cuts out most of the protocol's real complexity
+(no packet-ID tracking, no ack/retry state machine, no subscribe path at
+all). That narrower subset is ~250 lines over Node's built-in `net`/`tls`
+(so `mqtts://` is free — same framing, different socket constructor) and is
+exactly the kind of thing this codebase already prefers to hand-write over
+adding a dependency (see the OpenFlights CSV parser, the sunrise-equation
+daylight code, hand-rolled chart rendering). Verified two ways:
+`mqtt-client.test.js` unit-tests packet encoding against known byte
+sequences from the spec, plus an in-process fake TCP broker with its own,
+independently-written decoder (deliberately not reusing the client's own
+encode/decode helpers, so a shared bug can't hide from the test) exercising
+a real `connect()` → `publish()` round trip. What's deliberately **not**
+implemented, because nothing here needs it: QoS 1/2, subscribing, MQTT 5,
+WebSocket transport.
+
+**`server/src/notifications/smart-home.js`** is the manager sitting between
+`rules.js` and the raw client: owns the one persistent `MqttClient`
+singleton, `reconfigureSmartHome()` (idempotent — a settings PUT that
+didn't actually change the broker URL/credentials/prefix doesn't reconnect),
+`publishSmartHomeEvent({reason, aircraft, matchedEntry})`, and
+`testSmartHomeConnection()` for the Settings "Test connection" button. That
+last one is more useful than it might sound given QoS 0 has no delivery
+acknowledgment: CONNACK is still a real, awaitable handshake independent of
+QoS, so "did the broker accept us" is genuinely testable even though "did it
+receive our last publish" isn't — the test button opens a **separate**,
+temporary connection using whatever's currently in the form (not
+necessarily saved yet), so credentials can be verified before committing
+them.
+
+**Availability**: standard MQTT pattern — a Last Will (`<prefix>/status` =
+`offline`, retained) is set at CONNECT time, delivered by the *broker* if
+this client ever disconnects uncleanly (crash, network drop); on success, a
+retained `online` is published proactively. Graceful shutdown
+(`shutdownSmartHome()`, called from `index.js`'s existing SIGTERM/SIGINT
+handler alongside the other flush-on-shutdown calls) publishes `offline`
+itself rather than waiting for the broker to notice — same end state either
+way, just faster/more deliberate for a routine restart than a crash.
+
+**Payload**: flat JSON (not nested under an `aircraft` key), one topic per
+reason (`<prefix>/events/first_seen`, `<prefix>/events/watchlist`) rather
+than one shared topic with a `reason` field to filter on — lets a Home
+Assistant automation trigger on one specific topic instead of inspecting
+the payload. Fields: `reason`, `timestamp`, `hex`, `flight`, `registration`,
+`typeCode`, `altitude` (ground = `0`, same convention as the watch list's
+own altitude condition), `onGround`, `speed`, `lat`/`lon` (`null` if
+unavailable); a watch-list event adds `matchedType`/`matchedValue` so one
+HA automation can distinguish which watch-list entry fired. Never
+retained — this is a discrete occurrence, not persistent state; a retained
+event topic would make every fresh HA subscription immediately re-fire
+whatever the last event happened to be.
+
+**Settings**: a new "Smart Home" tab (`public/js/settings.js`), gated behind
+`requireSettingsAuth` **like the Server tab**, unlike the rest of the
+Notifications tab (ntfy topic, watch list) which stays open — a deliberate
+exception, decided explicitly with the user: a broker username/password is
+a real infrastructure secret, a different kind of sensitive than a random
+ntfy topic string, so it gets the same access-control treatment as the
+Settings password itself, the receiver's home location, and the server
+port. Stored server-side in SQLite (`smartHomeSettings` config key,
+`getSmartHomeSettings`/`updateSmartHomeSettings` in `notifications/
+settings.js`) — shared infrastructure config, not a per-browser preference.
+A PUT to `/api/notifications/smart-home` calls `reconfigureSmartHome()`
+immediately, so toggling the feature or changing the broker takes effect
+without a restart, same as every other setting in this app.
 
 ## Advanced statistics (Stage 7)
 

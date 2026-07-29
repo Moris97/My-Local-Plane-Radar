@@ -75,6 +75,7 @@ function renderSettingsForm(container) {
       <button type="button" class="mlpr-settings-tab-btn" data-tab="aircraft">${t('tabAircraft')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="notifications">${t('tabNotifications')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="server">${t('tabServer')}</button>
+      <button type="button" class="mlpr-settings-tab-btn" data-tab="smarthome">${t('tabSmartHome')}</button>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="general">
@@ -232,6 +233,11 @@ function renderSettingsForm(container) {
       <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
       <div id="mlpr-server-tab-root">…</div>
     </div>
+
+    <div class="mlpr-settings-tab-panel" data-tab-panel="smarthome" style="display:none">
+      <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
+      <div id="mlpr-smarthome-tab-root">…</div>
+    </div>
   `;
 
   wireTabs(container);
@@ -239,6 +245,7 @@ function renderSettingsForm(container) {
   wireNotificationSettings(container);
   wireWatchlist(container);
   renderServerTab(container.querySelector('#mlpr-server-tab-root'));
+  renderSmartHomeTab(container.querySelector('#mlpr-smarthome-tab-root'));
 
   return undefined;
 }
@@ -297,6 +304,120 @@ async function renderServerTab(root) {
   wireServerPort(root, onUnauthorized);
   wireHomeLocation(root, onUnauthorized);
   renderSecuritySection(root);
+}
+
+// Gated the same way as the Server tab (and for the same reason -- see
+// server.js's comment on why broker credentials get this treatment while
+// the rest of Notifications doesn't): a password, if one is set, protects
+// this tab's whole content, not just individual fields.
+async function renderSmartHomeTab(root) {
+  let status;
+  try {
+    status = await fetch('/api/settings-auth/status').then((res) => res.json());
+  } catch {
+    status = { passwordSet: false };
+  }
+
+  if (status.passwordSet && !getStoredToken()) {
+    renderGate(root, () => renderSmartHomeTab(root));
+    return;
+  }
+
+  root.innerHTML = `
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('tabSmartHome')}</legend>
+      <p class="mlpr-home-status">${t('smartHomeIntro')}</p>
+      <label><input type="checkbox" id="mlpr-smarthome-enable"> ${t('smartHomeEnable')}</label>
+      <label>${t('smartHomeBrokerUrl')} <input type="text" id="mlpr-smarthome-url" placeholder="mqtt://192.168.1.50:1883"></label>
+      <p class="mlpr-home-status">${t('smartHomeBrokerUrlHint')}</p>
+      <label>${t('smartHomeUsername')} <input type="text" id="mlpr-smarthome-username"></label>
+      <label>${t('smartHomePassword')} <input type="password" id="mlpr-smarthome-password"></label>
+      <label>${t('smartHomeTopicPrefix')} <input type="text" id="mlpr-smarthome-prefix" placeholder="mlpr"></label>
+      <p class="mlpr-home-status">${t('smartHomeTopicPrefixHint')}</p>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-smarthome-save">${t('save')}</button>
+        <button type="button" id="mlpr-smarthome-test">${t('smartHomeTestConnection')}</button>
+      </div>
+      <p id="mlpr-smarthome-status" class="mlpr-home-status"></p>
+      <p id="mlpr-smarthome-error" class="mlpr-gate-error"></p>
+    </fieldset>
+  `;
+
+  wireSmartHomeTab(root, () => renderSmartHomeTab(root));
+}
+
+function wireSmartHomeTab(root, onUnauthorized) {
+  const enableEl = root.querySelector('#mlpr-smarthome-enable');
+  const urlEl = root.querySelector('#mlpr-smarthome-url');
+  const usernameEl = root.querySelector('#mlpr-smarthome-username');
+  const passwordEl = root.querySelector('#mlpr-smarthome-password');
+  const prefixEl = root.querySelector('#mlpr-smarthome-prefix');
+  const saveBtn = root.querySelector('#mlpr-smarthome-save');
+  const testBtn = root.querySelector('#mlpr-smarthome-test');
+  const statusEl = root.querySelector('#mlpr-smarthome-status');
+  const errorEl = root.querySelector('#mlpr-smarthome-error');
+
+  function currentFormValues() {
+    return {
+      enabled: enableEl.checked,
+      brokerUrl: urlEl.value.trim(),
+      username: usernameEl.value,
+      password: passwordEl.value,
+      topicPrefix: prefixEl.value.trim(),
+    };
+  }
+
+  async function load() {
+    const response = await authedFetch('/api/notifications/smart-home', undefined, onUnauthorized);
+    if (!response) return;
+    const data = await response.json();
+    enableEl.checked = data.enabled;
+    urlEl.value = data.brokerUrl;
+    usernameEl.value = data.username;
+    passwordEl.value = data.password;
+    prefixEl.value = data.topicPrefix;
+  }
+
+  saveBtn.addEventListener('click', async () => {
+    errorEl.textContent = '';
+    statusEl.textContent = '';
+    const response = await authedFetch(
+      '/api/notifications/smart-home',
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(currentFormValues()),
+      },
+      onUnauthorized,
+    );
+    if (!response) return;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      errorEl.textContent = data.error ?? t('somethingWentWrong');
+      return;
+    }
+    statusEl.textContent = t('smartHomeSaved');
+  });
+
+  testBtn.addEventListener('click', async () => {
+    errorEl.textContent = '';
+    statusEl.textContent = t('smartHomeTesting');
+    const { brokerUrl, username, password } = currentFormValues();
+    const response = await authedFetch(
+      '/api/notifications/smart-home/test',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ brokerUrl, username, password }),
+      },
+      onUnauthorized,
+    );
+    if (!response) return;
+    const data = await response.json().catch(() => ({}));
+    statusEl.textContent = data.ok ? t('smartHomeTestSuccess') : `${t('smartHomeTestFailed')} ${data.error ?? ''}`;
+  });
+
+  load();
 }
 
 function wireTabs(container) {

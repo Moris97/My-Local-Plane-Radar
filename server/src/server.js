@@ -8,8 +8,9 @@ import { WebSocketServer } from 'ws';
 import { getTrackedAircraft } from './state.js';
 import { toWireAircraftList } from './wire.js';
 import { getEffectiveHome, setManualHome, clearManualHome } from './home.js';
-import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic } from './notifications/settings.js';
+import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic, getSmartHomeSettings, updateSmartHomeSettings } from './notifications/settings.js';
 import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
+import { reconfigureSmartHome, testSmartHomeConnection } from './notifications/smart-home.js';
 import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange } from './stats-query.js';
@@ -370,6 +371,63 @@ export async function buildServer() {
       return reply.code(404).send({ error: 'No watch entry with that id' });
     }
     return { removed: true };
+  });
+
+  // Smart-home (MQTT) delivery -- gated behind requireSettingsAuth, same as
+  // /api/settings and /api/server/port, unlike the rest of this
+  // Notifications-tab-adjacent config above (ntfy topic, watch list):
+  // broker credentials are a real infrastructure secret, a different kind
+  // of sensitive than a random ntfy topic string. Deliberate decision, not
+  // an inconsistency.
+  app.get('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async () => getSmartHomeSettings());
+
+  app.put('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const body = request.body ?? {};
+    const patch = {};
+
+    if ('enabled' in body) {
+      if (typeof body.enabled !== 'boolean') {
+        return reply.code(400).send({ error: 'enabled must be a boolean' });
+      }
+      patch.enabled = body.enabled;
+    }
+    for (const key of ['brokerUrl', 'username', 'password', 'topicPrefix']) {
+      if (key in body) {
+        if (typeof body[key] !== 'string') {
+          return reply.code(400).send({ error: `${key} must be a string` });
+        }
+        patch[key] = body[key];
+      }
+    }
+    if (patch.brokerUrl) {
+      try {
+        const parsed = new URL(patch.brokerUrl);
+        if (parsed.protocol !== 'mqtt:' && parsed.protocol !== 'mqtts:') {
+          return reply.code(400).send({ error: 'brokerUrl must start with mqtt:// or mqtts://' });
+        }
+      } catch {
+        return reply.code(400).send({ error: 'brokerUrl is not a valid URL' });
+      }
+    }
+
+    const next = updateSmartHomeSettings(patch);
+    reconfigureSmartHome(); // applies immediately, no restart needed
+    return next;
+  });
+
+  // Opens a separate, temporary connection using whatever's in the
+  // request body (not necessarily saved yet) -- lets broker credentials be
+  // verified from the Settings form before committing them. Falls back to
+  // the currently-saved settings if the body is empty (e.g. "test" clicked
+  // right after a page reload, before the form has been touched).
+  app.post('/api/notifications/smart-home/test', { preHandler: requireSettingsAuth }, async (request) => {
+    const body = request.body ?? {};
+    const settings = getSmartHomeSettings();
+    return testSmartHomeConnection({
+      brokerUrl: body.brokerUrl ?? settings.brokerUrl,
+      username: body.username ?? settings.username,
+      password: body.password ?? settings.password,
+    });
   });
 
   const wss = new WebSocketServer({ noServer: true });

@@ -12,9 +12,39 @@ const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
 const { hasSeenAircraft } = await import('../db.js');
+const smartHome = await import('./smart-home.js');
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// Fake MQTT client so the smart-home scope-boundary tests below don't open
+// real sockets -- same shape as smart-home.test.js's own fake.
+class FakeMqttClient {
+  constructor() {
+    this.published = [];
+  }
+  connect({ onConnect }) {
+    onConnect?.();
+  }
+  publish(topic, rawPayload) {
+    // Status-topic publishes ("online"/"offline") are plain strings, not
+    // JSON -- only event payloads are, so parse best-effort.
+    let payload;
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
+      payload = rawPayload;
+    }
+    this.published.push({ topic, payload });
+    return true;
+  }
+  disconnect() {}
+}
+let fakeSmartHomeClient;
+smartHome.setMqttClientFactory(() => {
+  fakeSmartHomeClient = new FakeMqttClient();
+  return fakeSmartHomeClient;
 });
 
 let sent;
@@ -23,7 +53,7 @@ rules.setNotifySender((topic, payload) => {
   return Promise.resolve();
 });
 
-beforeEach(() => {
+beforeEach(async () => {
   sent = [];
   resetCooldowns();
   updateNotificationSettings({
@@ -32,6 +62,11 @@ beforeEach(() => {
     firstSeenEnabled: true,
     rangeRecordEnabled: true,
   });
+  const { updateSmartHomeSettings } = await import('./settings.js');
+  smartHome.shutdownSmartHome(); // force a fresh client each test, regardless of whether settings actually changed
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://test-broker:1883', topicPrefix: 'mlpr' });
+  smartHome.reconfigureSmartHome();
+  fakeSmartHomeClient.published.length = 0; // clear the retained "online" status publish
   for (const entry of getWatchList()) {
     removeWatchEntry(entry.id);
   }
@@ -228,4 +263,39 @@ test('watch-list respects the per-hex cooldown', () => {
   rules.evaluateAircraftRules(aircraft);
   rules.evaluateAircraftRules(aircraft);
   assert.equal(watchedNotifications().length, 1);
+});
+
+// Smart-home (MQTT) scope boundary: wired to exactly first-seen and
+// watch-list, deliberately NOT squawk or range-record (explicit product
+// decision, not an oversight -- see rules.js's evaluateAircraftRules).
+test('first-seen publishes a smart-home event alongside the ntfy notification', () => {
+  const aircraft = aircraftFixture();
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 3000);
+
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/first_seen');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.reason, 'first_seen');
+  assert.equal(events[0].payload.hex, aircraft.hex);
+});
+
+test('watch-list match publishes a smart-home event with the matched type/value', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/watchlist');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.matchedType, 'type');
+  assert.equal(events[0].payload.matchedValue, 'B738');
+});
+
+test('squawk emergency does NOT publish a smart-home event (deliberately out of scope)', () => {
+  rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700' }));
+  assert.equal(fakeSmartHomeClient.published.length, 0);
+});
+
+test('a range record does NOT publish a smart-home event (deliberately out of scope)', () => {
+  rules.evaluateRangeRecordRule(9999);
+  assert.equal(fakeSmartHomeClient.published.length, 0);
 });

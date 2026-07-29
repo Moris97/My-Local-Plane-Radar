@@ -92,7 +92,10 @@ Added to as they come up; picked up in a later stage when relevant.
 - **Notification engine: radius-from-home geofence** — notify when *any*
   aircraft (not just a watched one) enters a distance-from-home radius. The
   watch-list's per-entry altitude condition (below/above threshold) shipped;
-  this general geofence rule, independent of the watch list, did not.
+  this general geofence rule, independent of the watch list, did not. Once
+  built, give it a `publishSmartHomeEvent()` call site too (see the smart-
+  home entry below) -- same pattern as first-seen/watchlist, not a design
+  question when the time comes.
 - **Log unmatched 3-letter airline callsign prefixes** — when
   `airline-lookup.js` sees a well-formed airline-style callsign whose prefix
   isn't in the OpenFlights `airlines.dat` map (`kind: 'airline_unknown'`),
@@ -140,15 +143,25 @@ Added to as they come up; picked up in a later stage when relevant.
   a "receiver has been silent for 5 minutes" ntfy alert, so a crashed
   readsb/SDR doesn't go unnoticed until someone happens to check the app.
   Requested 2026-07-28.
-- **Smart home integration (MQTT / Home Assistant)** — a lightweight
-  MQTT client publishing receiver state and flight stats to a home
-  automation system, only on meaningful state changes (e.g. the aircraft
-  count within 10 km changes, a specific type is detected) rather than
-  continuously, to avoid extra load on the Pi. Example automations: an
-  announcement or light flash when an interesting aircraft passes overhead,
-  an LED strip turning red on squawk 7700, a daily aircraft count on an
-  e-paper display, muting music/TV when a helicopter passes low overhead.
-  Requested 2026-07-28.
+- **Smart home integration (MQTT / Home Assistant) -- implemented
+  2026-07-29**, see CLAUDE.md's new "Smart home / MQTT integration"
+  section for the full picture. First-seen and watch-list notification
+  events now also publish a structured JSON event over MQTT (`mlpr/events/
+  first_seen`, `mlpr/events/watchlist`), tested against Home Assistant.
+  Deliberately scoped narrower than the original request: only the two
+  rules that already send a notification, not a general "aircraft count
+  within 10 km changed" state feed. Still-deferred ideas from the original
+  ask, not built:
+  - Squawk 7700/7600/7500 as a smart-home trigger too (currently NOT
+    wired -- explicit scope decision, not an oversight; easy to add, one
+    more `publishSmartHomeEvent()` call site in `rules.js` if wanted).
+  - A general geofence-based trigger ("any aircraft within N km", not just
+    watched ones) -- depends on the geofence feature below anyway.
+  - Continuous/ambient state feed (aircraft count, messages/sec) rather
+    than discrete events -- the original idea was "avoid extra load", and
+    the two-events-only version already satisfies that trivially; revisit
+    only if a real use case for continuous state (not discrete events)
+    shows up.
 - **PTZ camera tracking ("Cam-Track")** — given the receiver's own GPS
   position and an aircraft's lat/lon/altitude, compute azimuth and
   elevation angle and drive a PTZ IP camera to point at it (most support

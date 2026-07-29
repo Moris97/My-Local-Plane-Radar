@@ -3,6 +3,7 @@ import { getConfig, setConfig, getConfigJSON, setConfigJSON } from '../db.js';
 
 const SETTINGS_KEY = 'notificationSettings';
 const NTFY_TOPIC_KEY = 'ntfyTopic';
+const SMART_HOME_SETTINGS_KEY = 'smartHomeSettings';
 // No 0/o or 1/l/i — those are the pairs people mistype when copying a code by hand.
 const TOPIC_CHARSET = '23456789abcdefghjkmnpqrstuvwxyz';
 const TOPIC_LENGTH = 8;
@@ -50,4 +51,32 @@ export function regenerateNtfyTopic() {
   const topic = generateTopic();
   setConfig(NTFY_TOPIC_KEY, topic);
   return topic;
+}
+
+// Smart-home (MQTT) delivery -- a second, independent notification channel
+// alongside ntfy above, only ever fed by the first-seen/watchlist rules
+// (see rules.js/smart-home.js). Server-level infrastructure credentials
+// (broker URL, username, password), not a per-browser preference -- stored
+// here in SQLite same as everything else in this file, but gated behind
+// requireSettingsAuth in server.js (like the Server tab's own port/home-
+// location fields) rather than left open like the rest of this
+// Notifications-tab-adjacent config, since a broker password is a real
+// infrastructure secret, a different kind of sensitive than a random ntfy
+// topic string.
+const DEFAULT_SMART_HOME_SETTINGS = {
+  enabled: false,
+  brokerUrl: '', // e.g. mqtt://192.168.1.50:1883 or mqtts://host:8883 -- scheme picks plain/TLS
+  username: '',
+  password: '',
+  topicPrefix: 'mlpr',
+};
+
+export function getSmartHomeSettings() {
+  return { ...DEFAULT_SMART_HOME_SETTINGS, ...getConfigJSON(SMART_HOME_SETTINGS_KEY, {}) };
+}
+
+export function updateSmartHomeSettings(patch) {
+  const next = { ...getSmartHomeSettings(), ...patch };
+  setConfigJSON(SMART_HOME_SETTINGS_KEY, next);
+  return next;
 }

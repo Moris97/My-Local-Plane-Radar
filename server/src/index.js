@@ -18,6 +18,7 @@ import {
 import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeenFlight } from './db.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule, prunePendingFirstSeen } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
+import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
 import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
@@ -213,6 +214,11 @@ async function main() {
   const receiverInfo = await source.fetchReceiverInfo();
   setAutoDetectedHome(receiverInfo);
 
+  // No-ops if smart-home delivery isn't enabled/configured (server.js's PUT
+  // handler re-calls this immediately whenever Settings changes it, so this
+  // startup call only matters for whatever was already saved from before).
+  reconfigureSmartHome();
+
   setInterval(() => {
     pollOnce(broadcast).catch((err) => app.log.error(err, 'aircraft poll failed'));
   }, POLL_INTERVAL_MS);
@@ -275,6 +281,15 @@ async function main() {
       flushAntennaStatsIfDirty();
     } catch (err) {
       app.log.error(err, 'antenna stats flush on shutdown failed');
+    }
+    try {
+      // Proactively publishes retained "offline" rather than waiting for
+      // the broker to notice the TCP connection dropped and fall back to
+      // the Will -- same end result, just faster/more deliberate for a
+      // routine restart than a crash.
+      shutdownSmartHome();
+    } catch (err) {
+      app.log.error(err, 'smart-home MQTT shutdown failed');
     }
     await app.close();
     process.exit(0);

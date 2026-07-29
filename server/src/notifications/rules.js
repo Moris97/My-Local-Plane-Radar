@@ -3,6 +3,7 @@ import { getNotificationSettings, getNtfyTopic } from './settings.js';
 import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
 import { getWatchList } from './watchlist.js';
+import { publishSmartHomeEvent } from './smart-home.js';
 
 const SQUAWK_MEANINGS = {
   7500: 'Hijack',
@@ -116,6 +117,11 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           priority: 3,
           tags: ['eye'],
         });
+        // Smart-home (MQTT) is a separate, independent delivery channel --
+        // deliberately only wired to these two rules (first-seen,
+        // watchlist) for now, not squawk/range-record, per explicit scope.
+        // No-ops on its own if smart-home isn't enabled/configured.
+        publishSmartHomeEvent({ reason: 'first_seen', aircraft });
       }
     }
   }
@@ -130,6 +136,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
         priority: 4,
         tags: ['eyes'],
       });
+      publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
     }
   }
 }
