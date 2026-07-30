@@ -18,7 +18,10 @@ production are all in place. See [CLAUDE.md](./CLAUDE.md) for the
 architecture and [TODO.md](./TODO.md) for what's explicitly deferred.
 
 **[Full user guide →](./docs/README.md)** — a tour of the map, the List and
-Stats panels, and every Settings tab, with screenshots.
+Stats panels, and every Settings tab, with screenshots. For deeper,
+feature-specific walkthroughs (starting with
+[Smart Home / MQTT integration](https://github.com/Moris97/My-Local-Plane-Radar/wiki/Smart-Home-Integration)),
+see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
 
 <p>
   <img src="./docs/images/stats-panel.png" alt="Stats panel with history charts" width="49%">

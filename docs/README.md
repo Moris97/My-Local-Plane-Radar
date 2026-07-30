@@ -228,6 +228,14 @@ Protected by the same Security setting as the Server tab, since a broker
 username/password is a real infrastructure credential, not a routine
 display preference.
 
+**New to MQTT?** See the
+[Smart Home (MQTT) Integration wiki guide](https://github.com/Moris97/My-Local-Plane-Radar/wiki/Smart-Home-Integration)
+for a full walkthrough — getting a broker running (Home Assistant add-on
+or Docker), connecting both MLPR and Home Assistant to it, verifying
+messages arrive, building your first automation, and a troubleshooting
+checklist for the errors people actually hit doing this for the first
+time. The summary below covers just what each field in this tab does.
+
 - **Enable smart-home (MQTT) notifications** — publishes a message
   whenever a first-time-seen or watch-list notification fires, for a home
   automation system (tested against [Home Assistant](https://www.home-assistant.io/))
