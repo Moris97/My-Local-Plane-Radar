@@ -707,9 +707,12 @@ not a special case that bypasses it.
   production adapter `app.js` actually imports — it wraps
   `classifyIconKind`/`getIconPath` behind the same `createPlaneElement`/
   `setPlaneKind`/`setPlaneHeading`/`setPlaneColor`/`setPlaneLabel` shape an
-  older, simpler 4-shape module (`aircraft-icon.js`, still on disk but only
-  used by `/dev/icons`' own old-vs-new comparison row, not by `app.js`
-  anymore) already had, so swapping the import was most of the work.
+  older, simpler 4-shape module (`aircraft-icon.js`) already had, so
+  swapping the import was most of the work. That old module, its test
+  file, and `/dev/icons`' own old-vs-new comparison row were all removed
+  entirely once nothing referenced them anymore (2026-07-30) — the icon
+  dev pages themselves (`/dev/icons`, `/dev/icons-map`, `/dev/icon-types`,
+  `/dev/icon_verify`) stay, only the retired-module comparison went.
   `icon-types.json` is fetched once (`await loadIconTypes()`) inside
   `app.js`'s `map.on('load', ...)`, before the first queued snapshot is
   ever classified. A dev-only `/dev/icons` page exists for browsing every

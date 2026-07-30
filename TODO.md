@@ -20,7 +20,10 @@ Added to as they come up; picked up in a later stage when relevant.
     `createPlaneElement`/`setPlaneHeading`/`setPlaneColor`/`setPlaneKind`/
     `setPlaneLabel` call shape the old module had, so `app.js`'s call sites
     barely changed) instead of the OLD `aircraft-icon.js` (4 shapes:
-    passenger/light/helicopter/tower). `icon-types.json` is loaded once
+    passenger/light/helicopter/tower; that module, its test file, and
+    `/dev/icons`' old-vs-new comparison row were all removed entirely on
+    2026-07-30, once nothing referenced them anymore).
+    `icon-types.json` is loaded once
     (`await loadIconTypes()`) inside `map.on('load', ...)`, before the
     first queued snapshot is ever classified. `NON_ROTATING_ICON_IDS`
     (balloon/tower/drone never rotate by track) is wired into the new
@@ -30,9 +33,7 @@ Added to as they come up; picked up in a later stage when relevant.
     -- applied as an inline `--mlpr-plane-size` override per marker
     (`aircraft-icon-live.js`'s `refreshMarkerSize`), refreshed on a kind
     change and whenever the base slider setting changes
-    (`app.js`'s `onSettingsChange`). The OLD `aircraft-icon.js` module
-    itself is untouched on disk -- still used by `/dev/icons`' own
-    old-vs-new comparison row, just no longer imported by `app.js`.
+    (`app.js`'s `onSettingsChange`).
     Verified in a real browser (this sandbox has no WebGL, so the actual
     map can't render here -- see the note further down about that) via a
     standalone DOM harness exercising `aircraft-icon-live.js` directly:
@@ -185,7 +186,7 @@ Added to as they come up; picked up in a later stage when relevant.
   GPU-composited) instead of one HTML element per aircraft. Explicitly
   *not* being done now (2026-07-28, during the icon-set/classification
   work): the current DOM-marker architecture is deliberate (see
-  `aircraft-icon.js`/`style.css` comments — hover, the achromatic selection
+  `aircraft-icon-live.js`/`style.css` comments — hover, the achromatic selection
   glow, the plane label, and map↔list cross-highlight are all built on
   per-marker DOM elements) and switching would mean rebuilding all of
   those on symbol-layer mechanics (query rendered features for hover/click,

@@ -29,7 +29,7 @@ const defaults = {
   // Which fields appear in the small map label under each aircraft (empty
   // object/all-false = no label at all). Kept minimal by default (just the
   // callsign) so the map stays uncluttered until the user opts into more --
-  // see app.js's buildAircraftLabel and aircraft-icon.js's setPlaneLabel.
+  // see app.js's buildAircraftLabel and aircraft-icon-live.js's setPlaneLabel.
   aircraftLabelFields: { flight: true, type: false, altitude: false, speed: false },
   // Fetches a photo from Planespotters (external site) when an aircraft's
   // details panel is opened -- see aircraft-panel.js's loadPhoto. Opt-out

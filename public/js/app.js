@@ -743,8 +743,7 @@ function resetAll() {
 // "place/update a map marker" (only when there's a position to place it
 // at) -- which is also just a more honest description of what each half
 // actually does. list.js flags a position-less row instead of showing it
-// identically to a positioned one -- see aircraft-icon.js's noPosition
-// icon there.
+// identically to a positioned one -- see list.js's NO_POSITION_ICON.
 function applyAircraftUpdate(aircraft) {
   const now = Date.now();
   let state = aircraftState.get(aircraft.hex);

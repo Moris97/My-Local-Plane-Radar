@@ -36,7 +36,7 @@
   .size-block h3 { font-size: 13px; margin: 0 0 6px; color: #9fc9b3; }
   .rotation-row { display: flex; flex-wrap: wrap; }
   .icon-grid { display: flex; flex-wrap: wrap; }
-  .bg-toggle, .old-new-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+  .bg-toggle { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
   button {
     background: #16232d;
     color: #d8f3e6;
@@ -47,8 +47,6 @@
     font: inherit;
   }
   button.active { background: #245c3c; border-color: #3ddc84; }
-  .compare-pair { display: flex; align-items: center; gap: 4px; }
-  .compare-pair .arrow { color: #7fa896; }
   .palette-strip { display: flex; align-items: flex-end; gap: 2px; flex-wrap: wrap; }
   .palette-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; }
   .palette-cell .alt-label { font-size: 10px; color: #7fa896; }
@@ -118,12 +116,8 @@
 
   <section>
     <h2>All icons — real slider range (min / default / max), 3 rotations each</h2>
+    <p class="hint">Each row also ends with a flat, unscaled 40px pair in the signal-loss mode's fresh (green) and stale (red) endpoint colors, for comparing color at one common size across every icon kind.</p>
     <div id="size-grid"></div>
-  </section>
-
-  <section>
-    <h2>Old vs new (removed once the old 4-shape set is retired)</h2>
-    <div class="old-new-row" id="old-new-row"></div>
   </section>
 
   <section>

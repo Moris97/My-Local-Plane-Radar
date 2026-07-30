@@ -2,7 +2,6 @@ import {
   PLANE_ICON_IDS, NON_ROTATING_ICON_IDS, VIEW_BOX, getIconPath, getIconSizeMultiplier,
   SPINNING_ROTOR_ICON_IDS, SUGGESTED_SPIN_DURATION_S, getIconRotorPaths,
 } from '/js/plane-icons.js';
-import { ICONS as OLD_ICONS } from '/js/aircraft-icon.js';
 import { colorForAltitude } from '/js/trail.js';
 import { colorForElapsed } from '/js/aircraft-color.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
@@ -21,13 +20,22 @@ function svgEl(pathD, sizePx, rotationDeg) {
 </svg>`;
 }
 
-function iconCard({ pathD, sizePx, rotationDeg, label, bg }) {
+function iconCard({ pathD, sizePx, rotationDeg, label, bg, color }) {
   const div = document.createElement('div');
   div.className = 'icon-card';
   div.dataset.bg = bg;
+  if (color) div.style.color = color;
   div.innerHTML = `${svgEl(pathD, sizePx, rotationDeg)}<div class="label">${label}</div>`;
   return div;
 }
+
+// Same signalLoss-mode endpoints the live map actually fades between
+// (aircraft-color.js's colorForElapsed) -- shared by the size-grid's
+// green/red reference swatches below and the rotor demo further down, so
+// neither can silently drift from what the map really shows or from each
+// other.
+const SIGNAL_LOSS_FRESH_COLOR = colorForElapsed(0, 0, 1);
+const SIGNAL_LOSS_STALE_COLOR = colorForElapsed(1, 0, 1);
 
 let currentBg = 'dark';
 
@@ -59,32 +67,19 @@ function renderSizeGrid() {
         }));
       }
     }
+    // A flat, unscaled 40px reference pair (ignoring this kind's own
+    // ICON_SIZE_MULTIPLIER, unlike every card above) in the two signal-loss
+    // gradient endpoints, so color at a common size is comparable across
+    // every icon kind regardless of how big/small that kind normally
+    // renders relative to the others.
+    grid.appendChild(iconCard({
+      pathD, sizePx: 40, rotationDeg: 0, label: '40px · fresh', bg: currentBg, color: SIGNAL_LOSS_FRESH_COLOR,
+    }));
+    grid.appendChild(iconCard({
+      pathD, sizePx: 40, rotationDeg: 0, label: '40px · stale', bg: currentBg, color: SIGNAL_LOSS_STALE_COLOR,
+    }));
     block.appendChild(grid);
     container.appendChild(block);
-  }
-}
-
-function renderOldVsNew() {
-  const container = document.getElementById('old-new-row');
-  container.innerHTML = '';
-  // Only kinds that exist in both the old 4-shape module and the new set.
-  const shared = [
-    { newId: 'narrowbody', oldKind: 'passenger' },
-    { newId: 'light', oldKind: 'light' },
-    { newId: 'helicopter', oldKind: 'helicopter' },
-    { newId: 'tower', oldKind: 'tower' },
-  ];
-  for (const { newId, oldKind } of shared) {
-    const pair = document.createElement('div');
-    pair.className = 'compare-pair';
-    const oldSvg = `<svg viewBox="0 0 24 24" width="40" height="40" fill="none"><g fill="#3ddc84" stroke="#05070a" stroke-width="0.5">${OLD_ICONS[oldKind]}</g></svg>`;
-    const newSvg = svgEl(getIconPath(newId), 40, 0);
-    pair.innerHTML = `
-      <div class="icon-card" data-bg="${currentBg}">${oldSvg}<div class="label">old: ${oldKind}</div></div>
-      <div class="arrow">→</div>
-      <div class="icon-card" data-bg="${currentBg}">${newSvg}<div class="label">new: ${newId}</div></div>
-    `;
-    container.appendChild(pair);
   }
 }
 
@@ -124,15 +119,10 @@ function rotorDemoSvg(kind, sizePx) {
   </svg>`;
 }
 
-// Same signalLoss-mode endpoints the live map actually fades between
-// (aircraft-color.js's colorForElapsed) -- reading them off that function
-// with trivial (0, 1) bounds rather than duplicating the FRESH_COLOR/
-// STALE_COLOR literals here, so this can't silently drift from what the
-// map really shows if that gradient is ever retuned.
 const ROTOR_DEMO_COLORS = [
   { label: 'default', color: null },
-  { label: 'fresh (signal-loss green)', color: colorForElapsed(0, 0, 1) },
-  { label: 'stale (signal-loss red)', color: colorForElapsed(1, 0, 1) },
+  { label: 'fresh (signal-loss green)', color: SIGNAL_LOSS_FRESH_COLOR },
+  { label: 'stale (signal-loss red)', color: SIGNAL_LOSS_STALE_COLOR },
 ];
 
 function renderRotorDemo() {
@@ -182,7 +172,6 @@ for (const id of ['in-type', 'in-category', 'in-military']) {
 
 loadIconTypes().finally(() => {
   renderSizeGrid();
-  renderOldVsNew();
   renderPalette();
   renderRotorDemo();
   renderClassifyResult();

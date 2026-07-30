@@ -1,15 +1,12 @@
-// Production adapter over the new 17-icon set (plane-icons.js) and the
+// Production adapter over the 17-icon set (plane-icons.js) and the
 // classification chain (icon-classify.js), wired into the live map by
-// app.js. Exposes the exact same function names/shapes as the OLD
-// aircraft-icon.js module it replaces (createPlaneElement/setPlaneKind/
-// setPlaneHeading/setPlaneColor/setPlaneLabel) so app.js's call sites
-// barely had to change -- only the import line, plus loadIconTypes() being
-// awaited once at startup and refreshMarkerSize() being called when the
-// icon-size setting changes (see below, both new).
-//
-// aircraft-icon.js itself is untouched and still used for /dev/icons' own
-// old-vs-new comparison row -- this module does NOT replace it on disk,
-// it replaces which module app.js imports from.
+// app.js. Replaced the old 4-shape aircraft-icon.js module (now removed
+// from the codebase entirely, 2026-07-30, including /dev/icons' old-vs-new
+// comparison row) -- exposes the same function names/shapes that module
+// had (createPlaneElement/setPlaneKind/setPlaneHeading/setPlaneColor/
+// setPlaneLabel) so app.js's call sites barely had to change -- only the
+// import line, plus loadIconTypes() being awaited once at startup and
+// refreshMarkerSize() being called when the icon-size setting changes.
 import {
   VIEW_BOX, getIconPath, getIconSizeMultiplier, NON_ROTATING_ICON_IDS,
   SPINNING_ROTOR_ICON_IDS, SUGGESTED_SPIN_DURATION_S, getIconRotorPaths,

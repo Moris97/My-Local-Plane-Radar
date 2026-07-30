@@ -1,5 +1,16 @@
 :root {
   --bottom-bar-height: 64px;
+  /* The app's own UI chrome (bottom bar/panels/Settings) is always dark,
+     regardless of the map's own light/dark theme -- but without this,
+     native form controls (checkboxes, radios, range sliders) still render
+     using the browser's light-mode default surface (a plain white filled
+     square for an unchecked checkbox) unless the page declares which
+     scheme it actually wants. `accent-color` below only recolors the
+     *checked* state; this is what fixes the unchecked one, which is what
+     stood out as still "off" after that fix. Native controls only ever
+     appear in Settings/panels, never on the map itself, so this is safe
+     to set globally. */
+  color-scheme: dark;
 }
 
 html, body {

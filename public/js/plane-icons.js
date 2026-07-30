@@ -25,8 +25,8 @@
 //   with a second, same-size engine nacelle per wing (see widebody4Path).
 //
 // First draft of the fixed-wing shapes drew the fuselage and wing as two
-// separate crossing polygons (mirroring the old aircraft-icon.js's
-// technique). Rendered small, that reads as a plain "+"/"x" -- a thin rod
+// separate crossing polygons (mirroring the old, now-removed 4-shape
+// module's technique). Rendered small, that reads as a plain "+"/"x" -- a thin rod
 // crossed by a thin flat wing genuinely IS a plus sign, not an optical
 // illusion, and every fixed-wing icon ended up visually indistinguishable
 // from every other one. Every fixed-wing silhouette below is instead ONE
@@ -675,51 +675,46 @@ const cargoJetPath = combine(
   poly(cjPod2), poly(mirrored(cjPod2)),
 );
 
-// Fighter/attack jet (F-16 style): reference types (icon-types.json's exact
-// table) span both conventional swept-wing fighters (F-16/F-15/F-35) and
-// canard-delta fighters (Typhoon/Rafale), so this one icon has to read as
-// "fighter jet" generically rather than nailing one type exactly. Picked
-// after two rejected directions: a canard-delta shape modeled closely on a
-// Gripen reference photo (wing root trailing edge blended/curved into the
-// fuselage where it should have met it at a near-right-angle -- rejected
-// once for that, and the LERX-kink + separate intake bulge + twin
-// separated tailplane-stub rebuild that followed was rejected outright as
-// "pokraczne" -- too many competing small details for 24x24). This is
-// variant A from the first 4-way comparison (F-16/F/A-18/delta/delta+
-// canard): a modest single LERX kink in the leading edge, a trapezoidal
-// wing (straighter trailing edge, not a full delta), narrowing to one slim
-// tailcone with a single small tailplane -- built the same way as every
-// other fixed-wing icon here (one continuous smooth symmetricOutline, no
-// separate subpaths), which is what actually reads cleanly at this size.
-const MJ_FUSE_HALF_WIDTH = 0.8;
-const MJ_LERX_HALF_WIDTH = 1.6;
-const MJ_LERX_Y = 9.0;
-const MJ_WING_HALF_SPAN = 8.0;
-const MJ_WING_LE_Y = 12.5;
-const MJ_WING_TE_Y = 13.7;
-const MJ_WING_ROOT_TE_Y = 14.0;
-const MJ_TAIL_HALF_SPAN = 3.2;
-const MJ_TAIL_TIP_LE_Y = 19.0;
-const MJ_TAIL_TIP_TE_Y = 19.8;
-const MJ_TAIL_ROOT_TE_Y = 19.2;
-const MJ_TAIL_CONE_Y = 20.2;
-
-const militaryJetPath = symmetricOutline([
-  [12, 3],
-  [12 + MJ_FUSE_HALF_WIDTH * 0.5, 4.5],
-  [12 + MJ_FUSE_HALF_WIDTH, 6.5],
-  [12 + MJ_LERX_HALF_WIDTH, MJ_LERX_Y],                 // LERX kink
-  [12 + MJ_WING_HALF_SPAN, MJ_WING_LE_Y],                // wingtip leading edge
-  [12 + MJ_WING_HALF_SPAN - 0.5, MJ_WING_TE_Y],          // wingtip trailing edge
-  [12 + MJ_FUSE_HALF_WIDTH, MJ_WING_ROOT_TE_Y],          // wing root TE
-  [12 + MJ_FUSE_HALF_WIDTH, 15.5],
-  [12 + MJ_FUSE_HALF_WIDTH * 0.5, 17.0],
-  [12 + MJ_FUSE_HALF_WIDTH * 0.25, 18.2],
-  [12 + MJ_TAIL_HALF_SPAN, MJ_TAIL_TIP_LE_Y],            // tailplane tip LE
-  [12 + MJ_TAIL_HALF_SPAN - 0.4, MJ_TAIL_TIP_TE_Y],      // tailplane tip TE
-  [12 + MJ_FUSE_HALF_WIDTH * 0.25, MJ_TAIL_ROOT_TE_Y],   // tailplane root TE
-  [12, MJ_TAIL_CONE_Y],
-]);
+// Fighter/attack jet (F-16 style): replaced 2026-07-30 with a silhouette
+// supplied directly by the user (a wide-nose F-16-style outline with a
+// cropped-delta wing, twin wingtip rail pods, and a flat-bottomed
+// tailcone) rather than this file's own earlier from-scratch design.
+// Converted from their 200x260 reference artwork (nose at (100, 15),
+// symmetric about x=100) into this file's 24x24/nose-up convention via
+// one uniform scale+translate (s = 0.09: nose lands on (12, 1.5), same
+// spot narrowbody's own nose sits at) -- reproduces the source's exact
+// proportions/detail rather than reinterpreting it. The source's two nose
+// Bezier curves (per side) are flattened to 4-point samples each (t =
+// 0.25/0.5/0.75 plus the shared endpoint), consistent with this file's
+// existing curve-approximation convention (see ovalNosePoints) -- checked
+// point-by-point against the source's own separately-specified mirrored
+// curve control points before flattening (they're an exact reversed
+// mirror of each other), so flattening only the right side and mirroring
+// it here reproduces the source exactly.
+//
+// Built manually (not via symmetricOutline()) because the source's tail
+// is flat-bottomed -- it ends in two off-center points joined by a
+// horizontal edge, not a single tapered tip on the centerline, which is
+// what symmetricOutline() assumes of its last point.
+const militaryJetRightPoints = [
+  [12, 1.5],                                   // nose tip
+  [12.18, 2.44], [12.43, 3.48], [12.71, 4.59], // nose curve, right side
+  [12.99, 5.73],                                // curve join
+  [13.21, 6.84], [13.50, 7.98], [13.86, 9.12], // LERX sweep, right side
+  [14.34, 10.23],                               // wing root leading edge
+  [18.48, 13.83],                               // wingtip leading edge
+  [18.48, 12.93], [18.66, 12.93], [18.66, 15.9], [18.48, 15.9], // wingtip rail pod
+  [18.48, 15.18],                               // wingtip trailing edge
+  [13.35, 14.73],                               // wing root trailing edge
+  [13.35, 17.25],                               // aft fuselage flank
+  [16.95, 20.13], [16.95, 21.39],               // tailplane tip
+  [12.99, 20.67],                               // tailplane root trailing edge
+  [12.63, 21.03], [12.63, 21.57],               // tail cone, right of centerline
+];
+const militaryJetMiddle = militaryJetRightPoints.slice(1);
+const militaryJetLeft = militaryJetMiddle.slice().reverse()
+  .map(([x, y]) => [2 * CENTER_X - x, y]);
+const militaryJetPath = poly([...militaryJetRightPoints, ...militaryJetLeft]);
 
 // Glider (sailplane), rebuilt against a real reference photo: a rounded
 // nose pod (cockpit bulge, ovalNosePoints -- same technique as
@@ -1033,14 +1028,11 @@ export const PLANE_ICON_IDS = [
 // ground-station beacon is a fixed structure with no heading at all, and a
 // quadcopter has no fixed nose to point anywhere in particular. Whatever
 // `track`/`mag_heading` readsb reports for these (if anything) should be
-// ignored for rendering purposes -- always draw them upright. The one
-// consumer of this today is `aircraft-icon.js`'s `setPlaneHeading`, which
-// special-cases 'tower' directly since that's the only one of these three
-// that exists in the OLD (currently live) icon module; this export is the
-// single source of truth to check against instead once this new icon set
-// (still not wired into app.js -- see the top of this file) replaces it,
-// so 'balloon'/'drone' get the same treatment from day one rather than
-// this being rediscovered later.
+// ignored for rendering purposes -- always draw them upright. Consumed by
+// `aircraft-icon-live.js`'s `setPlaneHeading`, wired into the live map; the
+// old 4-shape module (now removed) only ever special-cased 'tower' since
+// that was the only one of these three it had at all -- this export is the
+// single source of truth, so 'balloon'/'drone' get the same treatment.
 export const NON_ROTATING_ICON_IDS = new Set(['tower', 'balloon', 'drone']);
 
 // Icon kinds whose rotor/propeller could be rendered as a genuinely
@@ -1053,12 +1045,8 @@ export const NON_ROTATING_ICON_IDS = new Set(['tower', 'balloon', 'drone']);
 // rotating blur reads immediately as "engine running" in a way the
 // static shape never can.
 //
-// This is a DESIGN-ONLY checkpoint, not a live feature -- nothing in
-// aircraft-icon.js/app.js consumes this yet, and it deliberately isn't
-// being wired in now (see the top of this file: the whole new icon set
-// stays in isolation on /dev/icons until it's complete). Recorded here
-// so the mechanism doesn't have to be rediscovered when that wiring
-// happens:
+// Wired into the live map by `aircraft-icon-live.js` (2026-07-30) -- the
+// notes below record the original design reasoning:
 //
 // - Kept deliberately narrow (helicopter + drone only, NOT light or
 //   cargo_turboprop, which also have propeller cues) because the
