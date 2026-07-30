@@ -225,32 +225,56 @@ const NB_WING_HALF_SPAN = 11.2;
 const NB_WING_ROOT_LE_Y = 9.2;
 const NB_WING_TIP_LE_Y = 16.9;
 
-// Nacelle: sits astride the leading edge, protruding further forward than
-// aft (how an underwing pod actually reads from above), tapering slightly
-// at the back. Corners are filleted too (NB_ENGINE_ROUND_RADIUS) -- a
-// zoomed-in screenshot showed the fuselage-shoulder fillet clearly but the
-// nacelle's own corners were still sharp rectangles, which is what was
-// actually being pointed at.
+// Nacelle: a small flag-shaped bump poking out ahead of the wing's leading
+// edge, axis-aligned the same way the fuselage/nose is (pointing straight
+// "up" the icon, not tilted to the wing's own sweep angle -- a real
+// underwing engine points into the airflow/direction of flight, not along
+// the sweep) and tapering slightly toward the wing. Baked directly into
+// the wing's own outline below, as a detour in its point list, rather than
+// drawn as a second overlapping subpath: an earlier version added the
+// nacelle as its own separate rectangle layered on top of the wing, and
+// since a single <path>'s stroke traces every subpath's edges regardless
+// of what the fill union looks like, the wing's own (diagonally swept)
+// leading-edge line still rendered as a visible cut straight through the
+// engine wherever the two shapes overlapped (reported directly against a
+// rendered screenshot -- the engine read as overlapping/cutting into the
+// wing's contour rather than merely sticking out from it). Routing the
+// wing's own boundary out to the nacelle's two front corners and back,
+// instead of layering a separate shape on top of it, means there's no
+// second edge left to cross the green -- the bump is just part of the one
+// line, and only its two front corners (ahead of the wing, genuinely
+// external) get their own small fillet (NB_ENGINE_ROUND_RADIUS).
 const NB_ENGINE_HALF_WIDTH = 0.95;
 const NB_ENGINE_ROUND_RADIUS = 0.35;
+const NB_ENGINE_DEPTH = 1.9;
+const NB_ENGINE_TAPER = 0.1;
 
-function nacelleAt(spanFraction) {
-  const offset = NB_FUSE_HALF_WIDTH + (NB_WING_HALF_SPAN - NB_FUSE_HALF_WIDTH) * spanFraction;
-  const leadingEdgeY =
-    NB_WING_ROOT_LE_Y
+function wingLeadingEdgeY(offset) {
+  return NB_WING_ROOT_LE_Y
     + ((offset - NB_FUSE_HALF_WIDTH) / (NB_WING_HALF_SPAN - NB_FUSE_HALF_WIDTH))
       * (NB_WING_TIP_LE_Y - NB_WING_ROOT_LE_Y);
-  return [
-    [CENTER_X + offset - NB_ENGINE_HALF_WIDTH, leadingEdgeY - 1.9],
-    [CENTER_X + offset + NB_ENGINE_HALF_WIDTH, leadingEdgeY - 1.9],
-    [CENTER_X + offset + NB_ENGINE_HALF_WIDTH - 0.18, leadingEdgeY + 1.5],
-    [CENTER_X + offset - NB_ENGINE_HALF_WIDTH + 0.18, leadingEdgeY + 1.5],
-  ];
 }
 
-// narrowbody/widebody2/widebody3 all have one nacelle per wing, one third
-// of the way out to the tip.
-const nbEngineRight = nacelleAt(1 / 3);
+// The leading-edge point-list detour for one nacelle at `spanFraction`:
+// onto the LE line just inboard of the nacelle (a plain point on the
+// straight run, added only so the detour has somewhere to jump out from),
+// forward to its two front corners, then back onto the LE line just
+// outboard -- as if the nacelle were never there except for this one
+// notch. `bumpCorners` collects the two front corners so the caller can
+// fillet them at a different (smaller) radius than the shoulder corners.
+function nacelleBump(spanFraction, bumpCorners) {
+  const offset = NB_FUSE_HALF_WIDTH + (NB_WING_HALF_SPAN - NB_FUSE_HALF_WIDTH) * spanFraction;
+  const frontY = wingLeadingEdgeY(offset) - NB_ENGINE_DEPTH;
+  const frontLeft = [CENTER_X + offset - NB_ENGINE_HALF_WIDTH, frontY];
+  const frontRight = [CENTER_X + offset + NB_ENGINE_HALF_WIDTH - NB_ENGINE_TAPER, frontY];
+  bumpCorners.push(frontLeft, frontRight);
+  return [
+    [CENTER_X + offset - NB_ENGINE_HALF_WIDTH, wingLeadingEdgeY(offset - NB_ENGINE_HALF_WIDTH)],
+    frontLeft,
+    frontRight,
+    [CENTER_X + offset + NB_ENGINE_HALF_WIDTH, wingLeadingEdgeY(offset + NB_ENGINE_HALF_WIDTH)],
+  ];
+}
 
 // The two "shoulder" corners -- nose taper meeting the straight fuselage
 // side, and that side meeting the wing's leading edge -- read as too sharp/
@@ -266,13 +290,19 @@ const NB_SHOULDER_CORNERS = [
   [CENTER_X + NB_FUSE_HALF_WIDTH, NB_WING_ROOT_LE_Y],
 ];
 
-// The bare airframe outline, shared as-is by narrowbody/widebody2/widebody3
-// (identical shape, only the size multiplier in ICON_SIZE_MULTIPLIERS makes
-// the widebodies read as bigger -- requested directly rather than drawing
-// three near-duplicate shapes) and reused by widebody4 too (same outline,
-// just a second nacelle per wing -- see below).
-const narrowbodyOutline =
-  symmetricOutlineRounded([
+// The shared airframe outline, parametrized only by how many engine
+// nacelles sit along each wing's leading edge (narrowbody/widebody2/
+// widebody3 get one at 1/3 of the way to the tip, widebody4 gets a second
+// at 2/3 -- see nacelleBump above for why the nacelles are detours in this
+// same point list rather than separate shapes drawn on top of it) --
+// identical airframe proportions either way, only the size multiplier in
+// ICON_SIZE_MULTIPLIERS makes the widebodies read as bigger, requested
+// directly rather than drawing three/four near-duplicate silhouettes.
+function buildNarrowbodyOutline(bumpFractions) {
+  const bumpCorners = [];
+  const leadingEdge = bumpFractions.flatMap((t) => nacelleBump(t, bumpCorners));
+
+  const rightPoints = [
     // Nose is deliberately rounded over three points rather than one sharp
     // apex -- a single nose vertex reads as a missile/dart, not an airliner
     // (visible immediately when compared side by side with real top-down
@@ -282,6 +312,7 @@ const narrowbodyOutline =
     [CENTER_X + 1.35, 3.6],
     NB_SHOULDER_CORNERS[0],                           // full fuselage width
     NB_SHOULDER_CORNERS[1],                           // wing root leading edge
+    ...leadingEdge,                                   // leading edge, detouring out to each nacelle
     [CENTER_X + NB_WING_HALF_SPAN, NB_WING_TIP_LE_Y], // wingtip leading edge
     [CENTER_X + NB_WING_HALF_SPAN, 17.3],             // wingtip trailing edge (near-pointed tip)
     // Root chord deliberately stops well short of the tailplane: the gap of
@@ -306,13 +337,31 @@ const narrowbodyOutline =
     [CENTER_X + NB_TAIL_HALF_SPAN, 23.8],             // tailplane tip trailing edge
     [CENTER_X + NB_FUSE_HALF_WIDTH, 22.9],            // tailplane root trailing edge
     [CENTER_X, 23.95],                                // tail cone
-  ], NB_SHOULDER_CORNERS, NB_ROUND_RADIUS);
+  ];
 
-const narrowbodyPath = combine(
-  narrowbodyOutline,
-  polyAllRounded(nbEngineRight, NB_ENGINE_ROUND_RADIUS),
-  polyAllRounded(mirrored(nbEngineRight), NB_ENGINE_ROUND_RADIUS),
-);
+  // Same mirroring symmetricOutlineRounded does internally, duplicated
+  // here (rather than reusing that helper) because this outline needs TWO
+  // different fillet radii -- the shoulder corners' NB_ROUND_RADIUS and
+  // the nacelles' own smaller NB_ENGINE_ROUND_RADIUS -- and
+  // symmetricOutlineRounded only ever applies one shared radius to its
+  // whole `roundedCorners` list.
+  const middle = rightPoints.slice(1, -1);
+  const left = middle.slice().reverse().map(([x, y]) => [2 * CENTER_X - x, y]);
+  const full = [...rightPoints, ...left];
+  const radiusByPoint = new Map();
+  for (const [x, y] of NB_SHOULDER_CORNERS) {
+    radiusByPoint.set(`${x},${y}`, NB_ROUND_RADIUS);
+    radiusByPoint.set(`${2 * CENTER_X - x},${y}`, NB_ROUND_RADIUS);
+  }
+  for (const [x, y] of bumpCorners) {
+    radiusByPoint.set(`${x},${y}`, NB_ENGINE_ROUND_RADIUS);
+    radiusByPoint.set(`${2 * CENTER_X - x},${y}`, NB_ENGINE_ROUND_RADIUS);
+  }
+  return polyRounded(full, radiusByPoint);
+}
+
+const narrowbodyOutline = buildNarrowbodyOutline([1 / 3]);
+const narrowbodyPath = narrowbodyOutline;
 
 // widebody2 and widebody3 are the exact same shape as narrowbody, scaled up
 // by ICON_SIZE_MULTIPLIERS alone (1.25x) rather than drawn as distinct
@@ -322,17 +371,11 @@ const narrowbodyPath = combine(
 const widebody2Path = narrowbodyPath;
 const widebody3Path = narrowbodyPath;
 
-// widebody4 reuses the same bare outline too, but with a second nacelle per
-// wing (four-engine jumbos -- 747/A380/A340/Il-96 -- are exactly this
-// icon's real-world examples) at 1/3 and 2/3 of the way out to the
-// wingtip, i.e. fuselage-engine-engine-wingtip at even spacing.
-const widebody4Path = combine(
-  narrowbodyOutline,
-  polyAllRounded(nacelleAt(1 / 3), NB_ENGINE_ROUND_RADIUS),
-  polyAllRounded(mirrored(nacelleAt(1 / 3)), NB_ENGINE_ROUND_RADIUS),
-  polyAllRounded(nacelleAt(2 / 3), NB_ENGINE_ROUND_RADIUS),
-  polyAllRounded(mirrored(nacelleAt(2 / 3)), NB_ENGINE_ROUND_RADIUS),
-);
+// widebody4 is the same airframe with a second nacelle per wing (four-engine
+// jumbos -- 747/A380/A340/Il-96 -- are exactly this icon's real-world
+// examples) at 1/3 and 2/3 of the way out to the wingtip, i.e.
+// fuselage-engine-engine-wingtip at even spacing.
+const widebody4Path = buildNarrowbodyOutline([1 / 3, 2 / 3]);
 
 // Light single-engine GA (Cessna 152/172 class), rebuilt against a real
 // top-down reference rather than the generic wingedOutline dart: three
@@ -432,7 +475,7 @@ const bizjetBody = symmetricOutline([
   [CENTER_X, 18.0],                     // tail cone
 ]);
 // Fuselage-mounted engine pod -- pointed front and back, unlike the
-// wing-leading-edge nacelles elsewhere in this file (nacelleAt()); those
+// wing-leading-edge nacelles elsewhere in this file (nacelleBump()); those
 // sit astride a wing's leading edge, these sit alongside the fuselage
 // itself, close against the boom, just ahead of the tailplane root.
 const bizjetEngineRight = [
@@ -603,7 +646,7 @@ const cargoJetOutline = symmetricOutlineRounded([
 
 // Podded turbofan astride the wing's leading edge, two per wing (1/3 and
 // 2/3 of the way to the tip, same fraction-of-span placement convention as
-// nacelleAt/turbopropEngineAt) -- no propeller-disc bar, and a longer pod
+// nacelleBump/turbopropEngineAt) -- no propeller-disc bar, and a longer pod
 // than either of those (a big turbofan is a long cylinder, not a stubby
 // nacelle).
 function jetPodAt(spanFraction) {

@@ -39,14 +39,25 @@ Added to as they come up; picked up in a later stage when relevant.
     classification, per-kind size, `NON_ROTATING_ICON_IDS` rotation
     behavior, color/label preservation across a kind change, and the
     settings-driven resize path all confirmed correct.
-    `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()` (an animated-rotor
-    mechanism for helicopter/drone, both fully worked out, demoed with a
-    real CSS spin on `/dev/icons`'s "Spinning-rotor demo" section)
-    deliberately was **not** part of this wiring pass -- still a separate,
-    later decision, since it needs multiple SVG elements per marker plus a
-    running CSS animation, which `getIconPath()`'s single-`<path>`
-    contract and `aircraft-icon-live.js`'s current DOM structure don't
-    support yet.
+    **Update (2026-07-30): `SPINNING_ROTOR_ICON_IDS`/`getIconRotorPaths()`
+    is now wired into the live map too.** `aircraft-icon-live.js`'s
+    `iconSvg()` renders the rotor group(s) (blur disc + blade `<g
+    class="mlpr-plane-rotor">`) plus the kind's static path for helicopter/
+    drone, instead of `getIconPath()`'s single combined path -- everything
+    still lives inside the same outer `<g fill stroke>`, so
+    `setPlaneColor`'s `element.querySelector('g')` keeps matching the
+    outer one (first `<g>` in document order) unchanged. The actual spin
+    (`style.css`'s `.mlpr-plane-rotor` + `@keyframes
+    mlpr-plane-rotor-spin`) composes fine with the icon's own heading
+    rotation on the parent `<svg>` since CSS transforms on nested elements
+    are independent -- a helicopter's blades spin *and* the whole icon
+    still turns to face its track. Spin duration is read from
+    `SUGGESTED_SPIN_DURATION_S` via an inline custom property per element,
+    not hardcoded in the stylesheet, so the two can't drift apart.
+    `prefers-reduced-motion: reduce` disables it. Verified with a
+    standalone DOM harness (this sandbox has no WebGL) confirming the
+    animation is actually applied and the blade transform changes over
+    time, not just that markup exists.
   - **Stage 3** (mostly done, 2026-07-29): `data/icon-types.json` expanded
     from Stage 1/2's ~30-entry illustrative sample to 246 entries (216
     exact + 27 prefix + 3 military-only), hand-composed from general

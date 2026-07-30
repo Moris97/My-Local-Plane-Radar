@@ -88,6 +88,47 @@ html, body {
   transform-origin: center center;
 }
 
+/* Spinning rotor/propeller blades for helicopter/drone markers
+   (aircraft-icon-live.js's iconSvg, plane-icons.js's
+   SPINNING_ROTOR_ICON_IDS/getIconRotorPaths) -- kept deliberately narrow to
+   those two kinds only, see plane-icons.js for why. `transform-box:
+   fill-box` + `transform-origin: center` rotates each blade group around
+   its own bounding-box center (by construction exactly the rotor's real
+   center, both helicopterBladesPath and droneBladeAt() are built symmetric
+   around it) without needing a per-instance inline transform-origin. This
+   composes fine with the icon's own heading rotation on the parent <svg>
+   (a helicopter's blades spin *and* the whole icon still turns to face its
+   track) since CSS transforms on nested elements are independent. Spin
+   duration comes from plane-icons.js's SUGGESTED_SPIN_DURATION_S via an
+   inline custom property set per element, not hardcoded here, so the two
+   can't drift apart. */
+.mlpr-plane-rotor {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: mlpr-plane-rotor-spin var(--mlpr-rotor-spin-duration, 0.5s) linear infinite;
+}
+
+/* The soft swept-area disc behind each rotor -- deliberately no stroke
+   (unlike every other shape in this icon set) since it's meant to read as
+   a translucent blur, not a hard-edged part of the airframe; the ancestor
+   `<g stroke="#05070a">` in iconSvg would otherwise outline it like
+   everything else. */
+.mlpr-plane-rotor-disc {
+  stroke: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mlpr-plane-rotor {
+    animation: none;
+  }
+}
+
+@keyframes mlpr-plane-rotor-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Selection indicator: a soft, breathing halo behind the icon, shown only
    while .mlpr-plane-selected is toggled on the marker (app.js's
    setSelectionHighlight). Deliberately achromatic (see aircraft-icon.js's

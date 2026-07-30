@@ -4,6 +4,7 @@ import {
 } from '/js/plane-icons.js';
 import { ICONS as OLD_ICONS } from '/js/aircraft-icon.js';
 import { colorForAltitude } from '/js/trail.js';
+import { colorForElapsed } from '/js/aircraft-color.js';
 import { classifyIconKind, loadIconTypes } from '/js/icon-classify.js';
 import { ICON_SIZE_MIN, ICON_SIZE_MAX, ICON_SIZE_DEFAULT } from '/js/settings-state.js';
 
@@ -123,16 +124,30 @@ function rotorDemoSvg(kind, sizePx) {
   </svg>`;
 }
 
+// Same signalLoss-mode endpoints the live map actually fades between
+// (aircraft-color.js's colorForElapsed) -- reading them off that function
+// with trivial (0, 1) bounds rather than duplicating the FRESH_COLOR/
+// STALE_COLOR literals here, so this can't silently drift from what the
+// map really shows if that gradient is ever retuned.
+const ROTOR_DEMO_COLORS = [
+  { label: 'default', color: null },
+  { label: 'fresh (signal-loss green)', color: colorForElapsed(0, 0, 1) },
+  { label: 'stale (signal-loss red)', color: colorForElapsed(1, 0, 1) },
+];
+
 function renderRotorDemo() {
   const container = document.getElementById('rotor-demo-row');
   container.innerHTML = '';
   for (const kind of SPINNING_ROTOR_ICON_IDS) {
-    const card = document.createElement('div');
-    card.className = 'icon-card rotor-demo-card';
-    card.dataset.bg = currentBg;
-    card.style.setProperty('--spin-duration', `${SUGGESTED_SPIN_DURATION_S}s`);
-    card.innerHTML = `${rotorDemoSvg(kind, 96)}<div class="label">${kind} (${SUGGESTED_SPIN_DURATION_S}s/rev)</div>`;
-    container.appendChild(card);
+    for (const { label, color } of ROTOR_DEMO_COLORS) {
+      const card = document.createElement('div');
+      card.className = 'icon-card rotor-demo-card';
+      card.dataset.bg = currentBg;
+      card.style.setProperty('--spin-duration', `${SUGGESTED_SPIN_DURATION_S}s`);
+      if (color) card.style.color = color;
+      card.innerHTML = `${rotorDemoSvg(kind, 96)}<div class="label">${kind} · ${label}</div>`;
+      container.appendChild(card);
+    }
   }
 }
 

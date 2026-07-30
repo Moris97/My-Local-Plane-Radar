@@ -10,9 +10,25 @@
 // aircraft-icon.js itself is untouched and still used for /dev/icons' own
 // old-vs-new comparison row -- this module does NOT replace it on disk,
 // it replaces which module app.js imports from.
-import { VIEW_BOX, getIconPath, getIconSizeMultiplier, NON_ROTATING_ICON_IDS } from './plane-icons.js';
+import {
+  VIEW_BOX, getIconPath, getIconSizeMultiplier, NON_ROTATING_ICON_IDS,
+  SPINNING_ROTOR_ICON_IDS, SUGGESTED_SPIN_DURATION_S, getIconRotorPaths,
+} from './plane-icons.js';
 import { classifyIconKind } from './icon-classify.js';
 import { getSettings } from './settings-state.js';
+
+// One rotor group: a soft translucent swept-area disc plus the actual
+// blade shape, spinning together (style.css's .mlpr-plane-rotor). Both
+// `fill="currentColor"` (no stroke of their own -- see style.css) so they
+// still follow setPlaneColor like the rest of the marker. Matches the
+// technique worked out and confirmed-good on /dev/icons' "Spinning-rotor
+// demo" section (plane-icons.js's SPINNING_ROTOR_ICON_IDS comment) --
+// nothing new designed here, just wired into the live marker.
+function rotorGroupSvg({ center: [cx, cy], bladePath, suggestedDiscRadius }) {
+  return `
+    <circle class="mlpr-plane-rotor-disc" cx="${cx}" cy="${cy}" r="${suggestedDiscRadius}" fill="currentColor" opacity="0.22"/>
+    <g class="mlpr-plane-rotor" style="--mlpr-rotor-spin-duration: ${SUGGESTED_SPIN_DURATION_S}s"><path d="${bladePath}" fill="currentColor"/></g>`;
+}
 
 // Same <g fill+stroke> wrapper technique as the old module (a dark outline
 // for contrast against varied map backgrounds) around the new module's
@@ -20,13 +36,23 @@ import { getSettings } from './settings-state.js';
 // structure style.css and app.js both depend on: .mlpr-plane-glow (a
 // sibling *before* the svg so it paints behind it, see style.css) and
 // .mlpr-plane-label (a sibling *after* it, so it never rotates with the
-// icon's own heading transform).
+// icon's own heading transform). For SPINNING_ROTOR_ICON_IDS kinds
+// (helicopter/drone), the body is the rotor group(s) plus the kind's
+// static (non-blade) path instead of getIconPath()'s single combined
+// path -- everything still lives inside the same outer <g>, so
+// setPlaneColor's `element.querySelector('g')` (which matches the first
+// <g> in document order, i.e. this outer one, even though rotor groups are
+// also <g>s nested inside it) keeps working unchanged.
 function iconSvg(kind) {
+  const rotor = SPINNING_ROTOR_ICON_IDS.has(kind) ? getIconRotorPaths(kind) : null;
+  const body = rotor
+    ? `${rotor.rotors.map(rotorGroupSvg).join('')}<path d="${rotor.staticPath}"/>`
+    : `<path d="${getIconPath(kind)}"/>`;
   return `
 <div class="mlpr-plane-glow"></div>
 <svg viewBox="${VIEW_BOX}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <g fill="#3ddc84" stroke="#05070a" stroke-width="0.5">
-    <path d="${getIconPath(kind)}"/>
+    ${body}
   </g>
 </svg>
 <div class="mlpr-plane-label"></div>
