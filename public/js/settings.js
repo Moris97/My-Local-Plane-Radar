@@ -87,6 +87,17 @@ function renderSettingsForm(container) {
         <label><input type="radio" name="mlpr-units" value="imperial" ${settings.units === 'imperial' ? 'checked' : ''}> ${t('imperial')}</label>
         <label><input type="radio" name="mlpr-units" value="metric" ${settings.units === 'metric' ? 'checked' : ''}> ${t('metric')}</label>
       </fieldset>
+
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('language')}</legend>
+        <label>
+          <select id="mlpr-language">
+            <option value="auto" ${settings.language === 'auto' ? 'selected' : ''}>${t('languageAuto')}</option>
+            <option value="en" ${settings.language === 'en' ? 'selected' : ''}>English</option>
+            <option value="pl" ${settings.language === 'pl' ? 'selected' : ''}>Polski</option>
+          </select>
+        </label>
+      </fieldset>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="map" style="display:none">
@@ -525,6 +536,17 @@ function wireDisplaySettings(container) {
   for (const input of container.querySelectorAll('input[name="mlpr-units"]')) {
     input.addEventListener('change', (event) => updateSettings({ units: event.target.value }));
   }
+
+  // A reload, not a live re-render -- translations are baked into static
+  // markup (button labels, aria-labels, document.documentElement.lang...)
+  // set once at render time all over the app, not something there's one
+  // central place to redo live. Simplest way to guarantee every corner of
+  // the UI actually picks up the new language consistently, rather than
+  // risking some already-rendered panel being left in the old one.
+  container.querySelector('#mlpr-language').addEventListener('change', (event) => {
+    updateSettings({ language: event.target.value });
+    location.reload();
+  });
 
   container.querySelector('#mlpr-alt-min').addEventListener('change', (event) => {
     updateSettings({ altitudeFilterMin: event.target.value === '' ? null : Number(event.target.value) });

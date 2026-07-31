@@ -14,6 +14,16 @@ export const ICON_SIZE_DEFAULT = 40;
 
 const defaults = {
   units: 'imperial',
+  // 'auto' follows the browser's own language (navigator.language) --
+  // see i18n.js's detectLanguage. Any other value here is a manual
+  // override that wins over that auto-detection. Changing it needs a
+  // page reload to actually apply (settings.js's language <select> does
+  // this itself right after saving) -- translations are baked into
+  // static markup all over the app (button labels, aria-labels,
+  // document.documentElement.lang...) at render time, not re-evaluated
+  // live, so there's no single place to "just re-render everything" the
+  // way a live setting like units can.
+  language: 'auto',
   altitudeFilterMin: null,
   altitudeFilterMax: null,
   basemapMode: 'online', // 'online' (OpenFreeMap) | 'offline' (Natural Earth)

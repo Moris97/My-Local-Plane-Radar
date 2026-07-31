@@ -1,3 +1,5 @@
+import { getSettings } from './settings-state.js';
+
 const DICTIONARIES = {
   en: {
     list: 'List',
@@ -9,6 +11,8 @@ const DICTIONARIES = {
     aircraftCount: 'Aircraft',
     messagesPerSecond: 'Messages/sec',
     units: 'Units',
+    language: 'Language',
+    languageAuto: 'Auto (browser language)',
     altitudeFilter: 'Altitude filter',
     showMoreDetails: 'Show more details',
     noAircraft: 'No aircraft in range',
@@ -287,6 +291,8 @@ const DICTIONARIES = {
     aircraftCount: 'Samoloty',
     messagesPerSecond: 'Wiadomości/s',
     units: 'Jednostki',
+    language: 'Język',
+    languageAuto: 'Automatycznie (język przeglądarki)',
     altitudeFilter: 'Filtr wysokości',
     showMoreDetails: 'Pokaż więcej szczegółów',
     noAircraft: 'Brak samolotów w zasięgu',
@@ -558,6 +564,12 @@ const DICTIONARIES = {
 };
 
 function detectLanguage() {
+  // A manual override (Settings -> General) wins over the browser's own
+  // language -- settings-state.js has no imports of its own, so reading
+  // it here can't create a circular import.
+  const override = getSettings().language;
+  if (override && override !== 'auto' && DICTIONARIES[override]) return override;
+
   const lang = (navigator.language || 'en').slice(0, 2).toLowerCase();
   return DICTIONARIES[lang] ? lang : 'en';
 }

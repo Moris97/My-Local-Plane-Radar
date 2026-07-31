@@ -637,19 +637,11 @@ function showInfoPopup(hex) {
     `<button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`;
 
   // Same aircraft's popup is already open -- refresh position/content on the
-  // *existing* instance instead of remove()-ing and creating a new one.
-  // This used to unconditionally recreate the popup on every call, which
-  // applyAircraftUpdate makes once per position tick for the selected
-  // aircraft (so roughly once a second for active traffic) -- MapLibre's
-  // Popup defaults to focusAfterOpen: true, and .addTo() is what triggers
-  // that focus grab, so recreating it that often kept silently stealing
-  // focus away from anything else on the page. Reported live (2026-07-28):
-  // impossible to pick an option from an open native <select> (List's
-  // Configure view) while a popup's aircraft kept updating in the
-  // background -- every tick force-closed the dropdown. setLngLat/setHTML
-  // on an already-mounted popup don't call .addTo() again, so they don't
-  // re-trigger that focus grab; only a genuinely new popup (a different
-  // aircraft selected, or none open yet) should.
+  // *existing* instance instead of remove()-ing and creating a new one, so
+  // applyAircraftUpdate's once-per-tick call for the selected aircraft (so
+  // roughly once a second for active traffic) doesn't tear down and rebuild
+  // the whole popup every time; only a genuinely new popup (a different
+  // aircraft selected, or none open yet) needs that.
   if (activePopup && activePopupHex === hex) {
     activePopup.setLngLat(state.lastLngLat).setHTML(html);
     return;
@@ -664,7 +656,26 @@ function showInfoPopup(hex) {
   // user-adjustable icon size (not a fixed constant) so it still clears the
   // marker at any size setting.
   const popupOffset = Math.round(getSettings().aircraftIconSize / 2) + 7;
-  activePopup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, offset: popupOffset })
+  // focusAfterOpen: false -- MapLibre's Popup defaults this to true, and
+  // its effect (_focusFirstElement()) isn't only wired to .addTo() the way
+  // an earlier version of this comment assumed: setHTML()/setDOMContent()
+  // call it too, on *every* call, addTo() or not. That means the "reuse
+  // the existing instance" branch above -- added specifically to stop
+  // .addTo() from re-stealing focus every tick -- was still calling
+  // setHTML() every tick, which kept stealing it anyway via that second,
+  // unguarded path. Reported again 2026-08-01 (still closing an open
+  // <select> anywhere on the page -- by then also the new language
+  // picker in Settings -- on every position update), traced by reading
+  // maplibre-gl's actual Popup source rather than re-guessing the already
+  // -documented-but-incomplete theory. This popup was never the app's
+  // real keyboard-accessible surface anyway -- panels.js's own trapFocus
+  // handles that properly for the full details panel "Show more details"
+  // opens into -- so disabling MapLibre's focus grab entirely here, for
+  // both the initial open and every refresh, is correct, not just a
+  // workaround.
+  activePopup = new maplibregl.Popup({
+    closeButton: true, closeOnClick: false, offset: popupOffset, focusAfterOpen: false,
+  })
     .setLngLat(state.lastLngLat)
     .setHTML(html)
     .addTo(map);

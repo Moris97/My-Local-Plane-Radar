@@ -662,6 +662,22 @@ not a special case that bypasses it.
   transition, **not** on a direct switch between panel and modal (e.g.
   List → Stats), which would otherwise capture focus already inside the
   panel being switched *away* from.
+- **Manual language override** (`language` in `settings-state.js`,
+  Settings → General, default `'auto'`): `i18n.js`'s `detectLanguage()`
+  checks this before falling back to `navigator.language` —
+  `settings-state.js` has no imports of its own, so `i18n.js` importing
+  `getSettings` from it can't create a circular import. Applying a change
+  is a straight `location.reload()` right after saving
+  (`settings.js`'s `#mlpr-language` handler), not a live re-render:
+  translations are baked into static markup all over the app (button
+  labels, `aria-label`s, `document.documentElement.lang` above) at
+  render time, not re-evaluated on the fly, so there's no single place
+  to redo that live without risking some already-rendered panel being
+  left in the old language. The two language options in the `<select>`
+  are shown in their own native name ("English"/"Polski", not run
+  through `t()`) — the standard convention for a language picker, so
+  they stay readable regardless of whichever language is currently
+  active.
 - **`.mlpr-info-icon` tooltips are real `<button>`s, not
   `<span tabindex="0">`** — some mobile browsers don't reliably move focus
   to a plain focusable span on tap (which is what the CSS `:hover`/`:focus`
@@ -683,22 +699,38 @@ not a special case that bypasses it.
   half the icon. `showInfoPopup` **reuses the existing popup instance**
   (`setLngLat`/`setHTML` on `activePopup`) when it's already showing the
   currently-selected aircraft, only `.remove()`-ing and creating a genuinely
-  new one when the selection changes. It used to unconditionally recreate
-  the popup on every call, which `applyAircraftUpdate` triggers once per
-  position tick for the selected aircraft (so roughly once a second for
-  active traffic) — MapLibre's `Popup` defaults to `focusAfterOpen: true`,
-  and `.addTo()` is what triggers that focus grab, so recreating it that
-  often kept silently stealing focus away from anything else on the page.
-  Reported live (2026-07-28): impossible to pick an option from an open
-  native `<select>` (List's Configure view, but this would have hit *any*
-  focusable control anywhere in the app) while a popup's aircraft kept
-  updating in the background — every tick force-closed the dropdown, since
-  browsers close an open `<select>` when focus moves elsewhere.
-  `setLngLat`/`setHTML` on an already-mounted popup don't call `.addTo()`
-  again, so reusing the instance avoids re-triggering the grab; a new
-  module-level `activePopupHex` (kept in sync everywhere `activePopup` is
-  cleared) is what lets `showInfoPopup` tell "same aircraft, just
-  refresh in place" apart from "different aircraft, need a new popup".
+  new one when the selection changes — `applyAircraftUpdate` calls this once
+  per position tick for the selected aircraft (so roughly once a second for
+  active traffic), and a new module-level `activePopupHex` (kept in sync
+  everywhere `activePopup` is cleared) is what lets `showInfoPopup` tell
+  "same aircraft, just refresh in place" apart from "different aircraft,
+  need a new popup". The `Popup` is constructed with **`focusAfterOpen:
+  false`**, overriding MapLibre's own default of `true`. First reported live
+  2026-07-28 (impossible to pick an option from an open native `<select>`
+  anywhere in the app while a popup's aircraft kept updating in the
+  background — every tick force-closed whatever dropdown was open, since
+  browsers close an open `<select>` when focus moves elsewhere) and *fixed*
+  at the time by adding the reuse-the-instance branch above, on the theory
+  that `.addTo()` was the only thing that calls MapLibre's internal
+  `_focusFirstElement()` and that avoiding it on the reuse path would be
+  enough. That theory was wrong, just incompletely: reported again
+  2026-08-01, identical symptom, still happening on every tick despite the
+  reuse branch already being in place. Reading MapLibre's actual `Popup`
+  source (not re-guessing) showed `setDOMContent()` — called internally by
+  *every* `setHTML()`, including the reuse path's own `setHTML()` call —
+  *also* calls `_focusFirstElement()` unconditionally, gated only by
+  `options.focusAfterOpen`, completely independent of whether `.addTo()`
+  ever ran. So the reuse branch stopped one focus-stealing path but not the
+  other, and the *other* one is the one that actually fires every tick.
+  `focusAfterOpen: false` disables `_focusFirstElement()` at its one real
+  gate, fixing both paths at once — this popup was never the app's actual
+  keyboard-accessible surface anyway (that's `panels.js`'s own `trapFocus`,
+  for the full details panel "Show more details" opens into), so turning
+  off MapLibre's own focus grab here entirely is correct, not a workaround.
+  If this class of bug shows up a third time, suspect a *third* MapLibre
+  code path calling `_focusFirstElement()` before assuming the fix is
+  wrong — grep the actual installed `node_modules/maplibre-gl` source for
+  `_focusFirstElement`, don't re-derive its call sites from memory.
   **`formatAircraftInfo()`'s output is HTML-escaped** (`app.js`'s own
   `escapeHtml`, same pattern as `aircraft-panel.js`/`stats.js`) before
   going into `setHTML()` — `aircraft.flight`/`typeCode` ultimately come
@@ -1064,7 +1096,7 @@ on the right side of this line:
 
 | Tab | Contents | Stored |
 |---|---|---|
-| General | units | `localStorage` |
+| General | units, language | `localStorage` |
 | Map | basemap mode, map theme, trails | `localStorage` |
 | Aircraft | marker color mode, icon size, altitude filter | `localStorage` |
 | Notifications | notification rules, ntfy topic, watch list | SQLite (shared) |
