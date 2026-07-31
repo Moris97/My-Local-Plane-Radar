@@ -50,6 +50,8 @@ function renderGate(container, onUnlocked) {
       const { token } = await response.json();
       storeToken(token);
       onUnlocked();
+    } else if (response.status === 429) {
+      errorEl.textContent = t('tooManyAttempts');
     } else {
       errorEl.textContent = t('wrongPassword');
     }
@@ -298,12 +300,97 @@ async function renderServerTab(root) {
         <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
       </div>
     </fieldset>
+
+    <fieldset class="mlpr-settings-group">
+      <legend>${t('configBackup')}</legend>
+      <p class="mlpr-home-status">${t('configBackupHint')}</p>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-config-export">${t('downloadBackup')}</button>
+        <button type="button" id="mlpr-config-import-btn">${t('restoreBackup')}</button>
+        <input type="file" id="mlpr-config-import-file" accept="application/json" style="display:none">
+      </div>
+      <p id="mlpr-config-backup-status" class="mlpr-home-status"></p>
+      <p id="mlpr-config-backup-error" class="mlpr-gate-error"></p>
+    </fieldset>
   `;
 
   const onUnauthorized = () => renderServerTab(root);
   wireServerPort(root, onUnauthorized);
   wireHomeLocation(root, onUnauthorized);
+  wireConfigBackup(root, onUnauthorized);
   renderSecuritySection(root);
+}
+
+function wireConfigBackup(container, onUnauthorized) {
+  const exportBtn = container.querySelector('#mlpr-config-export');
+  const importBtn = container.querySelector('#mlpr-config-import-btn');
+  const fileInput = container.querySelector('#mlpr-config-import-file');
+  const statusEl = container.querySelector('#mlpr-config-backup-status');
+  const errorEl = container.querySelector('#mlpr-config-backup-error');
+
+  exportBtn.addEventListener('click', async () => {
+    statusEl.textContent = '';
+    errorEl.textContent = '';
+    const response = await authedFetch('/api/settings/export', undefined, onUnauthorized);
+    if (!response) return;
+    if (!response.ok) {
+      errorEl.textContent = t('configExportError');
+      return;
+    }
+    const dump = await response.json();
+    // Plain client-side "download this JSON as a file" -- a Blob + a
+    // throwaway <a download> click, the standard no-dependency technique;
+    // nothing here is ever proxied through anywhere, it's a straight
+    // save of the response body already sitting in memory.
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `mlpr-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  });
+
+  importBtn.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files?.[0];
+    fileInput.value = '';
+    if (!file) return;
+
+    statusEl.textContent = '';
+    errorEl.textContent = '';
+
+    // Same "this is hard to walk back, confirm first" precedent the
+    // server-port change already set -- restoring an old backup can just
+    // as easily lock someone out (a different/no Settings password, a
+    // stale port) as a mistyped port can.
+    if (!window.confirm(t('confirmConfigImport'))) return;
+
+    let dump;
+    try {
+      dump = JSON.parse(await file.text());
+    } catch {
+      errorEl.textContent = t('configImportError');
+      return;
+    }
+
+    const response = await authedFetch(
+      '/api/settings/import',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dump),
+      },
+      onUnauthorized,
+    );
+    if (!response) return;
+    if (!response.ok) {
+      errorEl.textContent = t('configImportError');
+      return;
+    }
+    statusEl.textContent = t('configImportSuccess');
+  });
 }
 
 // Gated the same way as the Server tab (and for the same reason -- see

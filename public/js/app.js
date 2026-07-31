@@ -20,6 +20,18 @@ import { getSettings, onSettingsChange } from './settings-state.js';
 import { openPanel } from './panels.js';
 import { formatAltitude, formatSpeed } from './units.js';
 
+// aircraft.flight/typeCode ultimately come from readsb's aircraft.json --
+// trusted when read from the local file, but HttpSource fetches the same
+// JSON over plain, unauthenticated HTTP (the documented "dev on WSL against
+// live data" mode), where anyone else on the LAN can MITM/spoof the
+// response. formatAircraftInfo() below builds an HTML string from these
+// fields for MapLibre's Popup.setHTML() (= innerHTML), so they need the
+// same escaping aircraft-panel.js/stats.js already apply to aircraft data
+// everywhere else.
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
 
@@ -587,19 +599,33 @@ function buildAircraftLabel(aircraft, fields, units) {
   return parts.join(' · ');
 }
 
+// A labeled chip, same markup aircraft-panel.js's cluster rows already use
+// (.mlpr-detail-chip/-chip b) so the popup reads as the same visual
+// language as the full details panel it opens into, not a second one.
+function popupChip(label, value) {
+  return `<span class="mlpr-detail-chip"><b>${escapeHtml(label)}</b> ${value}</span>`;
+}
+
 function formatAircraftInfo(aircraft) {
   const { units } = getSettings();
-  const lines = [aircraft.flight || aircraft.hex];
-  if (aircraft.typeCode) lines.push(`${t('type')}: ${aircraft.typeCode}`);
+  const callsign = escapeHtml(aircraft.flight || aircraft.hex);
+
+  const chips = [];
+  if (aircraft.typeCode) chips.push(popupChip(t('type'), escapeHtml(aircraft.typeCode)));
   if (aircraft.onGround) {
-    lines.push(t('onGround'));
+    // A standalone badge, not a labeled chip -- "on ground" isn't a value
+    // for some other field, it's its own flag, same "flag" treatment
+    // aircraft-panel.js's boolean tiles (military/alert/...) already get.
+    chips.push(`<span class="mlpr-popup-badge">${escapeHtml(t('onGround'))}</span>`);
   } else {
     const altitude = formatAltitude(aircraft.altBaro, units);
-    if (altitude) lines.push(`${t('altitude')}: ${altitude}`);
+    if (altitude) chips.push(popupChip(t('altitude'), altitude));
   }
   const speed = formatSpeed(aircraft.gs, units);
-  if (speed) lines.push(`${t('speed')}: ${speed}`);
-  return lines.join('<br>');
+  if (speed) chips.push(popupChip(t('speed'), speed));
+
+  const chipsHtml = chips.length ? `<div class="mlpr-popup-chips">${chips.join('')}</div>` : '';
+  return `<div class="mlpr-popup-callsign">${callsign}</div>${chipsHtml}`;
 }
 
 function showInfoPopup(hex) {
@@ -608,7 +634,7 @@ function showInfoPopup(hex) {
 
   const html =
     `<div class="mlpr-popup">${formatAircraftInfo(state.lastAircraft)}` +
-    `<br><button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`;
+    `<button type="button" id="mlpr-more-details">${t('showMoreDetails')}</button></div>`;
 
   // Same aircraft's popup is already open -- refresh position/content on the
   // *existing* instance instead of remove()-ing and creating a new one.

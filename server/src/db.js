@@ -98,6 +98,17 @@ export function deleteConfig(key) {
   db.prepare('DELETE FROM config WHERE key = ?').run(key);
 }
 
+// Every row in `config` as a plain {key: rawValue} object, values left as
+// the raw TEXT column content -- some keys store a JSON blob (notification
+// settings, watch list, smart-home settings...), others a plain string
+// (home lat/lon, ntfy topic, port...), and this is generic over both:
+// config-backup.js's export/import round-trips the raw string either way
+// without needing to know which keys are which.
+export function getAllConfigEntries() {
+  const rows = db.prepare('SELECT key, value FROM config').all();
+  return Object.fromEntries(rows.map((row) => [row.key, row.value]));
+}
+
 export function upsertDailyStats(
   date,
   {

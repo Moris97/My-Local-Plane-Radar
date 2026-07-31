@@ -239,21 +239,129 @@ html, body {
   background: rgba(255, 255, 255, 0.78);
 }
 
-.mlpr-popup .maplibregl-popup-content {
-  background: #0a0f14;
+/* The aircraft click popup, styled to match the rest of the app's card
+   language (aircraft-panel.js's .mlpr-detail-tile / stats.js's .mlpr-tile:
+   #0e161c body on #1c2e3a, muted #7fa3b3 labels, bright #d8f3e6 values).
+   Targets .maplibregl-popup-content directly (MapLibre's own outer
+   wrapper) rather than nesting under .mlpr-popup -- an earlier version of
+   this rule was written as `.mlpr-popup .maplibregl-popup-content`,
+   expecting .maplibregl-popup-content to be a *descendant* of our own
+   .mlpr-popup div, but MapLibre actually nests it the other way around
+   (.mlpr-popup lives *inside* .maplibregl-popup-content), so that
+   selector never matched anything -- the popup was left with MapLibre's
+   own default white background the whole time. Harmless-looking on its
+   own, but combined with this file's :root { color-scheme: dark } (added
+   later, for native checkboxes), unstyled text with no explicit color
+   resolves to a *light* default (the dark-scheme CanvasText value) --
+   genuinely invisible light text on that leftover white background, not
+   just an off-brand white box. Reported live 2026-07-31, caught by
+   reading the actual DOM MapLibre builds rather than guessing. This app
+   only ever shows one kind/style of popup, so overriding the class
+   directly (no extra scoping) is simplest and correct. */
+.maplibregl-popup-content {
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
   color: #d8f3e6;
   font: 13px/1.5 system-ui, sans-serif;
+  padding: 12px 14px;
+}
+
+/* Redraws the little triangle "tip" that points from the popup card to
+   the aircraft's exact map position -- MapLibre hardcodes it white
+   (`#fff`) per anchor direction (which side of the popup it's drawn on
+   depends on which corner MapLibre auto-picked to keep the popup on
+   screen), so every direction needs its own override, matching
+   .maplibregl-popup-content's own new background exactly so the tip
+   reads as part of the same card rather than a separate white sliver. */
+.maplibregl-popup-anchor-top .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-top-right .maplibregl-popup-tip {
+  border-bottom-color: #0e161c;
+}
+
+.maplibregl-popup-anchor-bottom .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-left .maplibregl-popup-tip,
+.maplibregl-popup-anchor-bottom-right .maplibregl-popup-tip {
+  border-top-color: #0e161c;
+}
+
+.maplibregl-popup-anchor-left .maplibregl-popup-tip {
+  border-right-color: #0e161c;
+}
+
+.maplibregl-popup-anchor-right .maplibregl-popup-tip {
+  border-left-color: #0e161c;
+}
+
+/* MapLibre's own close button is a plain unstyled "x" glyph -- inherits
+   whatever color happens to cascade in rather than anything chosen for
+   this card, so it needs an explicit one same as everything else here.
+   Muted like #panel-close's own icon, for the same "dismiss" role. */
+.maplibregl-popup-close-button {
+  color: #7fa3b3;
+  font-size: 16px;
+  padding: 2px 6px;
+}
+
+.maplibregl-popup-close-button:hover {
+  color: #d8f3e6;
+  background-color: rgba(255, 255, 255, 0.06);
+}
+
+.mlpr-popup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 150px;
+}
+
+.mlpr-popup-callsign {
+  font-size: 15px;
+  font-weight: 600;
+  color: #d8f3e6;
+}
+
+.mlpr-popup-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+}
+
+/* Same green flag/pill look as aircraft-panel.js's .mlpr-detail-flag
+   (boolean tiles like military/alert/spi) -- "on ground" is its own flag
+   here too, not a value paired with a label. */
+.mlpr-popup-badge {
+  color: #7fd8a8;
+  background: #123423;
+  border: 1px solid #245c3c;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+/* Reuses the exact chip look aircraft-panel.js's cluster rows already use
+   (.mlpr-detail-chip/-chip b) -- same "muted label, bright value" pattern
+   as everywhere else in this app, so the popup and the full details panel
+   it opens into read as the same visual language, not two different ones. */
+.mlpr-popup-chips .mlpr-detail-chip {
+  font-size: 13px;
 }
 
 #mlpr-more-details {
-  margin-top: 6px;
   background: #123423;
   color: #7fd8a8;
   border: 1px solid #245c3c;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 5px 10px;
   font-size: 12px;
   cursor: pointer;
+  align-self: flex-start;
+}
+
+#mlpr-more-details:hover {
+  background: #1a4630;
 }
 
 /* Fixed-positioning owner for the whole bottom-left corner stack (credits

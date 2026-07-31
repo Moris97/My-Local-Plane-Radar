@@ -72,3 +72,54 @@ test('removePassword invalidates previously issued tokens', () => {
   assert.equal(auth.isValidToken(token), false);
   assert.equal(auth.isPasswordSet(), false);
 });
+
+test('an IP is not locked out before any failed attempts', () => {
+  assert.equal(auth.isLockedOut('1.2.3.4'), false);
+});
+
+test('an IP is not locked out after fewer than the max failed attempts', () => {
+  for (let i = 0; i < 4; i++) auth.recordFailedAttempt('1.2.3.5');
+  assert.equal(auth.isLockedOut('1.2.3.5'), false);
+});
+
+test('an IP is locked out once it reaches the max failed attempts', () => {
+  for (let i = 0; i < 5; i++) auth.recordFailedAttempt('1.2.3.6');
+  assert.equal(auth.isLockedOut('1.2.3.6'), true);
+});
+
+test('a successful attempt clears a previously failing IP', () => {
+  for (let i = 0; i < 4; i++) auth.recordFailedAttempt('1.2.3.7');
+  auth.recordSuccessfulAttempt('1.2.3.7');
+  assert.equal(auth.isLockedOut('1.2.3.7'), false);
+});
+
+test('lockout expires after the lockout window', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  for (let i = 0; i < 5; i++) auth.recordFailedAttempt('1.2.3.8');
+  assert.equal(auth.isLockedOut('1.2.3.8'), true);
+  t.mock.timers.tick(6 * 60 * 1000);
+  assert.equal(auth.isLockedOut('1.2.3.8'), false);
+});
+
+test('a different IP is unaffected by another IP being locked out', () => {
+  for (let i = 0; i < 5; i++) auth.recordFailedAttempt('1.2.3.9');
+  assert.equal(auth.isLockedOut('1.2.3.10'), false);
+});
+
+test('pruneLoginAttempts removes only expired lockouts', (t) => {
+  t.mock.timers.enable({ apis: ['Date'] });
+  for (let i = 0; i < 5; i++) auth.recordFailedAttempt('1.2.3.11');
+  for (let i = 0; i < 2; i++) auth.recordFailedAttempt('1.2.3.12');
+  t.mock.timers.tick(6 * 60 * 1000);
+  auth.pruneLoginAttempts();
+  // The expired lockout is gone (a fresh attempt starts a new count, not
+  // an immediate re-lockout)...
+  auth.recordFailedAttempt('1.2.3.11');
+  assert.equal(auth.isLockedOut('1.2.3.11'), false);
+  // ...while an IP that was never locked out (just a couple of failures)
+  // is untouched by the prune.
+  auth.recordFailedAttempt('1.2.3.12');
+  auth.recordFailedAttempt('1.2.3.12');
+  auth.recordFailedAttempt('1.2.3.12');
+  assert.equal(auth.isLockedOut('1.2.3.12'), true);
+});

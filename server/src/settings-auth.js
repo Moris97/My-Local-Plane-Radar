@@ -6,6 +6,46 @@ const TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
 
 const activeTokens = new Map();
 
+// Brute-force guard on password verification (the login endpoint, and the
+// change-password endpoint's own currentPassword check -- both call
+// verifyPassword() and were equally guessable with unlimited attempts
+// before this). Keyed by request IP, in memory only (same "lost on
+// restart is fine" tradeoff as activeTokens) -- a home LAN app doesn't
+// need anything sturdier than a fixed threshold/lockout window, no
+// exponential backoff bookkeeping.
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_MS = 5 * 60 * 1000;
+
+const failedAttempts = new Map();
+
+export function isLockedOut(ip) {
+  const entry = failedAttempts.get(ip);
+  if (!entry || !entry.lockedUntil) return false;
+  if (Date.now() >= entry.lockedUntil) {
+    failedAttempts.delete(ip);
+    return false;
+  }
+  return true;
+}
+
+export function recordFailedAttempt(ip) {
+  const entry = failedAttempts.get(ip) ?? { count: 0, lockedUntil: null };
+  entry.count += 1;
+  if (entry.count >= MAX_FAILED_ATTEMPTS) entry.lockedUntil = Date.now() + LOCKOUT_MS;
+  failedAttempts.set(ip, entry);
+}
+
+export function recordSuccessfulAttempt(ip) {
+  failedAttempts.delete(ip);
+}
+
+export function pruneLoginAttempts() {
+  const now = Date.now();
+  for (const [ip, entry] of failedAttempts) {
+    if (entry.lockedUntil && now >= entry.lockedUntil) failedAttempts.delete(ip);
+  }
+}
+
 function hashPassword(password, salt) {
   return scryptSync(password, salt, 64).toString('hex');
 }

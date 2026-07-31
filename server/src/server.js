@@ -11,7 +11,11 @@ import { getEffectiveHome, setManualHome, clearManualHome } from './home.js';
 import { getNotificationSettings, updateNotificationSettings, getNtfyTopic, regenerateNtfyTopic, getSmartHomeSettings, updateSmartHomeSettings } from './notifications/settings.js';
 import { getWatchList, addWatchEntry, removeWatchEntry, validateWatchEntryInput } from './notifications/watchlist.js';
 import { reconfigureSmartHome, testSmartHomeConnection, publishSmartHomeEvent, isSmartHomeConnected } from './notifications/smart-home.js';
-import { isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken } from './settings-auth.js';
+import {
+  isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken,
+  isLockedOut, recordFailedAttempt, recordSuccessfulAttempt,
+} from './settings-auth.js';
+import { exportConfig, importConfig } from './config-backup.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange } from './stats-query.js';
 import { rangeStartMs, bucketGranularityForRange } from './time-buckets.js';
@@ -50,8 +54,18 @@ const mapDataDir = join(__dirname, '..', '..', 'data', 'naturalearth');
 // second, NODE_ENV-gated mechanism (see below).
 const devDir = join(__dirname, '..', '..', 'dev');
 
-export async function buildServer() {
-  const app = Fastify({ logger: true });
+export async function buildServer({ logger = true } = {}) {
+  const app = Fastify({ logger });
+
+  // No reason for this app to ever be framed by another site, and no
+  // reason for a browser to guess a response's type past what we already
+  // declare -- both cheap, no-downside hardening, applied to every
+  // response rather than picked route by route.
+  app.addHook('onSend', (request, reply, payload, done) => {
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('X-Content-Type-Options', 'nosniff');
+    done(null, payload);
+  });
 
   await app.register(fastifyStatic, {
     root: publicDir,
@@ -120,19 +134,37 @@ export async function buildServer() {
 
   app.get('/api/settings-auth/status', async () => ({ passwordSet: isPasswordSet() }));
 
+  // Both routes below call verifyPassword() with attacker-suppliable input
+  // and unlimited attempts would make the password guessable by brute
+  // force -- guarded by the same per-IP lockout (settings-auth.js's
+  // isLockedOut/recordFailedAttempt/recordSuccessfulAttempt), checked
+  // before verifyPassword() runs so a locked-out client can't even spend
+  // a guess while waiting out the lockout.
   app.post('/api/settings-auth/login', async (request, reply) => {
+    if (isLockedOut(request.ip)) {
+      return reply.code(429).send({ error: 'Too many failed attempts, try again later' });
+    }
     const { password } = request.body ?? {};
     if (!verifyPassword(password)) {
+      recordFailedAttempt(request.ip);
       return reply.code(401).send({ error: 'Incorrect password' });
     }
+    recordSuccessfulAttempt(request.ip);
     return { token: issueToken() };
   });
 
   app.post('/api/settings-auth/password', async (request, reply) => {
     const { newPassword, currentPassword } = request.body ?? {};
 
-    if (isPasswordSet() && !verifyPassword(currentPassword)) {
-      return reply.code(401).send({ error: 'Current password is incorrect' });
+    if (isPasswordSet()) {
+      if (isLockedOut(request.ip)) {
+        return reply.code(429).send({ error: 'Too many failed attempts, try again later' });
+      }
+      if (!verifyPassword(currentPassword)) {
+        recordFailedAttempt(request.ip);
+        return reply.code(401).send({ error: 'Current password is incorrect' });
+      }
+      recordSuccessfulAttempt(request.ip);
     }
 
     if (!newPassword) {
@@ -203,6 +235,25 @@ export async function buildServer() {
     // see the comment in index.js on why we don't self-restart.
     const { port, source } = resolvePort();
     return { port, source, restartRequired: true };
+  });
+
+  // A full config backup/restore (config-backup.js) -- gated the same as
+  // /api/settings and /api/server/port even though it also bundles things
+  // that normally aren't gated on their own (notification settings, watch
+  // list): the export is one payload containing the password hash, home
+  // location, and smart-home broker credentials alongside those, so the
+  // combined response has to be protected at the level of its most
+  // sensitive content, not its least.
+  app.get('/api/settings/export', { preHandler: requireSettingsAuth }, async () => exportConfig());
+
+  app.post('/api/settings/import', { preHandler: requireSettingsAuth }, async (request, reply) => {
+    const result = importConfig(request.body);
+    if (!result.ok) return reply.code(400).send({ error: result.error });
+    // Any of the imported keys could be the smart-home settings blob --
+    // same "apply immediately, no restart needed" behavior the smart-home
+    // PUT route already has, just reached from a different entry point.
+    reconfigureSmartHome();
+    return result;
   });
 
   app.get('/api/stats/history', async (request) => getStatsHistoryForRange(parseStatsRange(request)));

@@ -19,7 +19,7 @@ import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeen
 import { evaluateAircraftRules, evaluateRangeRecordRule, prunePendingFirstSeen } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
-import { pruneTokens } from './settings-auth.js';
+import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
 import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
 import { resolveAirlineIcao } from './airline-lookup.js';
@@ -259,6 +259,7 @@ async function main() {
   setInterval(() => {
     pruneCooldowns();
     pruneTokens();
+    pruneLoginAttempts();
     prunePendingFirstSeen();
   }, COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {

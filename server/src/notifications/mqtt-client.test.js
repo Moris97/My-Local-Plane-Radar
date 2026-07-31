@@ -200,11 +200,44 @@ test('MqttClient.publish() is a no-op (returns false) when not yet connected', (
 });
 
 test('MqttClient reports failure via onFailure for an unreachable broker', async () => {
-  // Port 1 is reserved and nothing listens there -- connection should fail fast.
-  const client = new MqttClient({ url: 'mqtt://127.0.0.1:1', clientId: 'test-client', reconnectDelayMs: 60000 });
+  // Port 1 is reserved and nothing listens there. Whether that actually
+  // fails fast (ECONNREFUSED) or just hangs with no error at all depends
+  // on the network environment -- it hung indefinitely in this project's
+  // own sandbox, which is exactly the real bug connectTimeoutMs now
+  // guards against. A short connectTimeoutMs here means this test stays
+  // fast and deterministic either way, instead of assuming a refusal.
+  const client = new MqttClient({
+    url: 'mqtt://127.0.0.1:1', clientId: 'test-client', reconnectDelayMs: 60000, connectTimeoutMs: 100,
+  });
   const message = await new Promise((resolve) => {
     client.connect({ onConnect: () => resolve(null), onFailure: (msg) => resolve(msg) });
   });
   assert.ok(message, 'onFailure should have been called with a reason');
   client.disconnect();
+});
+
+test('MqttClient reports a timeout failure if the connection never completes within connectTimeoutMs', async () => {
+  // A real listening TCP server whose 'connection' handler simply never
+  // does anything -- Node's net server always completes the TCP
+  // handshake itself before the 'connection' event fires, so the client's
+  // 'connect' event fires immediately here too (this is NOT testing a
+  // stalled handshake, real network conditions for that aren't
+  // reproducible portably). What this deterministically exercises instead
+  // is connectTimeoutMs racing a connection that succeeds at the TCP
+  // level but the MQTT handshake (CONNACK) never arrives -- proving the
+  // timer is real and does fire with the expected message, not just that
+  // *some* error eventually surfaces (already covered by the test above).
+  const server = createServer(() => {}); // accepts, then does nothing
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+
+  const client = new MqttClient({
+    url: `mqtt://127.0.0.1:${port}`, clientId: 'test-client', reconnectDelayMs: 60000, connectTimeoutMs: 50,
+  });
+  const message = await new Promise((resolve) => {
+    client.connect({ onConnect: () => resolve(null), onFailure: (msg) => resolve(msg) });
+  });
+  assert.match(message, /timed out after 50ms/);
+  client.disconnect();
+  server.close();
 });

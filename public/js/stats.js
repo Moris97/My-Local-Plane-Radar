@@ -12,6 +12,7 @@ import {
 } from './chart.js';
 import { formatDistance, formatAltitude, formatSpeed } from './units.js';
 import { findNearestFarthest } from './geo.js';
+import { rowsToCsv } from './csv.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TABLE_PAGE_SIZE = 20;
@@ -232,6 +233,7 @@ export function renderStatsPanel(container) {
       <button type="button" id="mlpr-load-registrations" class="mlpr-detail-expand">${t('showRegistrations')}</button>
       <div id="mlpr-reg-controls" style="display:none">
         <input type="search" id="mlpr-reg-search" class="mlpr-list-search" placeholder="${t('regSearchPlaceholder')}">
+        <button type="button" id="mlpr-reg-export-csv">${t('exportCsv')}</button>
       </div>
       <div id="mlpr-reg-table-wrap"></div>
       <div class="mlpr-pagination" id="mlpr-reg-pagination"></div>
@@ -242,6 +244,7 @@ export function renderStatsPanel(container) {
       <button type="button" id="mlpr-load-airlines" class="mlpr-detail-expand">${t('showAllAirlines')}</button>
       <div id="mlpr-airlines-controls" style="display:none">
         <input type="search" id="mlpr-airlines-search" class="mlpr-list-search" placeholder="${t('airlinesSearchPlaceholder')}">
+        <button type="button" id="mlpr-airlines-export-csv">${t('exportCsv')}</button>
       </div>
       <div id="mlpr-airlines-table-wrap"></div>
       <div class="mlpr-pagination" id="mlpr-airlines-pagination"></div>
@@ -570,13 +573,22 @@ export function renderStatsPanel(container) {
       </tr>`;
   }
 
+  // `value()` mirrors exactly what rowHtml() above shows on screen (the
+  // resolved airline name, locale-formatted dates) rather than the raw
+  // entry field -- used by the CSV export below so a downloaded file
+  // matches what's actually visible in the table, not the underlying JSON
+  // shape.
   const REGISTRATIONS_COLUMNS = [
-    { key: 'registration', label: () => t('colRegistration') },
-    { key: 'typeCode', label: () => t('colType') },
-    { key: 'airlineIcao', label: () => t('colAirline') },
-    { key: 'firstSeenAt', label: () => t('colFirstSeen') },
-    { key: 'timesSeen', label: () => t('colTimesSeen') },
-    { key: 'lastSeenAt', label: () => t('colLastSeen') },
+    { key: 'registration', label: () => t('colRegistration'), value: (e) => e.registration },
+    { key: 'typeCode', label: () => t('colType'), value: (e) => e.typeCode ?? '' },
+    {
+      key: 'airlineIcao',
+      label: () => t('colAirline'),
+      value: (e, airlines) => (e.airlineIcao ? (airlines.get(e.airlineIcao)?.name ?? e.airlineIcao) : ''),
+    },
+    { key: 'firstSeenAt', label: () => t('colFirstSeen'), value: (e) => new Date(e.firstSeenAt).toLocaleString() },
+    { key: 'timesSeen', label: () => t('colTimesSeen'), value: (e) => e.timesSeen },
+    { key: 'lastSeenAt', label: () => t('colLastSeen'), value: (e) => new Date(e.lastSeenAt).toLocaleString() },
   ];
 
   function airlineRowHtml(entry, airlines) {
@@ -592,12 +604,12 @@ export function renderStatsPanel(container) {
   }
 
   const AIRLINES_COLUMNS = [
-    { key: 'name', label: () => t('colAirline') },
-    { key: 'airlineIcao', label: () => t('colAirlineIcao') },
-    { key: 'registrationsCount', label: () => t('colRegistrationsCount') },
-    { key: 'totalTimesSeen', label: () => t('colTimesSeen') },
-    { key: 'firstSeenAt', label: () => t('colFirstSeen') },
-    { key: 'lastSeenAt', label: () => t('colLastSeen') },
+    { key: 'name', label: () => t('colAirline'), value: (e, airlines) => airlines.get(e.airlineIcao)?.name ?? e.airlineIcao },
+    { key: 'airlineIcao', label: () => t('colAirlineIcao'), value: (e) => e.airlineIcao },
+    { key: 'registrationsCount', label: () => t('colRegistrationsCount'), value: (e) => e.registrationsCount },
+    { key: 'totalTimesSeen', label: () => t('colTimesSeen'), value: (e) => e.totalTimesSeen },
+    { key: 'firstSeenAt', label: () => t('colFirstSeen'), value: (e) => new Date(e.firstSeenAt).toLocaleString() },
+    { key: 'lastSeenAt', label: () => t('colLastSeen'), value: (e) => new Date(e.lastSeenAt).toLocaleString() },
   ];
 
   // Prev/first-window/current-window/last-window/next, with an ellipsis
@@ -632,6 +644,8 @@ export function renderStatsPanel(container) {
     loadBtnId,
     controlsId,
     searchId,
+    exportBtnId,
+    csvFilenamePrefix,
     tableWrapId,
     paginationId,
     fetchUrl,
@@ -645,6 +659,7 @@ export function renderStatsPanel(container) {
     const paginationEl = container.querySelector(`#${paginationId}`);
     const controlsEl = container.querySelector(`#${controlsId}`);
     const searchInput = container.querySelector(`#${searchId}`);
+    const exportBtn = container.querySelector(`#${exportBtnId}`);
     const loadBtn = container.querySelector(`#${loadBtnId}`);
     loadBtn.remove();
     tableWrap.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
@@ -655,6 +670,10 @@ export function renderStatsPanel(container) {
     let sortAsc = defaultSortAsc;
     let page = 1;
     let query = '';
+    // Kept in sync by every draw() so the export button can download
+    // exactly the current search/sort view (every matching row, not just
+    // the current page) without redoing the filter/sort work at click time.
+    let currentSorted = rows;
 
     function draw() {
       if (rows.length === 0) {
@@ -668,6 +687,7 @@ export function renderStatsPanel(container) {
         const cmp = String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? ''), undefined, { numeric: true });
         return sortAsc ? cmp : -cmp;
       });
+      currentSorted = sorted;
 
       const totalPages = Math.max(1, Math.ceil(sorted.length / TABLE_PAGE_SIZE));
       page = Math.min(page, totalPages);
@@ -714,6 +734,17 @@ export function renderStatsPanel(container) {
       draw();
     });
 
+    exportBtn.addEventListener('click', () => {
+      const csv = rowsToCsv(columns, currentSorted, airlines);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${csvFilenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    });
+
     controlsEl.style.display = '';
     draw();
   }
@@ -725,6 +756,8 @@ export function renderStatsPanel(container) {
         loadBtnId: 'mlpr-load-registrations',
         controlsId: 'mlpr-reg-controls',
         searchId: 'mlpr-reg-search',
+        exportBtnId: 'mlpr-reg-export-csv',
+        csvFilenamePrefix: 'mlpr-registrations',
         tableWrapId: 'mlpr-reg-table-wrap',
         paginationId: 'mlpr-reg-pagination',
         fetchUrl: '/api/stats/registrations',
@@ -753,6 +786,8 @@ export function renderStatsPanel(container) {
         loadBtnId: 'mlpr-load-airlines',
         controlsId: 'mlpr-airlines-controls',
         searchId: 'mlpr-airlines-search',
+        exportBtnId: 'mlpr-airlines-export-csv',
+        csvFilenamePrefix: 'mlpr-airlines',
         tableWrapId: 'mlpr-airlines-table-wrap',
         paginationId: 'mlpr-airlines-pagination',
         fetchUrl: '/api/stats/all-airlines',

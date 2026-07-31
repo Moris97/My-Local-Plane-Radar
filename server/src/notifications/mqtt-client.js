@@ -131,13 +131,19 @@ export class MqttPacketReader {
 
 const DEFAULT_KEEPALIVE_SEC = 60;
 const DEFAULT_RECONNECT_DELAY_MS = 5000;
+const DEFAULT_CONNECT_TIMEOUT_MS = 10000;
 
 // Fire-and-forget, auto-reconnecting publisher. `will` (if given) is sent
 // as part of CONNECT and delivered by the *broker* if this client
 // disconnects uncleanly (crash, network drop) -- the standard MQTT
 // "availability" pattern (see smart-home.js's use of it for mlpr/status).
 export class MqttClient {
-  constructor({ url, clientId, username, password, will, keepAliveSec = DEFAULT_KEEPALIVE_SEC, reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS }) {
+  constructor({
+    url, clientId, username, password, will,
+    keepAliveSec = DEFAULT_KEEPALIVE_SEC,
+    reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS,
+    connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS,
+  }) {
     this.url = url;
     this.clientId = clientId;
     this.username = username;
@@ -145,7 +151,9 @@ export class MqttClient {
     this.will = will;
     this.keepAliveSec = keepAliveSec;
     this.reconnectDelayMs = reconnectDelayMs;
+    this.connectTimeoutMs = connectTimeoutMs;
     this._socket = null;
+    this._connectTimer = null;
     this._reader = new MqttPacketReader();
     this._connected = false;
     this._intentionalDisconnect = false;
@@ -191,6 +199,27 @@ export class MqttClient {
     this._socket = socket;
     this._reader = new MqttPacketReader();
 
+    // Guards the whole path from opening the socket to a successful
+    // CONNACK -- cleared in _handlePacket() below on CONNACK, not on the
+    // plain TCP 'connect' event, since a broker that accepts the TCP
+    // handshake but never actually answers the MQTT CONNECT (hung,
+    // overloaded, wrong port with some other service listening) is just as
+    // real a failure mode as the handshake itself never completing. A
+    // plain one-shot setTimeout, not socket.setTimeout()/the `timeout`
+    // connect option (which resets on any read/write and would otherwise
+    // misfire on a healthy, merely-quiet *already-connected* session
+    // between our own keepalive pings, tens of seconds apart -- this timer
+    // only ever needs to run once, for the initial handshake). Without
+    // this at all, an address that never actively refuses or completes
+    // the connection (firewalled/dropped rather than ECONNREFUSED, or a
+    // silent broker) left the socket -- and the caller awaiting
+    // onConnect/onFailure -- hanging forever, since neither 'error' nor
+    // 'close' ever fired. Caught via a real hang in this file's own test
+    // suite, not a live report.
+    this._connectTimer = setTimeout(() => {
+      socket.destroy(new Error(`connection timed out after ${this.connectTimeoutMs}ms`));
+    }, this.connectTimeoutMs);
+
     socket.on('connect', () => {
       socket.write(buildConnectPacket({
         clientId: this.clientId,
@@ -214,11 +243,13 @@ export class MqttClient {
     });
 
     socket.on('error', (err) => {
+      clearTimeout(this._connectTimer);
       console.warn(`[mqtt] connection error: ${err.message}`);
       this._reportFailure(err.message);
     });
 
     socket.on('close', () => {
+      clearTimeout(this._connectTimer);
       this._connected = false;
       clearInterval(this._pingTimer);
       this._pingTimer = null;
@@ -228,6 +259,7 @@ export class MqttClient {
 
   _handlePacket(packet) {
     if (packet.type === PACKET_TYPE.CONNACK) {
+      clearTimeout(this._connectTimer);
       const returnCode = packet.body[1];
       if (returnCode === 0) {
         this._connected = true;

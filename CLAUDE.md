@@ -75,6 +75,15 @@ One interface, three implementations, selected by environment variable:
 `scripts/record-fixtures.sh` records ~10 minutes of snapshots into `fixtures/`
 for tests and the no-receiver demo mode.
 
+**`HttpSource` fetch calls carry a timeout** (`AbortSignal.timeout`,
+constructor option `timeoutMs`, default 3s) — unlike `FileSource`'s local
+`fs.readFile`, a network request can simply hang forever with no error,
+and `pollOnce()` runs on a plain `setInterval` (`index.js`) that does
+**not** wait for the previous call to finish before firing the next one.
+Without the timeout, one stalled connection meant a new hung request
+piled up on top of it every second, forever, rather than just delaying a
+tick.
+
 ### `aircraft.json` contract
 
 One JSON object: `{ now, messages, aircraft: [...] }`. readsb writes to a temp
@@ -363,6 +372,10 @@ not a special case that bypasses it.
 - App root `/` serves the interface directly (no `/index.html` needed).
 - No authentication (home LAN app). But **never expose an endpoint that runs
   system commands**, in case this ever ends up reachable from outside.
+- Every response carries `X-Frame-Options: DENY` and `X-Content-Type-Options:
+  nosniff` (one `onSend` hook in `server.js`, no dependency) — cheap,
+  no-downside hardening against clickjacking/MIME-sniffing for the same
+  "might end up reachable from outside" reason as the line above.
 
 ## UI
 
@@ -686,6 +699,50 @@ not a special case that bypasses it.
   module-level `activePopupHex` (kept in sync everywhere `activePopup` is
   cleared) is what lets `showInfoPopup` tell "same aircraft, just
   refresh in place" apart from "different aircraft, need a new popup".
+  **`formatAircraftInfo()`'s output is HTML-escaped** (`app.js`'s own
+  `escapeHtml`, same pattern as `aircraft-panel.js`/`stats.js`) before
+  going into `setHTML()` — `aircraft.flight`/`typeCode` ultimately come
+  from readsb's `aircraft.json`, trusted when read from the local file,
+  but `HttpSource` fetches the same JSON over plain, unauthenticated HTTP
+  (the "dev on WSL against live data" mode above), where anyone else on
+  the LAN can MITM/spoof the response — an unescaped callsign there was a
+  real stored-XSS path into the browser's own Settings session. Found
+  2026-07-31 during a security review, not reported live.
+  **Redesigned 2026-07-31** after the popup was reported showing
+  invisible (white-on-white) text — the actual bug turned out to be a
+  backward CSS selector (`.mlpr-popup .maplibregl-popup-content`, which
+  expects MapLibre's own content wrapper to be a *descendant* of our div,
+  when MapLibre actually nests it the other way: our `.mlpr-popup` lives
+  *inside* `.maplibregl-popup-content`) that had silently never matched
+  anything, leaving the popup on MapLibre's default white background the
+  whole time. Harmless-looking on its own, but combined with this file's
+  `:root { color-scheme: dark }` (added later, for native checkboxes —
+  see the Settings section), unstyled text with no explicit `color`
+  resolves to a *light* default, genuinely invisible on that leftover
+  white background rather than just off-brand. Fixed by styling
+  `.maplibregl-popup-content` directly (this app only ever shows one kind
+  of popup, so no extra scoping needed) instead of the broken nested
+  selector, and used the opportunity to redesign the content itself to
+  match the rest of the app's card language rather than just recoloring
+  the old plain `<br>`-joined lines: a bold callsign header
+  (`.mlpr-popup-callsign`) followed by a `.mlpr-popup-chips` row reusing
+  aircraft-panel.js's exact chip markup (`.mlpr-detail-chip`/`-chip b`) —
+  so the popup and the full details panel it opens into read as the same
+  visual language, not two different ones — plus a `.mlpr-popup-badge`
+  (the same green pill `.mlpr-detail-flag` uses for boolean tiles) for
+  "on ground" specifically, since that's a standalone flag, not a value
+  paired with a label the way Type/Altitude/Speed are. MapLibre's own
+  popup tip (the triangle pointing at the aircraft) and close button are
+  both hardcoded white/unstyled by MapLibre's own CSS and needed their
+  own overrides too, matched per anchor direction
+  (`.maplibregl-popup-anchor-{top,bottom,left,right}(-left/-right)
+  .maplibregl-popup-tip`) since MapLibre auto-picks which corner to
+  anchor the popup from depending on available screen space. Verified
+  visually by reconstructing MapLibre's actual popup DOM (tip + content +
+  close button wrapping our markup) against the real stylesheet, since
+  this sandbox has no WebGL and `app.js` itself can't load far enough to
+  open a real one (see the coverage-map section's note on this same
+  limitation) — not by guessing that the CSS ought to work.
 - **Aircraft icon shapes and classification** (`public/js/plane-icons.js` +
   `icon-classify.js`, wired into the live map 2026-07-29): 17 hand-drawn
   top-down silhouettes (`PLANE_ICON_IDS` — narrowbody/widebody2/3/4, light,
@@ -1037,12 +1094,40 @@ just stop the service rather than restart it; the UI tells the user to
 restart manually. `validatePort` rejects anything below 1024 (would need
 root, which MLPR never runs as), readsb's own ports, and 8080/8085 — a UI
 that could bind over readsb's ports would break the very receiver MLPR reads
-from. Saving asks for confirmation first (`window.confirm`, this codebase's
-only use of it — a deliberately heavier gate than the inline status
-messages everywhere else, since mistyping a port on a headless Pi is an
-easy way to lock yourself out): the message states the *exact* new address
-(`location.protocol`/`location.hostname` — the host the browser is already
-on, unchanged — plus the new port), not a vague "somewhere else" warning.
+from. Saving asks for confirmation first (`window.confirm` — a deliberately
+heavier gate than the inline status messages everywhere else, since
+mistyping a port on a headless Pi is an easy way to lock yourself out): the
+message states the *exact* new address (`location.protocol`/
+`location.hostname` — the host the browser is already on, unchanged — plus
+the new port), not a vague "somewhere else" warning. The config backup
+restore button (see below) uses the same `window.confirm` gate for the
+same reason — restoring an old backup is just as easy a way to lock
+yourself out (a stale password, a stale port).
+
+**Config backup/restore** (`server/src/config-backup.js`, Server tab's
+"Backup" fieldset): a full export/import of everything in SQLite's
+`config` table — notification settings, watch list, smart-home broker
+settings, ntfy topic, receiver home location, server port, and the
+Settings password hash — in one JSON file. Added because hard rule 4
+already keeps this table small, but nothing protected it from an outright
+SD card failure; there was no way to get it back except retyping it by
+hand. Deliberately generic over the table's mix of raw-string and
+JSON-blob values (`db.js`'s `getAllConfigEntries`) — export/import treat
+every value as an opaque string and round-trip it byte-for-byte, so the
+module doesn't need updating every time a new config key is added
+elsewhere. Import **merges** into the existing config (only overwrites
+keys actually present in the file) rather than wiping the table first, so
+restoring an export taken on an older MLPR version can't delete a
+newer-version-only setting it never knew about. `GET`/`POST
+/api/settings/export`/`/import`, both gated behind `requireSettingsAuth`
+— a deliberate exception to that gate's usual scope (notification
+settings/watch list are normally ungated): the export bundles them
+*alongside* the password hash and smart-home credentials in one payload,
+so the combined response has to be protected at the level of its most
+sensitive content. A successful import calls `reconfigureSmartHome()`
+immediately (same "apply without a restart" behavior the smart-home PUT
+route already has) and the frontend just says "reload the page" afterward
+rather than trying to live-refresh every affected UI section individually.
 
 ## Notification engine
 
@@ -1157,6 +1242,22 @@ encode/decode helpers, so a shared bug can't hide from the test) exercising
 a real `connect()` → `publish()` round trip. What's deliberately **not**
 implemented, because nothing here needs it: QoS 1/2, subscribing, MQTT 5,
 WebSocket transport.
+
+**`connectTimeoutMs`** (constructor option, default 10s): guards the whole
+path from opening the socket to a successful CONNACK, cleared only on
+CONNACK (not the plain TCP `'connect'` event) since a broker that accepts
+the TCP handshake but never actually answers the MQTT CONNECT is just as
+real a failure as the handshake itself never completing. A plain one-shot
+`setTimeout`, not `socket.setTimeout()`/the `timeout` connect option
+(which resets on any read/write and would misfire on a healthy, merely-
+quiet already-connected session between keepalive pings tens of seconds
+apart). Without this, an address that never actively refuses or completes
+the connection (firewalled/dropped rather than ECONNREFUSED, or a silent
+broker) hung forever — found via a real, reproducible hang in this file's
+own test suite (`node --test` on the whole project would hang indefinitely
+on the "unreachable broker" test, since connecting to `127.0.0.1:1` never
+actually errored in that sandbox the way the test assumed), not a live
+report.
 
 **`server/src/notifications/smart-home.js`** is the manager sitting between
 `rules.js` and the raw client: owns the one persistent `MqttClient`
@@ -1274,6 +1375,22 @@ like `list.js`'s aircraft search — lives outside the subtree that
 `draw()` rebuilds on every sort/page/search change, specifically so typing
 in it doesn't lose focus/cursor position on every keystroke; only
 `#mlpr-reg-table-wrap` and `#mlpr-reg-pagination` get rebuilt.
+
+**CSV export** (`public/js/csv.js`'s `rowsToCsv`, both this table and the
+all-airlines one, wired through `loadLazyTable`'s shared `exportBtnId`/
+`csvFilenamePrefix` params): exports the *current* search-filtered,
+sorted view — every matching row, not just the current page — rather
+than the whole unfiltered set, kept in sync by every `draw()` in a
+closure variable (`currentSorted`) so the export button doesn't redo the
+filter/sort work at click time. Each column's `value()` (added alongside
+the existing `key`/`label()`) mirrors exactly what `rowHtml()` shows on
+screen — the resolved airline *name*, not the raw ICAO code; locale-
+formatted dates, not raw timestamps — so the downloaded file matches what
+was actually visible, not the underlying JSON shape. `rowsToCsv` itself is
+pure/DOM-free (same reasoning as `chart.js`/`geo.js` — testable under
+plain `node --test`) and only quotes a field when it actually needs it
+(contains a comma/quote/newline), matching how spreadsheet apps write CSV
+rather than blanket-quoting every field.
 
 ### Range/position sampling (`server/src/stats-history.js`, `range.js`)
 
@@ -1667,6 +1784,18 @@ no new dependency), `timingSafeEqual` for comparison. Sessions are random
 tokens issued on login, held **in memory only** (`Map<token, expiresAt>`,
 24h TTL, pruned hourly) — lost on restart, which just means logging in again,
 consistent with hard rule 6.
+
+**Brute-force lockout** (`isLockedOut`/`recordFailedAttempt`/
+`recordSuccessfulAttempt`, same in-memory-only spirit as the tokens above,
+pruned on the same hourly tick): per-IP, 5 failed `verifyPassword()` calls
+within the lockout window lock that IP out for 5 minutes (`429`, checked
+*before* the password check runs, so a locked-out client can't spend a
+guess waiting it out). Guards **both** call sites that verify the password
+— `/api/settings-auth/login` and `/api/settings-auth/password`'s own
+`currentPassword` check — since unlimited attempts against either made the
+password guessable. No exponential backoff or persistence: a fixed
+threshold/window is enough for a home LAN app and needs no bookkeeping
+beyond a plain `Map`.
 
 **Gates the Server tab only, not the whole Settings panel** — this was a
 deliberate narrowing (originally the password gated the entire panel before
