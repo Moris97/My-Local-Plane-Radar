@@ -130,7 +130,40 @@ export function onChange(fn) {
   return () => listeners.delete(fn);
 }
 
+// Redraws driven from here (list.js's drawTable, stats.js's drawNowSection)
+// are the app's one piece of periodic work the browser does NOT throttle in
+// a background tab: they hang off incoming WebSocket deltas, not a timer, so
+// a hidden tab kept rebuilding the whole list <table> and the Stats tiles
+// about once a second for nobody. Suppressed while hidden and flushed once
+// on the way back, so returning to the tab shows current data immediately
+// rather than waiting for the next delta.
+//
+// Deliberately gated here rather than in each subscriber: it's one place,
+// and it covers anything that subscribes later without them having to
+// remember. State itself is never suppressed -- only the redraw signal --
+// so the data is already correct the moment the tab is visible again.
+let notifyPending = false;
+
+function documentHidden() {
+  // No `document` under plain `node --test`, where this module is unit-
+  // tested -- treat that as "always visible" so tests see every notify.
+  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (!documentHidden() && notifyPending) {
+      notifyPending = false;
+      for (const fn of listeners) fn();
+    }
+  });
+}
+
 function notify() {
+  if (documentHidden()) {
+    notifyPending = true;
+    return;
+  }
   for (const fn of listeners) fn();
 }
 

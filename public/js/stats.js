@@ -13,6 +13,7 @@ import {
 import { formatDistance, formatAltitude, formatSpeed } from './units.js';
 import { findNearestFarthest } from './geo.js';
 import { rowsToCsv } from './csv.js';
+import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TABLE_PAGE_SIZE = 20;
@@ -288,24 +289,61 @@ export function renderStatsPanel(container) {
     drawNowSection();
   }
 
+  // The four live counters are structurally identical every time -- only
+  // their numbers move -- so the tiles are built once and then have their
+  // value text replaced. Rebuilding this via innerHTML on every radar-state
+  // change (about once a second) was cheap in absolute terms but it threw
+  // away and recreated the elements each time, which drops any text
+  // selection inside them and forces a layout pass for numbers that often
+  // hadn't changed at all.
+  const NOW_TILES = [
+    { labelKey: 'aircraftCount', value: ({ stats }) => String(stats.aircraftCount ?? 0) },
+    { labelKey: 'chartWithPos', value: ({ withPosition }) => String(withPosition) },
+    {
+      labelKey: 'messagesPerSecond',
+      value: ({ stats }) => (typeof stats.messagesPerSec === 'number' ? stats.messagesPerSec.toFixed(1) : '–'),
+    },
+    {
+      labelKey: 'maxRangeLastHour',
+      value: ({ stats, units }) => formatDistance(stats.maxRangeLastHourKm, units) ?? '–',
+    },
+  ];
+  let nowTileValueEls = null;
+
+  function ensureNowTiles() {
+    if (nowTileValueEls) return;
+    const el = container.querySelector('#mlpr-now-tiles');
+    el.innerHTML = NOW_TILES.map((tile) => tileHtml(t(tile.labelKey), '')).join('');
+    nowTileValueEls = [...el.querySelectorAll('.mlpr-tile-value')];
+  }
+
   function drawNowSection() {
     const stats = getLiveStats();
     const { units } = getSettings();
     const aircraft = getLiveAircraft();
     const withPosition = aircraft.filter((a) => typeof a.lat === 'number' && typeof a.lon === 'number').length;
 
-    container.querySelector('#mlpr-now-tiles').innerHTML = [
-      tileHtml(t('aircraftCount'), String(stats.aircraftCount ?? 0)),
-      tileHtml(t('chartWithPos'), String(withPosition)),
-      tileHtml(t('messagesPerSecond'), typeof stats.messagesPerSec === 'number' ? stats.messagesPerSec.toFixed(1) : '–'),
-      tileHtml(t('maxRangeLastHour'), formatDistance(stats.maxRangeLastHourKm, units) ?? '–'),
-    ].join('');
+    ensureNowTiles();
+    const context = { stats, units, withPosition };
+    NOW_TILES.forEach((tile, i) => {
+      const next = tile.value(context);
+      // Skip the assignment when nothing moved: aircraft count and max range
+      // are stable for long stretches, and not touching the node at all is
+      // strictly cheaper than writing the same string back.
+      if (nowTileValueEls[i].textContent !== next) nowTileValueEls[i].textContent = next;
+    });
 
+    // Left as an innerHTML rebuild deliberately: unlike the counters above,
+    // these tiles change shape as well as value (a different aircraft, a
+    // different set of available chips, or the "no receiver location"
+    // fallback), so there is no stable structure to write into.
     const { nearest, farthest } = findNearestFarthest(aircraft, homeLocation);
     const emptyMessage = homeLocation ? t('noAircraftWithPosition') : t('homeNotConfiguredShort');
-    container.querySelector('#mlpr-now-aircraft-tiles').innerHTML =
+    const aircraftTilesHtml =
       aircraftTileHtml(t('tileNearest'), nearest, units, emptyMessage) +
       aircraftTileHtml(t('tileFarthest'), farthest, units, emptyMessage);
+    const aircraftTilesEl = container.querySelector('#mlpr-now-aircraft-tiles');
+    if (aircraftTilesEl.innerHTML !== aircraftTilesHtml) aircraftTilesEl.innerHTML = aircraftTilesHtml;
   }
 
   function drawRangeSelector() {
@@ -749,11 +787,16 @@ export function renderStatsPanel(container) {
 
     // Outside draw()'s rebuilt subtree deliberately -- same reasoning as
     // list.js's search box, so typing doesn't lose focus on every redraw.
-    searchInput.addEventListener('input', () => {
+    // Debounced because this table filters, sorts and re-renders the whole
+    // matching set on every call, over an array that grows for the life of
+    // the install -- unlike the live aircraft list, which is bounded by
+    // what's currently in range.
+    const runSearch = debounce(() => {
       query = searchInput.value;
       page = 1;
       draw();
-    });
+    }, SEARCH_DEBOUNCE_MS);
+    searchInput.addEventListener('input', runSearch);
 
     exportBtn.addEventListener('click', () => {
       const csv = rowsToCsv(columns, currentSorted, airlines);
@@ -839,15 +882,35 @@ export function renderStatsPanel(container) {
 
   const unsubscribeAircraft = onChange(drawNowSection);
   const unsubscribeSettings = onSettingsChange(drawNowSection);
-  const refreshTimer = setInterval(() => {
+  // Every one of these is a fetch (six-plus endpoints between them), so a
+  // backgrounded tab with Stats left open was re-pulling the whole set
+  // every 20 seconds for nobody -- browsers throttle the timer but not the
+  // requests it fires. Skipped while hidden and run once on the way back,
+  // so returning to the tab shows current figures rather than whatever was
+  // on screen when it was backgrounded.
+  function refreshAll() {
     drawCharts();
     drawPeriodSections();
     drawAntennaSection();
+  }
+
+  const refreshTimer = setInterval(() => {
+    if (document.visibilityState === 'hidden') return;
+    refreshAll();
   }, HISTORY_REFRESH_MS);
+
+  function onVisibilityChange() {
+    if (document.visibilityState !== 'hidden') refreshAll();
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange);
 
   return () => {
     unsubscribeAircraft();
     unsubscribeSettings();
     clearInterval(refreshTimer);
+    // Must be removed with the rest -- renderStatsPanel runs again on every
+    // panel open, so a listener left behind would keep a closed panel's
+    // stale closure alive and refetching on every future tab focus.
+    document.removeEventListener('visibilitychange', onVisibilityChange);
   };
 }

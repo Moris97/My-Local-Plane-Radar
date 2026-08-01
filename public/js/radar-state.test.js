@@ -83,3 +83,41 @@ test('mapView round-trips what app.js pushes into it, and can be cleared', () =>
   setMapView(null);
   assert.equal(getMapView(), null);
 });
+
+// Redraw suppression while the tab is hidden. Under plain `node --test`
+// there is no `document`, which the module treats as "always visible" --
+// stubbing one lets the real branch be exercised without a browser.
+test('notifications are suppressed while the document is hidden, then flushed once', async () => {
+  const original = globalThis.document;
+  let visibility = 'visible';
+  const handlers = [];
+  globalThis.document = {
+    get visibilityState() { return visibility; },
+    addEventListener: (type, fn) => { if (type === 'visibilitychange') handlers.push(fn); },
+  };
+
+  // Re-imported with the stub in place so its module-level listener binds
+  // to it (a plain re-import is cached, hence the cache-busting query).
+  const mod = await import('./radar-state.js?visibility-test');
+
+  let calls = 0;
+  const unsubscribe = mod.onChange(() => { calls += 1; });
+
+  mod.noteLiveStats({ aircraftCount: 1 });
+  assert.equal(calls, 1, 'visible: notifies immediately');
+
+  visibility = 'hidden';
+  mod.noteLiveStats({ aircraftCount: 2 });
+  mod.noteLiveStats({ aircraftCount: 3 });
+  assert.equal(calls, 1, 'hidden: no redraws at all, however many updates arrive');
+
+  visibility = 'visible';
+  for (const fn of handlers) fn();
+  assert.equal(calls, 2, 'on return: exactly one catch-up redraw, not one per missed update');
+
+  // State itself was never suppressed -- only the redraw signal.
+  assert.equal(mod.getLiveStats().aircraftCount, 3);
+
+  unsubscribe();
+  globalThis.document = original;
+});

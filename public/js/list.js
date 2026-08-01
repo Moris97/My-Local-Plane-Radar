@@ -4,6 +4,7 @@ import { getSettings, onSettingsChange, updateSettings } from './settings-state.
 import { getListField, sortedFieldOptions } from './list-fields.js';
 import { openFullscreenModal, openPanel, isSidePanelLayout } from './panels.js';
 import { GROUND_MARKER } from './aircraft-details.js';
+import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 
 // Fields matched against the search box -- not necessarily the same as the
 // user-configured columns (registration isn't always a column, but is still
@@ -171,10 +172,15 @@ export function renderListPanel(container, { fullscreen = false } = {}) {
   // with live traffic, see radar-state.js's batching), and if the input
   // itself were part of that rebuilt HTML it would lose focus/cursor
   // position on every redraw, making it unusable while typing.
-  searchInput.addEventListener('input', () => {
+  // Debounced like the Stats tables' search, though this one matters less:
+  // the live list is bounded by what's currently in range, not by how long
+  // the install has been running. Consistency is the point -- both search
+  // boxes should feel the same.
+  const runSearch = debounce(() => {
     searchQuery = searchInput.value;
     drawTable();
-  });
+  }, SEARCH_DEBOUNCE_MS);
+  searchInput.addEventListener('input', runSearch);
 
   function drawTable() {
     const { units, listColumns, listSortLevels } = getSettings();

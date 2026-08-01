@@ -18,6 +18,7 @@ import {
   setMapView,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
+import { queuePendingMessage } from './pending-queue.js';
 import { openPanel } from './panels.js';
 import { formatAltitude, formatSpeed } from './units.js';
 
@@ -111,6 +112,10 @@ let activePopup = null;
 // selected aircraft's position just updated, refresh the existing popup in
 // place" apart from "a different aircraft got selected, need a new popup".
 let activePopupHex = null;
+
+// Snapshots that arrived before the map finished initialising, replayed in
+// order once it has (see map.on('load')). Bounded -- see pending-queue.js
+// for why that matters.
 const pendingMessages = [];
 
 // The effective mode actually rendered (may differ from getSettings().basemapMode
@@ -461,20 +466,44 @@ map.on('load', async () => {
   refreshCoverage();
 });
 
+// A tab nobody is looking at shouldn't be fetching. Browsers throttle
+// background timers but not the requests they fire, so without this a
+// backgrounded tab kept pulling the coverage polygon and the daylight
+// boolean indefinitely. Both are refreshed once on the way back instead,
+// so returning to the tab still shows current data.
+function isHidden() {
+  return document.visibilityState === 'hidden';
+}
+
 // Re-check daylight periodically so an open tab flips itself at sunset/
 // sunrise without needing a reload. 10 minutes is plenty of precision for a
 // day/night switch and costs one tiny request per tab.
-setInterval(async () => {
+async function refreshDaylightTheme() {
   const { mapTheme, basemapMode } = getSettings();
   if (mapTheme !== 'auto') return;
   await refreshDaylight();
   const resolved = resolveMapTheme(mapTheme);
   if (resolved !== lastRequestedMapTheme) switchBasemap(basemapMode, resolved);
+}
+
+setInterval(() => {
+  if (isHidden()) return;
+  refreshDaylightTheme();
 }, DAYLIGHT_POLL_INTERVAL_MS);
 
 setInterval(() => {
+  if (isHidden()) return;
   if (getSettings().showCoverage) refreshCoverage();
 }, COVERAGE_REFRESH_INTERVAL_MS);
+
+document.addEventListener('visibilitychange', () => {
+  if (isHidden()) return;
+  // Catch up on whatever was skipped while hidden. Both are cheap and
+  // idempotent, so an unconditional refresh is simpler (and more obviously
+  // correct) than tracking what was actually missed.
+  refreshDaylightTheme();
+  if (getSettings().showCoverage) refreshCoverage();
+});
 
 function passesAltitudeFilter(aircraft) {
   if (aircraft.onGround) return true;
@@ -990,7 +1019,7 @@ function connect() {
     if (mapReady) {
       handleSnapshot(snapshot);
     } else {
-      pendingMessages.push(snapshot);
+      queuePendingMessage(pendingMessages, snapshot);
     }
   });
 
