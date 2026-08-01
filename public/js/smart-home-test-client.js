@@ -60,6 +60,12 @@ function renderGate(container, onUnlocked) {
       const { token } = await response.json();
       storeToken(token);
       onUnlocked();
+    } else if (response.status === 429) {
+      // The login endpoint has a per-IP lockout (settings-auth.js); saying
+      // "incorrect password" here would send the user hunting for a typo
+      // when the real answer is "wait". Kept in English like the rest of
+      // this page -- /dev/* tooling is deliberately untranslated.
+      errorEl.textContent = 'Too many failed attempts, try again later';
     } else {
       errorEl.textContent = 'Incorrect password';
     }
@@ -84,6 +90,13 @@ function currentFormValues() {
     lat: document.getElementById('f-lat').value ? Number(document.getElementById('f-lat').value) : undefined,
     lon: document.getElementById('f-lon').value ? Number(document.getElementById('f-lon').value) : undefined,
   };
+  // rules.js only ever publishes a squawk event for an aircraft that has
+  // one, so the code belongs on the aircraft object exactly as it would in
+  // a real event. The human-readable meaning is deliberately NOT sent --
+  // the server derives it (squawkMeaningFor) so this page can't disagree
+  // with what the real rule would say.
+  if (reason === 'squawk') aircraft.squawk = document.getElementById('f-squawk').value;
+
   const matchedEntry = reason === 'watchlist'
     ? { matchType: document.getElementById('f-matched-type').value, matchValue: document.getElementById('f-matched-value').value.trim() }
     : undefined;
@@ -95,6 +108,12 @@ function updatePreview(topicPrefix) {
   document.getElementById('topic-preview').textContent = `${topicPrefix}/events/${reason}`;
   const payload = { reason, timestamp: Date.now(), ...aircraft };
   if (matchedEntry) Object.assign(payload, { matchedType: matchedEntry.matchType, matchedValue: matchedEntry.matchValue });
+  if (reason === 'squawk') {
+    // Read out of the option's own label rather than repeating the
+    // code->meaning table here; the server is what actually sets this field.
+    const option = document.getElementById('f-squawk').selectedOptions[0];
+    payload.squawkMeaning = option ? option.textContent.replace(/^\d+\s*\(|\)$/g, '') : null;
+  }
   document.getElementById('payload-preview').textContent = JSON.stringify(payload, null, 2);
 }
 
@@ -113,6 +132,7 @@ function applyPreset(name) {
   document.getElementById('f-lat').value = preset.lat;
   document.getElementById('f-lon').value = preset.lon;
   document.getElementById('watchlist-fields').style.display = preset.reason === 'watchlist' ? '' : 'none';
+  document.getElementById('squawk-fields').style.display = preset.reason === 'squawk' ? '' : 'none';
 }
 
 async function main() {
@@ -163,6 +183,7 @@ async function main() {
 
   document.getElementById('f-reason').addEventListener('change', (event) => {
     document.getElementById('watchlist-fields').style.display = event.target.value === 'watchlist' ? '' : 'none';
+    document.getElementById('squawk-fields').style.display = event.target.value === 'squawk' ? '' : 'none';
     updatePreview(status.topicPrefix);
   });
   for (const id of ['f-hex', 'f-flight', 'f-registration', 'f-typecode', 'f-altitude', 'f-speed', 'f-onground', 'f-lat', 'f-lon', 'f-matched-type', 'f-matched-value']) {

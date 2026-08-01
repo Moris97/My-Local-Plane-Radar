@@ -84,8 +84,23 @@
         <select id="f-reason">
           <option value="first_seen">first_seen</option>
           <option value="watchlist">watchlist</option>
+          <option value="squawk">squawk</option>
         </select>
       </label>
+      <!-- Only the emergency codes rules.js actually notifies on: firing a
+           test event for a code the real rule would ignore would be testing
+           something that can never happen. The human-readable meaning is
+           derived server-side from this code, so it always matches what a
+           real squawk event would carry. -->
+      <div id="squawk-fields" style="display:none">
+        <label>Squawk
+          <select id="f-squawk">
+            <option value="7700">7700 (Emergency)</option>
+            <option value="7600">7600 (Radio failure)</option>
+            <option value="7500">7500 (Hijack)</option>
+          </select>
+        </label>
+      </div>
       <div id="watchlist-fields" style="display:none">
         <div class="row">
           <label>Matched type

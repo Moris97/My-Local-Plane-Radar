@@ -32,7 +32,7 @@ import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getTodayStartMs, getDailyUniqueCounts, getRangeSummary } from './stats-history.js';
 import { getSeenAircraftCount, getSeenFlightsCount, getRegistrationsCount, getAllAirlinesSummary } from './db.js';
-import { getAllTimeMaxRangeKm } from './notifications/rules.js';
+import { getAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
 import { destinationPoint } from './range.js';
 
@@ -500,18 +500,26 @@ export async function buildServer({ logger = true } = {}) {
   // their Home Assistant automations without waiting for a genuine
   // first-seen/watch-list match. See /dev/smart-home-test, which is the
   // one and only caller of this in practice.
-  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist']);
+  // Must list every reason rules.js can actually publish, or the one event
+  // type left out becomes the one nobody can test -- which is exactly what
+  // happened to 'squawk' when it was added as a third smart-home event
+  // (2026-08-01) and this set wasn't updated with it.
+  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist', 'squawk']);
   app.post('/api/notifications/smart-home/send-test-event', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     if (!VALID_TEST_EVENT_REASONS.has(body.reason)) {
-      return reply.code(400).send({ error: 'reason must be "first_seen" or "watchlist"' });
+      return reply.code(400).send({ error: 'reason must be "first_seen", "watchlist" or "squawk"' });
     }
     const aircraft = body.aircraft ?? {};
     if (!aircraft.hex) {
       return reply.code(400).send({ error: 'aircraft.hex is required' });
     }
 
-    const sent = publishSmartHomeEvent({ reason: body.reason, aircraft, matchedEntry: body.matchedEntry });
+    // Derived here, not taken from the request: the test event should carry
+    // the same meaning the real rule would send for that code, and that
+    // mapping belongs to rules.js.
+    const squawkMeaning = body.reason === 'squawk' ? squawkMeaningFor(aircraft.squawk) : undefined;
+    const sent = publishSmartHomeEvent({ reason: body.reason, aircraft, matchedEntry: body.matchedEntry, squawkMeaning });
     return { sent, enabled: getSmartHomeSettings().enabled, connected: isSmartHomeConnected() };
   });
 

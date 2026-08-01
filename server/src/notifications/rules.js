@@ -6,6 +6,14 @@ import { getWatchList } from './watchlist.js';
 import { publishSmartHomeEvent } from './smart-home.js';
 import { distanceKm, destinationPoint } from '../range.js';
 
+// Exported as a function rather than the raw table so the "unknown code"
+// fallback lives in one place -- /dev/smart-home-test needs the same
+// meaning the real rule would send, and duplicating three strings into a
+// dev page would be three strings free to drift.
+export function squawkMeaningFor(squawk) {
+  return SQUAWK_MEANINGS[squawk] ?? 'Alert';
+}
+
 const SQUAWK_MEANINGS = {
   7500: 'Hijack',
   7600: 'Radio failure',
@@ -143,7 +151,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
   if (settings.squawkEnabled && aircraft.squawk && settings.squawkCodes[aircraft.squawk]) {
     if (!isOnCooldown('squawk', aircraft.hex)) {
       markNotified('squawk', aircraft.hex);
-      const squawkMeaning = SQUAWK_MEANINGS[aircraft.squawk] ?? 'Alert';
+      const squawkMeaning = squawkMeaningFor(aircraft.squawk);
       notify({
         title: `Squawk ${aircraft.squawk} — ${squawkMeaning}`,
         message: aircraftLabel(aircraft),
