@@ -132,17 +132,26 @@ function recordRangeAndRegistrationSightings() {
     recordDailyUnique(aircraft.hex, aircraft.flight);
   }
 
-  if (bestRangeKm !== null) recordRangeSample(bestRangeKm);
+  if (bestRangeKm !== null) {
+    recordRangeSample(bestRangeKm);
+    // Same MLAT-filtered, self-computed reading "today"'s max range
+    // (getRangeSummary) is already based on -- the all-time record used to
+    // come from readsb's own stats.json total.max_distance instead (see
+    // pollStats below), a completely different, unfiltered,
+    // receiver-restart-resettable number that could (and did, live) read
+    // *lower* than today's own more accurate figure -- a logically
+    // impossible "all time < today" reading on the Stats panel. Feeding
+    // both the daily and all-time record from this one source keeps them
+    // consistent by construction.
+    evaluateRangeRecordRule(bestRangeKm);
+  }
 }
 
 async function pollStats() {
   const stats = await source.fetchStats();
   if (stats === null) return;
 
-  const sample = ingestStats(stats);
-  if (sample) {
-    evaluateRangeRecordRule(sample.maxRangeKm);
-  }
+  ingestStats(stats);
 
   // `local` is absent in --net-only mode (no SDR attached, MLAT/network-only
   // feed) -- optional chaining rather than assuming it's always there.

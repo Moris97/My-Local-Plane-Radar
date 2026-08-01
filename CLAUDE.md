@@ -1185,9 +1185,16 @@ correct than the old immediate-fire behavior, since we never actually got a
 good-enough look at it. `evaluateAircraftRules` takes an optional second `now`
 argument (defaults to the real clock) purely so tests can exercise the delay
 deterministically without real waits or fake timers; the one real call site
-(`index.js`) never passes it. New all-time range record (compared against a
-`allTimeMaxRangeKm` config value, fed by `stats.json`'s own `max_distance` —
-no per-aircraft distance math needed), and a **watch list**
+(`index.js`) never passes it. New all-time range record (compared against an
+`allTimeMaxRangeKm` config value) — **fed by MLPR's own per-tick Haversine
+calc since 2026-08-01** (`bestRangeKm`, `index.js`'s
+`recordRangeAndRegistrationSightings`, `range.js`'s `distanceKm`,
+MLAT-excluded via `isRangeEligible`), not readsb's own `stats.json`
+`total.max_distance` as originally shipped — see the "Range/position
+sampling" section below for why the switch happened (a real, live
+inversion: "today"'s max range briefly exceeded "all time"'s, since the two
+were computed by two independent, differently-filtered mechanisms), and a
+**watch list**
 (`watchlist.js`): entries `{id, matchType: type|registration|flight,
 matchValue, altitudeOperator: below|above|null, altitudeValue}`, stored as
 JSON in `config` (same pattern as notification settings). Matching is
@@ -1433,9 +1440,7 @@ from the same daily accumulator pattern already in use (sum + sample count,
 divided at flush time).
 
 `range_top_avg_km` is a **deliberate, narrow exception** to "readsb already
-computes max range, don't reimplement distance math" (that note is about the
-*existing* all-time-max-range notification feature, which is untouched and
-still reads `stats.json`'s `total.max_distance` directly). `stats.json` only
+computes max range, don't reimplement distance math". `stats.json` only
 exposes a single running maximum, never a distribution — there's no way to
 show "how good was reception typically" from it alone. So `server/src/
 range.js` adds a pure Haversine `distanceKm()`, called once per poll tick
@@ -1443,8 +1448,12 @@ per aircraft-with-position against the effective home location, keeping only
 the best distance *per minute* in memory (~1440 floats/day — an ephemeral
 rolling aggregate, same category as the existing daily accumulator, not
 "raw position history" under hard rule 4). At day rollover this reduces to
-two numbers written to `daily_stats`: `max_range_km` (unchanged, still from
-readsb) and `range_top_avg_km` — the **mean of the top `ceil(n × 10%)`**
+two numbers written to `daily_stats`: `max_range_km` (`index.js`'s
+`flushDailyStats` takes this from `getRangeSummary()`, i.e. this same
+self-computed figure — **not** readsb's `stats.json` `total.max_distance`;
+an earlier version of this paragraph said "unchanged, still from readsb",
+which was already wrong when written, not a later drift) and
+`range_top_avg_km` — the **mean of the top `ceil(n × 10%)`**
 per-minute best samples (not a percentile cutoff value — the user asked for
 "an average of the best few%," which is a different statistic and was
 briefly implemented wrong as a percentile before being caught and renamed).
@@ -1462,14 +1471,31 @@ actually heard it that far out; the top-10%-average above blunts a single
 MLAT *spike* but a receiver in an MLAT-dense area could see its typical
 `range_top_avg_km` (and the antenna coverage map/bar chart, `recordAntennaSample`
 in `index.js`, gated by the same check in the same loop) skewed by MLAT
-contacts routinely, not just as an outlier. **This does not touch the
-all-time-max-range notification or Stats' "Od początku" all-time max range
-tile** — both still read `getAllTimeMaxRangeKm()` / `stats.json`'s
-`total.max_distance` straight from readsb (see the paragraph above), a
-single pre-aggregated number with no per-aircraft breakdown we could filter
-even if we wanted to; only the figures actually built from our own
-per-aircraft Haversine loop (`range_top_avg_km` and the antenna stats) are
-in scope here.
+contacts routinely, not just as an outlier.
+
+**Update, 2026-08-01: the all-time-max-range notification/tile now also
+reads from this same self-computed, MLAT-excluded figure, not readsb's
+`stats.json` `total.max_distance`.** Originally left alone deliberately (the
+scope note used to read "a single pre-aggregated number with no
+per-aircraft breakdown we could filter even if we wanted to; only
+`range_top_avg_km` and the antenna stats are in scope") — but that meant
+`evaluateRangeRecordRule()` (`notifications/rules.js`) and today's
+`getRangeSummary().maxRangeKm` were fed by two independent, differently-
+filtered mechanisms (one MLAT-excluded and home-location-aware via our own
+`distanceKm()`, one readsb's own unfiltered, receiver-restart-resettable
+running counter using whatever origin *readsb* has configured). Reported
+live 2026-08-01: Stats showed "Ten dzień" (today) with a *higher* max range
+than "Od początku" (all time), which is logically impossible since today is
+a subset of all-time. Fixed by calling `evaluateRangeRecordRule(bestRangeKm)`
+right alongside `recordRangeSample(bestRangeKm)` in `index.js`'s
+`recordRangeAndRegistrationSightings` (removed the old call from
+`pollStats`, which fed it `sample.maxRangeKm` off `stats.json`) — both the
+daily figure and the all-time record now come from the exact same per-tick
+value, so this specific inversion can no longer happen. readsb's own
+`total.max_distance` is still ingested into `stats-history.js`'s `history`/
+`dailyAccumulator.maxRangeKm` as a side effect of `ingestStats()`, but
+nothing reads it back for display or notifications anymore — harmless,
+just vestigial; not cleaned up as part of this fix since it wasn't the bug.
 
 ### Registration visit-tracking (`server/src/stats-registrations.js`)
 
