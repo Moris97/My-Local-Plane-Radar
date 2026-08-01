@@ -6,15 +6,20 @@ import { renderAircraftDetailsPanel, aircraftDetailsPanelTitle } from './aircraf
 import { getSettings, updateSettings } from './settings-state.js';
 
 // Bottom-sheet on phones / side panel on desktop (see the @media block in
-// style.css). `fill: true` (List only) makes the panel reach the true
-// screen bottom instead of stopping above the bottom bar -- see the
-// mlpr-panel-fill CSS rule, toggled below in openPanel/openFullscreenModal.
+// style.css). `fill: true` makes the panel reach the true screen bottom
+// instead of stopping above the bottom bar -- see the mlpr-panel-fill CSS
+// rule, toggled below in openPanel/openFullscreenModal. Originally List-only
+// (it needed the extra height for a long table); every panel/modal now gets
+// it, since stopping short also meant the live map (aircraft, trails, place
+// labels) visibly showed through the gap above the bar under Stats/Settings/
+// aircraft details too -- reported live as a visual bug (2026-08-01), not
+// something anyone had wanted on purpose.
 const PANELS = {
   list: { title: () => t('list'), render: renderListPanel, fill: true },
-  settings: { title: () => t('settings'), render: renderSettingsPanel },
+  settings: { title: () => t('settings'), render: renderSettingsPanel, fill: true },
   // Not tied to a bottom-bar button -- opened contextually from the
   // "show more details" button in an aircraft's popup (see app.js).
-  aircraft: { title: aircraftDetailsPanelTitle, render: renderAircraftDetailsPanel },
+  aircraft: { title: aircraftDetailsPanelTitle, render: renderAircraftDetailsPanel, fill: true },
 };
 
 // Full-screen instead -- currently Stats and the List's own "open
@@ -24,7 +29,7 @@ const PANELS = {
 // PANELS.list, just with more screen real estate -- not a separate
 // column/sort configuration.
 const FULLSCREEN_MODALS = {
-  stats: { title: () => t('stats'), render: renderStatsPanel },
+  stats: { title: () => t('stats'), render: renderStatsPanel, fill: true },
   listFull: { title: () => t('list'), render: (el) => renderListPanel(el, { fullscreen: true }), fill: true },
 };
 
