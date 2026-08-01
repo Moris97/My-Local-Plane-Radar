@@ -206,7 +206,7 @@ function flushStatsHistorySnapshot() {
 }
 
 async function main() {
-  const { app, broadcast } = await buildServer();
+  const { app, broadcast, closeWebSockets } = await buildServer();
 
   // Bridges the exact gap reported live: the 24h charts (aircraft
   // seen/with-position/range) read from in-memory state that's otherwise
@@ -300,6 +300,16 @@ async function main() {
       shutdownSmartHome();
     } catch (err) {
       app.log.error(err, 'smart-home MQTT shutdown failed');
+    }
+    try {
+      // Before app.close(), never after -- see server.js's closeWebSockets:
+      // app.close() waits for every connection to drain, and an open
+      // WebSocket never drains on its own, so this is what stops shutdown
+      // hanging until systemd's 90s timeout on any restart with a browser
+      // tab open.
+      closeWebSockets();
+    } catch (err) {
+      app.log.error(err, 'websocket shutdown failed');
     }
     await app.close();
     process.exit(0);

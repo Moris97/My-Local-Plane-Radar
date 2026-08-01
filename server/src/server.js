@@ -546,5 +546,31 @@ export async function buildServer({ logger = true } = {}) {
     }
   }
 
-  return { app, broadcast };
+  // Must be called before app.close() on shutdown. An upgraded WebSocket is
+  // still one of the HTTP server's own connections, and it never ends on its
+  // own -- so app.close(), which waits for every connection to drain, waited
+  // forever whenever any browser tab was open. In practice that meant
+  // `systemctl restart` hung until systemd's TimeoutStopSec (90s by default)
+  // gave up and SIGKILLed, on every restart and every reboot with a tab
+  // open. (Data was never at risk: index.js does all its flushes before
+  // app.close(). It was purely a 90-second stall.) Found 2026-08-01 by
+  // noticing test servers that logged "shutting down" and then just sat
+  // there; reproduced deterministically -- no WS client, exits in ~200ms;
+  // one WS client, never exits.
+  //
+  // terminate() rather than close(): close() starts a closing handshake and
+  // waits for the peer to answer, which an unresponsive client may never do
+  // -- reintroducing the same hang in a smaller form. We are exiting anyway,
+  // and app.js's own WebSocket 'close' handler already reconnects a second
+  // later, so dropping the socket outright is both safe and what a restart
+  // wants.
+  function closeWebSockets() {
+    for (const ws of clients) {
+      ws.terminate();
+    }
+    clients.clear();
+    wss.close();
+  }
+
+  return { app, broadcast, closeWebSockets };
 }
