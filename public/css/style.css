@@ -128,12 +128,6 @@ html, body {
   stroke: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mlpr-plane-rotor {
-    animation: none;
-  }
-}
-
 @keyframes mlpr-plane-rotor-spin {
   to {
     transform: rotate(360deg);
@@ -1923,4 +1917,52 @@ input[type='checkbox'] {
   padding: 8px 12px;
   font-size: 13px;
   cursor: pointer;
+}
+
+/* Keyboard focus. The app has full focus management already (panels.js
+   traps Tab within an open panel and restores focus on close), but nothing
+   ever *showed* where focus was: every interactive control here is
+   custom-styled, so the browser's default ring is either overridden or
+   barely visible against the dark chrome. :focus-visible rather than
+   :focus so it appears for keyboard/AT navigation without ringing every
+   mouse click. Green matches the app accent; the offset keeps it clear of
+   the control's own border. */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+a:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid #3ddc84;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Every infinite animation in the app belongs in here, not just the rotor
+   this block originally covered -- the home marker's radar-ping rings and
+   the selection glow's breathing both ran regardless of the setting, which
+   is exactly what someone asking for reduced motion is trying to avoid.
+   Note two of the three need more than `animation: none`, because in both
+   cases the animation is what makes the element visible at all. */
+@media (prefers-reduced-motion: reduce) {
+  .mlpr-plane-rotor {
+    animation: none;
+  }
+
+  /* The rings convey "the receiver is here" purely through motion, and
+     their keyframes are what fade them out; frozen at frame 0 they'd sit
+     as two static circles cluttering the solid centre dot. The dot alone
+     already marks the spot, so drop them entirely. */
+  .mlpr-home-ring {
+    display: none;
+  }
+
+  /* .mlpr-plane-glow's base opacity is 0 -- the breathing keyframes are the
+     only thing that ever makes it visible. Turning the animation off alone
+     would therefore silently delete the selection indicator, so pin it to a
+     steady mid-cycle value instead. */
+  .mlpr-plane-selected .mlpr-plane-glow {
+    animation: none;
+    opacity: 0.75;
+  }
 }

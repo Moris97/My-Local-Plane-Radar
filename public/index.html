@@ -51,7 +51,12 @@
 </div>
 
 <div id="panel-overlay" class="hidden"></div>
-<section id="panel" class="hidden" aria-hidden="true">
+<!-- role/aria-modal, not just aria-hidden: this already behaves as a modal
+     dialog (panels.js traps Tab inside it, Escape closes it, focus is
+     restored on close), so assistive technology should be told that rather
+     than having to infer it from a plain <section>. aria-labelledby points
+     at the title panels.js fills in per panel. -->
+<section id="panel" class="hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="panel-title">
   <div id="panel-resize-handle" aria-hidden="true"></div>
   <header id="panel-header">
     <h2 id="panel-title"></h2>
@@ -71,7 +76,7 @@
      own size or position. Positioned/shown entirely by list.js; empty here. -->
 <section id="list-config-window" class="hidden" aria-hidden="true"></section>
 
-<section id="fullscreen-modal" class="hidden" aria-hidden="true">
+<section id="fullscreen-modal" class="hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="fullscreen-modal-title">
   <header id="fullscreen-modal-header">
     <h2 id="fullscreen-modal-title"></h2>
     <button type="button" id="fullscreen-modal-close">
@@ -90,7 +95,10 @@
      that's handed in) and resolves a value back to its caller, which that
      registry's render(el) contract has no room for. Populated entirely by
      area-editor.js; empty here. -->
-<section id="area-editor" class="hidden" aria-hidden="true"></section>
+<!-- No static title element to point aria-labelledby at (area-editor.js
+     builds the whole toolbar), so it sets an aria-label itself on open,
+     translated like everything else. -->
+<section id="area-editor" class="hidden" aria-hidden="true" role="dialog" aria-modal="true"></section>
 
 <nav id="bottom-bar">
   <button type="button" class="mlpr-bar-btn" data-panel="list">

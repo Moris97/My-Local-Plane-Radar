@@ -130,6 +130,10 @@ export function openAreaEditor(initialArea = null) {
 
     overlay.classList.remove('hidden');
     overlay.setAttribute('aria-hidden', 'false');
+    // The dialog's accessible name. Set here rather than in index.html
+    // because this overlay has no persistent title element to reference,
+    // and it has to be translated like the rest of the UI.
+    overlay.setAttribute('aria-label', t('areaEditorTitle'));
     overlay.innerHTML = `
       <div class="mlpr-area-toolbar">
         <!-- The free-shape (polygon) button is deliberately absent, not
@@ -253,6 +257,16 @@ export function openAreaEditor(initialArea = null) {
           redrawShape();
           positionHandles();
         });
+
+        // Deliberately not on 'input': rewriting the field mid-keystroke
+        // would fight the user (typing "1" on the way to "150" would be
+        // rewritten to the minimum instantly). 'change' fires on blur or
+        // Enter -- once they've finished -- which is the right moment to
+        // show what was actually stored. Without this, typing a value
+        // outside [MIN_SIZE_KM, MAX_SIZE_KM] left the field showing the
+        // typed number while the shape on the map used the clamped one, so
+        // the two silently disagreed.
+        input.addEventListener('change', syncHandleInputs);
 
         marker.on('drag', () => {
           const { lng, lat } = marker.getLngLat();
