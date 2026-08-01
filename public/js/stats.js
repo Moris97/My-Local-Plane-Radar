@@ -63,6 +63,23 @@ const chartView = { topType: 'doughnut', topAirline: 'doughnut' };
 
 let airlinesCache = null;
 
+// Caches the last-fetched /api/stats/types or /api/stats/airlines counts
+// per chart kind, keyed by the range they were fetched for -- the
+// doughnut<->line view toggle used to re-fetch from scratch on every click
+// even though the range hadn't changed and the same counts were just
+// fetched moments ago for the other view. { range, counts } | null per kind.
+const topChartCountsCache = { topType: null, topAirline: null };
+
+async function fetchTopChartCounts(kind, countsUrl, range, forceRefresh) {
+  const cached = topChartCountsCache[kind];
+  if (!forceRefresh && cached && cached.range === range) {
+    return cached.counts;
+  }
+  const counts = await fetchJson(countsUrl, []);
+  topChartCountsCache[kind] = { range, counts };
+  return counts;
+}
+
 async function fetchJson(url, fallback) {
   try {
     const response = await fetch(url);
@@ -416,8 +433,8 @@ export function renderStatsPanel(container) {
     legendEl.innerHTML = topKeys.map((key, i) => legendItemHtml(DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length], labelFor(key))).join('');
   }
 
-  async function drawTopChart(kind, elId, legendId, countsUrl, labelFor, extractKey) {
-    const counts = await fetchJson(countsUrl, []);
+  async function drawTopChart(kind, elId, legendId, countsUrl, labelFor, extractKey, forceRefresh = true) {
+    const counts = await fetchTopChartCounts(kind, countsUrl, currentRange, forceRefresh);
     const view = chartView[kind];
 
     if (view === 'doughnut') {
@@ -437,11 +454,11 @@ export function renderStatsPanel(container) {
     drawLineTrend(elId, legendId, buckets, topKeys, labelFor);
   }
 
-  async function drawTypeChart() {
-    await drawTopChart('topType', '#mlpr-chart-top-type', '#mlpr-legend-top-type', `/api/stats/types?range=${currentRange}`, (typeCode) => typeCode, (e) => e.typeCode);
+  async function drawTypeChart(forceRefresh = true) {
+    await drawTopChart('topType', '#mlpr-chart-top-type', '#mlpr-legend-top-type', `/api/stats/types?range=${currentRange}`, (typeCode) => typeCode, (e) => e.typeCode, forceRefresh);
   }
 
-  async function drawAirlineChart() {
+  async function drawAirlineChart(forceRefresh = true) {
     const airlines = await getAirlinesMap();
     await drawTopChart(
       'topAirline',
@@ -450,6 +467,7 @@ export function renderStatsPanel(container) {
       `/api/stats/airlines?range=${currentRange}`,
       (icao) => airlines.get(icao)?.name ?? icao,
       (e) => e.airlineIcao,
+      forceRefresh,
     );
   }
 
@@ -463,8 +481,11 @@ export function renderStatsPanel(container) {
           for (const sibling of toggle.querySelectorAll('.mlpr-range-btn')) {
             sibling.classList.toggle('active', sibling === btn);
           }
-          if (kind === 'topType') drawTypeChart();
-          else drawAirlineChart();
+          // Just switching views, not a new range -- reuse the counts
+          // already fetched for the current range instead of re-fetching
+          // from scratch (see topChartCountsCache above).
+          if (kind === 'topType') drawTypeChart(false);
+          else drawAirlineChart(false);
         });
       }
     }

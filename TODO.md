@@ -108,12 +108,6 @@ Added to as they come up; picked up in a later stage when relevant.
   built, give it a `publishSmartHomeEvent()` call site too (see the smart-
   home entry below) -- same pattern as first-seen/watchlist, not a design
   question when the time comes.
-- **Log unmatched 3-letter airline callsign prefixes** — when
-  `airline-lookup.js` sees a well-formed airline-style callsign whose prefix
-  isn't in the OpenFlights `airlines.dat` map (`kind: 'airline_unknown'`),
-  it's silently ignored rather than logged anywhere. Explicitly called out
-  by the user as optional/nice-to-have, not required, when the advanced
-  stats feature was specced (2026-07-27) — not implemented.
 - **Circling-aircraft notification** (effort: medium, impact: high,
   priority: low) — an aircraft that loops in roughly the same place for
   several minutes is usually doing something worth knowing about: police,
@@ -193,32 +187,30 @@ Added to as they come up; picked up in a later stage when relevant.
   a separate layer for the glow, `text-field` for labels). Revisit only if
   real performance problems show up at this receiver's actual traffic
   density — this note is so it's obvious where to look if that happens.
-- **Perf/optimization pass found during a 2026-07-29 UI/UX review** — small,
-  concrete inefficiencies spotted while reading the frontend code, not yet
-  fixed (the one already done, merging the three hourly prune timers into
-  one, is not in this list):
-  - `renderTrail()` in `trailMode: 'all'` (`public/js/app.js`, called from
-    inside `applyAircraftUpdate`'s per-aircraft loop in `handleSnapshot`)
-    rebuilds the *entire* trail GeoJSON source — every tracked aircraft,
-    every point, re-run through the MLAT filter/smoothing pass — once per
-    aircraft in the incoming batch, instead of once after the loop. Exactly
-    the same shape of bug `notifyAircraftChanged()` was already batched to
-    fix elsewhere (see `radar-state.js`'s comment on `noteAircraft`) — this
-    one spot never got the equivalent fix. A batch of 20 updated aircraft
-    means the full trail source is rebuilt 20 times instead of once.
+- **Perf/optimization pass found during a 2026-07-29 UI/UX review — done
+  2026-08-01**: four small, concrete inefficiencies spotted while reading
+  the frontend code (the one already done at the time, merging the three
+  hourly prune timers into one, is not in this list):
+  - `renderTrail()` in `trailMode: 'all'` (`public/js/app.js`) used to
+    rebuild the *entire* trail GeoJSON source once per aircraft inside
+    `applyAircraftUpdate`'s per-aircraft loop rather than once after the
+    loop — same shape of bug `notifyAircraftChanged()` was already batched
+    to fix elsewhere. `applyAircraftUpdate` now returns whether it touched
+    the trail, and `handleSnapshot` calls `renderTrail()` at most once per
+    snapshot regardless of batch size.
   - Stats' doughnut/line chart-view toggle (`public/js/stats.js`'s
-    `drawTopChart`) re-fetches `/api/stats/types` or `/api/stats/airlines`
-    from scratch on every toggle click, even when the range hasn't changed
-    and the same data was just fetched for the other view. Worth caching
-    per (kind, range), invalidated on an actual range change.
-  - List's sort comparator (`public/js/list.js`'s `visibleAircraft`) calls
-    `field.sortValue(a, ctx)`/`(b, ctx)` fresh on every pairwise comparison
-    during `Array.prototype.sort()` instead of computing each row's sort
-    key(s) once upfront (a decorate-sort-undecorate / Schwartzian
-    transform). Notably wasteful for the `distance` field, which redoes a
-    Haversine calculation per comparison rather than once per aircraft.
-  - `getLiveAircraft()` (`radar-state.js`) allocates a fresh array via
-    `Array.from(liveAircraft.values())` on every call; `list.js`'s
-    `drawTable()` calls it twice per render (once for the total count via
-    `.length`, once more inside `visibleAircraft` for the filtered/sorted
-    rows). Trivial to halve: fetch once, reuse for both.
+    `drawTopChart`) re-fetched `/api/stats/types`/`/api/stats/airlines`
+    from scratch on every toggle click even when the range hadn't changed.
+    Added `topChartCountsCache` keyed by `(kind, range)`; the toggle click
+    handler now passes `forceRefresh: false` to reuse it, while the range
+    selector and the periodic refresh timer still force a fresh fetch.
+  - List's sort comparator (`public/js/list.js`'s `visibleAircraft`) called
+    `field.sortValue()` fresh on every pairwise comparison during
+    `Array.prototype.sort()` — notably wasteful for the `distance` field's
+    Haversine calculation. Switched to a decorate-sort-undecorate
+    (Schwartzian) transform: each row's sort key(s) are computed once
+    upfront.
+  - `getLiveAircraft()` (`radar-state.js`) allocates a fresh array on every
+    call; `list.js`'s `drawTable()` was calling it twice per render (total
+    count, then again inside `visibleAircraft`). Now fetched once and
+    reused for both.

@@ -70,27 +70,39 @@ function matchesSearch(aircraft, query) {
 }
 
 // ctx is { home } -- only the 'distance' field reads it, see list-fields.js.
-function visibleAircraft(query, ctx) {
+// allAircraft is passed in (rather than calling getLiveAircraft() here)
+// so a caller that also needs the unfiltered live set (drawTable's total
+// count) can fetch it once and reuse it -- getLiveAircraft() allocates a
+// fresh array from the underlying Map on every call.
+function visibleAircraft(allAircraft, query, ctx) {
   const { listSortLevels, listPositionFirst } = getSettings();
-  const rows = getLiveAircraft().filter((aircraft) => matchesSearch(aircraft, query));
-  rows.sort((a, b) => {
+  const rows = allAircraft.filter((aircraft) => matchesSearch(aircraft, query));
+
+  // Decorate-sort-undecorate (Schwartzian transform): each row's sort
+  // key(s) are computed once upfront instead of calling field.sortValue()
+  // fresh on every pairwise comparison inside Array.prototype.sort() --
+  // notably wasteful for the 'distance' field, which otherwise redoes a
+  // Haversine calculation per comparison instead of once per aircraft.
+  const decorated = rows.map((aircraft) => ({
+    aircraft,
+    positionRank: listPositionFirst ? (hasPosition(aircraft) ? 0 : 1) : 0,
+    keys: listSortLevels.map((level) => getListField(level.key)?.sortValue(aircraft, ctx) ?? null),
+  }));
+
+  decorated.sort((a, b) => {
     // Optional pre-sort grouping requested separately from any column sort
     // -- aircraft with a known position always come first, then the
     // configured sort levels apply within each group.
-    if (listPositionFirst) {
-      const posA = hasPosition(a) ? 0 : 1;
-      const posB = hasPosition(b) ? 0 : 1;
-      if (posA !== posB) return posA - posB;
-    }
-    for (const level of listSortLevels) {
-      const field = getListField(level.key);
-      if (!field) continue;
-      const cmp = compareValues(field.sortValue(a, ctx), field.sortValue(b, ctx), level.asc);
+    if (listPositionFirst && a.positionRank !== b.positionRank) return a.positionRank - b.positionRank;
+    for (let i = 0; i < listSortLevels.length; i++) {
+      if (!getListField(listSortLevels[i].key)) continue;
+      const cmp = compareValues(a.keys[i], b.keys[i], listSortLevels[i].asc);
       if (cmp !== 0) return cmp;
     }
     return 0;
   });
-  return rows;
+
+  return decorated.map((d) => d.aircraft);
 }
 
 // fullscreen: true when rendered inside the "open fullscreen" modal
@@ -170,10 +182,10 @@ export function renderListPanel(container, { fullscreen = false } = {}) {
     const columns = listColumns.map((key) => getListField(key)).filter(Boolean);
     const primarySort = listSortLevels[0];
 
-    const total = getLiveAircraft().length;
-    totalEl.textContent = `${t('listTotal')}: ${total}`;
+    const allAircraft = getLiveAircraft();
+    totalEl.textContent = `${t('listTotal')}: ${allAircraft.length}`;
 
-    const rows = visibleAircraft(searchQuery, ctx);
+    const rows = visibleAircraft(allAircraft, searchQuery, ctx);
     const selectedHex = getSelectedHex();
     tableWrap.innerHTML = '';
 

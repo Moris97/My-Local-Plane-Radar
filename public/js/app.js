@@ -842,10 +842,11 @@ function applyAircraftUpdate(aircraft) {
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
   state.lastLngLat = lngLat;
 
+  let trailChanged = false;
   const { trailMode } = getSettings();
   if (trailMode === 'all' || aircraft.hex === selectedHex) {
     recordPosition(aircraft.hex, lngLat, aircraft.onGround ? 0 : aircraft.altBaro, now, wasGone, aircraft.sourceType);
-    renderTrail();
+    trailChanged = true;
   }
 
   if (aircraft.hex === selectedHex) {
@@ -856,19 +857,33 @@ function applyAircraftUpdate(aircraft) {
     map.jumpTo({ center: lngLat, zoom: 9 });
     hasCentered = true;
   }
+
+  return trailChanged;
 }
 
+// applyAircraftUpdate() only *records* a trail point per aircraft (cheap);
+// renderTrail() re-runs the MLAT filter/smoothing pass and rebuilds the
+// entire shared GeoJSON source across every tracked aircraft (in
+// trailMode: 'all', not just the one that changed) -- calling it once per
+// aircraft in a batch meant a 20-aircraft delta rebuilt the whole trail
+// source 20 times instead of once. Batched here the same way
+// notifyAircraftChanged() already is for the same reason (see
+// radar-state.js's comment on noteAircraft).
 function handleSnapshot(snapshot) {
   if (snapshot.type === 'full') {
     resetAll();
+    let trailChanged = false;
     for (const aircraft of snapshot.aircraft) {
-      applyAircraftUpdate(aircraft);
+      if (applyAircraftUpdate(aircraft)) trailChanged = true;
     }
+    if (trailChanged) renderTrail();
     notifyAircraftChanged();
   } else if (snapshot.type === 'delta') {
+    let trailChanged = false;
     for (const aircraft of snapshot.updated) {
-      applyAircraftUpdate(aircraft);
+      if (applyAircraftUpdate(aircraft)) trailChanged = true;
     }
+    if (trailChanged) renderTrail();
     notifyAircraftChanged();
   } else if (snapshot.type === 'stats') {
     noteLiveStats({
