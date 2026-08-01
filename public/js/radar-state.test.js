@@ -8,6 +8,8 @@ import {
   getLiveAircraft,
   getAircraftByHex,
   onChange,
+  setMapView,
+  getMapView,
 } from './radar-state.js';
 
 beforeEach(() => {
@@ -69,4 +71,15 @@ test('onChange returns an unsubscribe function', () => {
   notifyAircraftChanged();
 
   assert.equal(calls, 1);
+});
+
+test('mapView round-trips what app.js pushes into it, and can be cleared', () => {
+  // Placeholder coordinates only -- never the real receiver location.
+  setMapView({ lat: 50.0, lon: 20.0, zoom: 9 });
+  assert.deepEqual(getMapView(), { lat: 50.0, lon: 20.0, zoom: 9 });
+
+  // area-editor.js treats null as "no view yet" and falls back to the home
+  // location, so that state has to stay representable.
+  setMapView(null);
+  assert.equal(getMapView(), null);
 });

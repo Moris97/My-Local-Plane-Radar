@@ -88,17 +88,17 @@ function aircraftFields(aircraft) {
   };
 }
 
-// `reason` is also the topic's last segment ('first_seen' | 'watchlist')
-// so a Home Assistant automation can trigger on one specific topic instead
-// of inspecting the payload -- see rules.js's two call sites. Flat payload
-// (not nested under an `aircraft` key) so HA's Jinja templates can read
-// `trigger.payload_json.typeCode` directly.
+// `reason` is also the topic's last segment ('first_seen' | 'watchlist' |
+// 'squawk') so a Home Assistant automation can trigger on one specific
+// topic instead of inspecting the payload -- see rules.js's call sites.
+// Flat payload (not nested under an `aircraft` key) so HA's Jinja templates
+// can read `trigger.payload_json.typeCode` directly.
 // Returns whether the event was actually handed to a connected socket --
 // `false` covers "smart home disabled", "no client configured", and "client
 // exists but the broker connection is currently down" alike. Used by
 // /dev/smart-home-test (see server.js) to tell a real user whether their
 // test event went anywhere, not just fire-and-forget silently.
-export function publishSmartHomeEvent({ reason, aircraft, matchedEntry }) {
+export function publishSmartHomeEvent({ reason, aircraft, matchedEntry, squawkMeaning }) {
   const settings = getSmartHomeSettings();
   if (!settings.enabled || !client) return false;
 
@@ -110,6 +110,15 @@ export function publishSmartHomeEvent({ reason, aircraft, matchedEntry }) {
   if (matchedEntry) {
     payload.matchedType = matchedEntry.matchType;
     payload.matchedValue = matchedEntry.matchValue;
+  }
+  if (reason === 'squawk') {
+    // aircraft.squawk itself isn't part of aircraftFields() (no other event
+    // needs it) -- included here, plus the human-readable meaning
+    // (Hijack/Radio failure/Emergency) so an HA automation doesn't need its
+    // own copy of rules.js's SQUAWK_MEANINGS table just to show a sensible
+    // message.
+    payload.squawk = aircraft.squawk;
+    payload.squawkMeaning = squawkMeaning ?? null;
   }
 
   // Never retained -- this is a discrete occurrence ("a watched aircraft

@@ -11,7 +11,7 @@ const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
-const { hasSeenAircraft } = await import('../db.js');
+const { hasSeenAircraft, setConfigJSON } = await import('../db.js');
 const smartHome = await import('./smart-home.js');
 
 after(() => {
@@ -61,6 +61,7 @@ beforeEach(async () => {
     squawkCodes: { 7500: true, 7600: true, 7700: true },
     firstSeenEnabled: true,
     rangeRecordEnabled: true,
+    watchedEnabled: true,
   });
   const { updateSmartHomeSettings } = await import('./settings.js');
   smartHome.shutdownSmartHome(); // force a fresh client each test, regardless of whether settings actually changed
@@ -265,9 +266,141 @@ test('watch-list respects the per-hex cooldown', () => {
   assert.equal(watchedNotifications().length, 1);
 });
 
-// Smart-home (MQTT) scope boundary: wired to exactly first-seen and
-// watch-list, deliberately NOT squawk or range-record (explicit product
-// decision, not an oversight -- see rules.js's evaluateAircraftRules).
+test('watchedEnabled=false suppresses watch-list notifications entirely', () => {
+  updateNotificationSettings({ watchedEnabled: false });
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+  assert.equal(watchedNotifications().length, 0);
+  assert.equal(fakeSmartHomeClient.published.length, 0);
+});
+
+// Trigger area (watchlist.js's `area`). Placeholder coordinates only --
+// never the real receiver location (see CLAUDE.md's home-location rule).
+// The centre is deliberately an arbitrary point, not home: the feature
+// exists to watch a specific piece of sky (an airfield, an approach path)
+// that may be well away from the antenna.
+const AREA_CENTRE = { lat: 50.0, lon: 20.0 };
+
+test('circle area matches an aircraft inside the radius', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'circle', ...AREA_CENTRE, radiusKm: 20 },
+  });
+  // ~11 km north of the centre (0.1 deg latitude is ~11.1 km).
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.1, lon: 20.0 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('circle area does not match an aircraft outside the radius', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'circle', ...AREA_CENTRE, radiusKm: 20 },
+  });
+  // ~55 km north of the centre, well outside a 20 km radius.
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.5, lon: 20.0 }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('an area-restricted entry never matches an aircraft with no position', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'circle', ...AREA_CENTRE, radiusKm: 20 },
+  });
+  // A Mode-S-only contact -- missing data must never produce a false
+  // positive, same rule the altitude condition already follows.
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('an entry with no area still matches regardless of position', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 12.3, lon: 45.6 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('area and altitude conditions must BOTH hold, not either', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    altitudeOperator: 'below',
+    altitudeValue: 5000,
+    area: { kind: 'circle', ...AREA_CENTRE, radiusKm: 20 },
+  });
+
+  // Inside the area but too high.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'high-inside', typeCode: 'B738', lat: 50.1, lon: 20.0, altBaro: 35000 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  // Low enough but outside the area.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'low-outside', typeCode: 'B738', lat: 50.5, lon: 20.0, altBaro: 2000 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  // Both conditions satisfied.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'low-inside', typeCode: 'B738', lat: 50.1, lon: 20.0, altBaro: 2000 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('rectangle area matches an aircraft inside the box', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'rectangle', ...AREA_CENTRE, widthKm: 40, heightKm: 40 },
+  });
+  // ~11 km north of centre, comfortably inside a 40x40 km box.
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.1, lon: 20.0 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('rectangle area rejects an aircraft outside on either axis', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'rectangle', ...AREA_CENTRE, widthKm: 40, heightKm: 40 },
+  });
+
+  // Too far north (~55 km) but bang on the centre longitude.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'north', typeCode: 'B738', lat: 50.5, lon: 20.0 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  // On the centre latitude but far to the east (~1 deg lon is ~71 km here).
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'east', typeCode: 'B738', lat: 50.0, lon: 21.0 }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('a rectangle is not a circle: the corners are inside, unlike an equivalent circle', () => {
+  // A point diagonally out towards a corner is ~1.41x further than the
+  // half-width, so it would fall outside a circle of that radius but must
+  // be inside the box -- this is what proves the two shapes really differ
+  // rather than the rectangle quietly reusing the circle's test.
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'rectangle', ...AREA_CENTRE, widthKm: 60, heightKm: 60 },
+  });
+  // ~25 km north and ~25 km east of centre -- ~35 km diagonally.
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.225, lon: 20.35 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('an unrecognised area kind matches nothing rather than everything', () => {
+  // Deliberately bypasses addWatchEntry (validateArea would reject this
+  // shape) -- simulates an entry written by a future version with a shape
+  // this build doesn't know about, then read back after a downgrade.
+  const entry = addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  const stored = getWatchList();
+  stored.find((e) => e.id === entry.id).area = { kind: 'hexagon', lat: 50.0, lon: 20.0, radiusKm: 20 };
+  setConfigJSON('watchList', stored);
+
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.0, lon: 20.0 }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+// Smart-home (MQTT) scope boundary: wired to first-seen, watch-list, and
+// squawk; deliberately NOT range-record (explicit product decision, not an
+// oversight -- see rules.js's evaluateAircraftRules).
 test('first-seen publishes a smart-home event alongside the ntfy notification', () => {
   const aircraft = aircraftFixture();
   const start = Date.now();
@@ -290,7 +423,17 @@ test('watch-list match publishes a smart-home event with the matched type/value'
   assert.equal(events[0].payload.matchedValue, 'B738');
 });
 
-test('squawk emergency does NOT publish a smart-home event (deliberately out of scope)', () => {
+test('squawk emergency publishes a smart-home event with the squawk code/meaning', () => {
+  rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700' }));
+
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/squawk');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.squawk, '7700');
+  assert.equal(events[0].payload.squawkMeaning, 'Emergency');
+});
+
+test('squawkEnabled=false suppresses the smart-home event too, not just ntfy', () => {
+  updateNotificationSettings({ squawkEnabled: false });
   rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700' }));
   assert.equal(fakeSmartHomeClient.published.length, 0);
 });

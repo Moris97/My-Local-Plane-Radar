@@ -113,6 +113,21 @@ export function isOnlineFallbackActive() {
   return onlineFailedThisSession;
 }
 
+// The style a *secondary*, short-lived map (the trigger-area editor) should
+// use, given the user's configured mode/theme -- without touching any of
+// this module's fallback state machine. Deliberately not applyBasemapMode:
+// that function owns module-level state (errorWatchArmed, currentTheme,
+// currentCallbacks) scoped to the one long-lived main map, and pointing it
+// at a second map would let a transient editor map overwrite the callbacks
+// the main map's own error watcher fires with. Instead the editor gets a
+// plain style and simply inherits whatever online/offline verdict the main
+// map already reached this session -- if online was already found
+// unreachable, there's no reason to make the editor probe it again.
+export function styleForSecondaryMap(mode, theme) {
+  const effective = mode === 'online' && !onlineFailedThisSession ? 'online' : 'offline';
+  return { effective, style: effective === 'online' ? onlineStyleUrl(theme) : blankStyle(theme) };
+}
+
 async function checkOnlineReachable() {
   try {
     const response = await fetch(ONLINE_REACHABILITY_URL, {

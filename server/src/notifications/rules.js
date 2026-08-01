@@ -4,6 +4,7 @@ import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
 import { getWatchList } from './watchlist.js';
 import { publishSmartHomeEvent } from './smart-home.js';
+import { distanceKm, destinationPoint } from '../range.js';
 
 const SQUAWK_MEANINGS = {
   7500: 'Hijack',
@@ -55,10 +56,58 @@ function satisfiesAltitudeCondition(aircraft, entry) {
   return true;
 }
 
+// Optional per-entry trigger area (watchlist.js's `area`) -- "only notify
+// when this aircraft is actually inside this region". The centre is an
+// arbitrary point, not necessarily the receiver's own location: the point
+// is watching a specific piece of sky (an airfield, an approach path) that
+// may be well away from home.
+//
+// Same "missing data never produces a false positive" rule the altitude
+// condition already follows: an aircraft with no position at all (a
+// Mode-S-only contact) simply doesn't match an area-restricted entry,
+// rather than being let through on the grounds that we can't prove it's
+// outside.
+function satisfiesAreaCondition(aircraft, entry) {
+  if (!entry.area) return true;
+  if (typeof aircraft.lat !== 'number' || typeof aircraft.lon !== 'number') return false;
+
+  if (entry.area.kind === 'circle') {
+    return distanceKm(entry.area.lat, entry.area.lon, aircraft.lat, aircraft.lon) <= entry.area.radiusKm;
+  }
+
+  if (entry.area.kind === 'rectangle') {
+    // Bounds derived with the same destinationPoint() calls the editor uses
+    // to draw the box, so "inside the shape on screen" and "matches" can't
+    // drift apart. A lat/lon-aligned box is also a true rectangle in Web
+    // Mercator (constant latitude is horizontal, constant longitude is
+    // vertical), so what's drawn from these four numbers is exactly what's
+    // tested here.
+    const { lat, lon, widthKm, heightKm } = entry.area;
+    const north = destinationPoint(lat, lon, 0, heightKm / 2).lat;
+    const south = destinationPoint(lat, lon, 180, heightKm / 2).lat;
+    const east = destinationPoint(lat, lon, 90, widthKm / 2).lon;
+    const west = destinationPoint(lat, lon, 270, widthKm / 2).lon;
+
+    if (aircraft.lat < south || aircraft.lat > north) return false;
+    // A box wide enough to straddle the antimeridian comes back with
+    // west > east, where "between" means the two outer arcs, not the inner
+    // one. Vanishingly unlikely for a home receiver, but getting it wrong
+    // would silently invert the longitude test rather than fail loudly.
+    return west <= east
+      ? aircraft.lon >= west && aircraft.lon <= east
+      : aircraft.lon >= west || aircraft.lon <= east;
+  }
+
+  // An unknown shape (e.g. an entry written by a newer version, then
+  // downgraded) is treated as "don't match" rather than "match everything"
+  // -- a silently over-firing notification rule is worse than a silent one.
+  return false;
+}
+
 function matchesWatchEntry(aircraft, entry) {
   const field = aircraft[WATCH_FIELD_BY_MATCH_TYPE[entry.matchType]];
   if (!field || field.toLowerCase() !== entry.matchValue.toLowerCase()) return false;
-  return satisfiesAltitudeCondition(aircraft, entry);
+  return satisfiesAltitudeCondition(aircraft, entry) && satisfiesAreaCondition(aircraft, entry);
 }
 
 function formatAltitude(aircraft) {
@@ -94,12 +143,18 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
   if (settings.squawkEnabled && aircraft.squawk && settings.squawkCodes[aircraft.squawk]) {
     if (!isOnCooldown('squawk', aircraft.hex)) {
       markNotified('squawk', aircraft.hex);
+      const squawkMeaning = SQUAWK_MEANINGS[aircraft.squawk] ?? 'Alert';
       notify({
-        title: `Squawk ${aircraft.squawk} — ${SQUAWK_MEANINGS[aircraft.squawk] ?? 'Alert'}`,
+        title: `Squawk ${aircraft.squawk} — ${squawkMeaning}`,
         message: aircraftLabel(aircraft),
         priority: 5,
         tags: ['rotating_light'],
       });
+      // Smart-home (MQTT): originally scoped to only first-seen/watchlist
+      // (see those two call sites below); squawk emergencies were the one
+      // explicitly-deferred case from that decision (TODO.md) -- added
+      // 2026-08-01, same one-more-call-site change anticipated there.
+      publishSmartHomeEvent({ reason: 'squawk', aircraft, squawkMeaning });
     }
   }
 
@@ -118,15 +173,15 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           tags: ['eye'],
         });
         // Smart-home (MQTT) is a separate, independent delivery channel --
-        // deliberately only wired to these two rules (first-seen,
-        // watchlist) for now, not squawk/range-record, per explicit scope.
-        // No-ops on its own if smart-home isn't enabled/configured.
+        // wired to first-seen, watchlist, and squawk (see that block
+        // above); range-record is still deliberately out of scope. No-ops
+        // on its own if smart-home isn't enabled/configured.
         publishSmartHomeEvent({ reason: 'first_seen', aircraft });
       }
     }
   }
 
-  if (!isOnCooldown('watched', aircraft.hex)) {
+  if (settings.watchedEnabled && !isOnCooldown('watched', aircraft.hex)) {
     const matchedEntry = getWatchList().find((entry) => matchesWatchEntry(aircraft, entry));
     if (matchedEntry) {
       markNotified('watched', aircraft.hex);

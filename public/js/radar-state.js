@@ -133,3 +133,23 @@ export function onChange(fn) {
 function notify() {
   for (const fn of listeners) fn();
 }
+
+// The main map's current view, mirrored here purely so other UI modules can
+// read it without importing app.js -- which they cannot, since app.js
+// imports panels.js -> settings.js -> area-editor.js and the cycle back
+// would be circular. Same "app.js pushes, others pull" arrangement
+// setSelectedHex/getSelectedHex already uses.
+//
+// Written by app.js on every moveend (which a jumpTo/flyTo also fires, so
+// the initial auto-centering registers too). null until the map has settled
+// once -- readers must treat that as "no view yet" rather than assuming a
+// default.
+let mapView = null;
+
+export function setMapView(view) {
+  mapView = view;
+}
+
+export function getMapView() {
+  return mapView;
+}

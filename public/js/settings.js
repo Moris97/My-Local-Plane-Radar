@@ -3,6 +3,8 @@ import { getSettings, updateSettings, ICON_SIZE_MIN, ICON_SIZE_MAX } from './set
 import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
+import { formatDistance } from './units.js';
+import { openAreaEditor } from './area-editor.js';
 
 // Mirrors server/src/antenna-stats.js's ALTITUDE_BANDS, index for index --
 // only the translated label text lives here, the actual band boundaries are
@@ -77,7 +79,6 @@ function renderSettingsForm(container) {
       <button type="button" class="mlpr-settings-tab-btn" data-tab="aircraft">${t('tabAircraft')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="notifications">${t('tabNotifications')}</button>
       <button type="button" class="mlpr-settings-tab-btn" data-tab="server">${t('tabServer')}</button>
-      <button type="button" class="mlpr-settings-tab-btn" data-tab="smarthome">${t('tabSmartHome')}</button>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="general">
@@ -199,68 +200,145 @@ function renderSettingsForm(container) {
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="notifications" style="display:none">
-      <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('notifications')}</legend>
-        <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
-        <div class="mlpr-notif-squawk-codes">
-          <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
-          <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
-          <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
-        </div>
-        <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
-        <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
-        <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
-        <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
-        <div class="mlpr-home-actions">
-          <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
-        </div>
-      </fieldset>
+      <!-- Two views sharing this tab: the rule toggles ("what do I want to
+           be notified about"), and a subview for the fuller configuration
+           behind either of the two buttons. Same display:none swap the tab
+           panels themselves use -- no separate panel/modal machinery. The
+           Smart Home tab used to be a seventh top-level tab; folding it in
+           here is what brings the tab row back to five, which is what the
+           .mlpr-settings-tabs layout was sized for in the first place. -->
+      <div id="mlpr-notif-main">
+        <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
+        <fieldset class="mlpr-settings-group">
+          <legend>${t('notifications')}</legend>
+          <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
+          <div class="mlpr-notif-squawk-codes">
+            <label><input type="checkbox" id="mlpr-notif-squawk-7500"> 7500</label>
+            <label><input type="checkbox" id="mlpr-notif-squawk-7600"> 7600</label>
+            <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
+          </div>
+          <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
+          <label><input type="checkbox" id="mlpr-notif-watched"> ${t('watchlist')}</label>
+          <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
+        </fieldset>
 
-      <fieldset class="mlpr-settings-group">
-        <legend>${t('watchlist')}</legend>
-        <div id="mlpr-watchlist-items"></div>
-        <div class="mlpr-watch-form">
-          <select id="mlpr-watch-type">
-            <option value="type">${t('watchType')}</option>
-            <option value="registration">${t('watchRegistration')}</option>
-            <option value="flight">${t('watchFlight')}</option>
-          </select>
-          <input type="text" id="mlpr-watch-value" list="mlpr-aircraft-types" placeholder="${t('watchValuePlaceholder')}">
-          <datalist id="mlpr-aircraft-types">
-            ${COMMON_AIRCRAFT_TYPES.map((code) => `<option value="${code}">`).join('')}
-          </datalist>
-          <select id="mlpr-watch-alt-op">
-            <option value="">${t('noAltitudeCondition')}</option>
-            <option value="below">${t('below')}</option>
-            <option value="above">${t('above')}</option>
-          </select>
-          <input type="number" id="mlpr-watch-alt-value" placeholder="ft" style="display:none">
-          <button type="button" id="mlpr-watch-add">${t('add')}</button>
+        <!-- Directly under the "Watched aircraft" toggle it configures,
+             deliberately on this main view rather than behind "Configure
+             notifications" (which holds ntfy *delivery* settings only) --
+             the list is what that checkbox actually means, so hiding it a
+             click away separated a toggle from its own subject. -->
+        <fieldset class="mlpr-settings-group">
+          <legend>${t('watchlist')}</legend>
+          <div id="mlpr-watchlist-items"></div>
+          <div class="mlpr-watch-form">
+            <select id="mlpr-watch-type">
+              <option value="type">${t('watchType')}</option>
+              <option value="registration">${t('watchRegistration')}</option>
+              <option value="flight">${t('watchFlight')}</option>
+            </select>
+            <input type="text" id="mlpr-watch-value" list="mlpr-aircraft-types" placeholder="${t('watchValuePlaceholder')}">
+            <datalist id="mlpr-aircraft-types">
+              ${COMMON_AIRCRAFT_TYPES.map((code) => `<option value="${code}">`).join('')}
+            </datalist>
+            <select id="mlpr-watch-alt-op">
+              <option value="">${t('noAltitudeCondition')}</option>
+              <option value="below">${t('below')}</option>
+              <option value="above">${t('above')}</option>
+            </select>
+            <input type="number" id="mlpr-watch-alt-value" placeholder="ft" style="display:none">
+            <button type="button" id="mlpr-watch-area">${t('setArea')}</button>
+            <button type="button" id="mlpr-watch-add">${t('add')}</button>
+          </div>
+          <p id="mlpr-watch-area-summary" class="mlpr-home-status"></p>
+          <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
+        </fieldset>
+
+        <div class="mlpr-notif-config-actions">
+          <button type="button" id="mlpr-notif-configure">${t('configureNotifications')}</button>
+          <button type="button" id="mlpr-smarthome-configure">${t('configureSmartHome')}</button>
         </div>
-        <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
-      </fieldset>
+      </div>
+      <div id="mlpr-notif-subview" style="display:none"></div>
     </div>
 
     <div class="mlpr-settings-tab-panel" data-tab-panel="server" style="display:none">
       <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
       <div id="mlpr-server-tab-root">…</div>
     </div>
-
-    <div class="mlpr-settings-tab-panel" data-tab-panel="smarthome" style="display:none">
-      <p class="mlpr-scope-note">${t('scopeGlobal')}</p>
-      <div id="mlpr-smarthome-tab-root">…</div>
-    </div>
   `;
 
   wireTabs(container);
   wireDisplaySettings(container);
-  wireNotificationSettings(container);
+  wireNotificationToggles(container);
   wireWatchlist(container);
+  wireNotificationSubviews(container);
   renderServerTab(container.querySelector('#mlpr-server-tab-root'));
-  renderSmartHomeTab(container.querySelector('#mlpr-smarthome-tab-root'));
 
   return undefined;
+}
+
+// Both "Configure ..." buttons open into the same subview container,
+// replacing the toggles in place (not stacking on top of them) with a Back
+// button in a small header. Deliberately NOT list.js's floating-window
+// machinery -- that exists because List's Configure has to sit *beside* a
+// live-updating table without disturbing it; nothing here updates while
+// you're editing, so an in-place swap is both simpler and identical on
+// mobile and desktop.
+function wireNotificationSubviews(container) {
+  const mainEl = container.querySelector('#mlpr-notif-main');
+  const subviewEl = container.querySelector('#mlpr-notif-subview');
+
+  function closeSubview() {
+    subviewEl.style.display = 'none';
+    subviewEl.innerHTML = '';
+    mainEl.style.display = '';
+  }
+
+  function openSubview(titleText, renderContent) {
+    mainEl.style.display = 'none';
+    subviewEl.style.display = '';
+    subviewEl.innerHTML = `
+      <div class="mlpr-subview-header">
+        <button type="button" class="mlpr-subview-back" id="mlpr-subview-back">← ${t('back')}</button>
+        <span class="mlpr-subview-title">${titleText}</span>
+      </div>
+      <div id="mlpr-subview-body"></div>
+    `;
+    subviewEl.querySelector('#mlpr-subview-back').addEventListener('click', closeSubview);
+    renderContent(subviewEl.querySelector('#mlpr-subview-body'));
+  }
+
+  container
+    .querySelector('#mlpr-notif-configure')
+    .addEventListener('click', () => openSubview(t('configureNotifications'), renderNotificationsConfig));
+  container
+    .querySelector('#mlpr-smarthome-configure')
+    // Still gated by requireSettingsAuth exactly as when this was its own
+    // tab -- renderSmartHomeTab does its own password check internally, so
+    // moving it into a subview doesn't widen who can read broker
+    // credentials. The rest of this tab (rule toggles, ntfy topic, watch
+    // list) stays deliberately ungated, same split as before.
+    .addEventListener('click', () => openSubview(t('configureSmartHome'), renderSmartHomeTab));
+}
+
+// Notification *delivery* settings -- currently just the ntfy topic. The
+// watch list deliberately does NOT live here: it belongs next to the
+// "Watched aircraft" toggle on the main view, since it's what that toggle
+// actually means. This subview is about how notifications reach you, not
+// what triggers them.
+function renderNotificationsConfig(root) {
+  root.innerHTML = `
+    <fieldset class="mlpr-settings-group">
+      <legend>ntfy</legend>
+      <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
+      <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
+      </div>
+    </fieldset>
+  `;
+
+  wireNtfySection(root);
 }
 
 // Settings password gates this tab's content specifically (server port,
@@ -723,15 +801,18 @@ function wireHomeLocation(container, onUnauthorized) {
   loadHome();
 }
 
-function wireNotificationSettings(container) {
+// The main Notifications view's rule toggles. Split from the ntfy section
+// below (which now lives in the "Configure notifications" subview) purely
+// because the two no longer render at the same time -- querying for the
+// ntfy elements here would find nothing until that subview is opened.
+function wireNotificationToggles(container) {
   const notifSquawkEl = container.querySelector('#mlpr-notif-squawk');
   const notif7500El = container.querySelector('#mlpr-notif-squawk-7500');
   const notif7600El = container.querySelector('#mlpr-notif-squawk-7600');
   const notif7700El = container.querySelector('#mlpr-notif-squawk-7700');
   const notifFirstSeenEl = container.querySelector('#mlpr-notif-firstseen');
+  const notifWatchedEl = container.querySelector('#mlpr-notif-watched');
   const notifRangeRecordEl = container.querySelector('#mlpr-notif-rangerecord');
-  const ntfyTopicEl = container.querySelector('#mlpr-ntfy-topic');
-  const ntfyRegenerateBtn = container.querySelector('#mlpr-ntfy-regenerate');
 
   async function loadNotificationSettings() {
     const response = await fetch('/api/notifications/settings');
@@ -742,6 +823,7 @@ function wireNotificationSettings(container) {
     notif7600El.checked = data.squawkCodes['7600'];
     notif7700El.checked = data.squawkCodes['7700'];
     notifFirstSeenEl.checked = data.firstSeenEnabled;
+    notifWatchedEl.checked = data.watchedEnabled;
     notifRangeRecordEl.checked = data.rangeRecordEnabled;
   }
 
@@ -760,9 +842,19 @@ function wireNotificationSettings(container) {
   notifFirstSeenEl.addEventListener('change', (event) =>
     putNotificationSettings({ firstSeenEnabled: event.target.checked }),
   );
+  notifWatchedEl.addEventListener('change', (event) =>
+    putNotificationSettings({ watchedEnabled: event.target.checked }),
+  );
   notifRangeRecordEl.addEventListener('change', (event) =>
     putNotificationSettings({ rangeRecordEnabled: event.target.checked }),
   );
+
+  loadNotificationSettings();
+}
+
+function wireNtfySection(root) {
+  const ntfyTopicEl = root.querySelector('#mlpr-ntfy-topic');
+  const ntfyRegenerateBtn = root.querySelector('#mlpr-ntfy-regenerate');
 
   async function loadNtfyTopic() {
     const response = await fetch('/api/notifications/ntfy-topic');
@@ -778,8 +870,25 @@ function wireNotificationSettings(container) {
     ntfyTopicEl.textContent = data.topic;
   });
 
-  loadNotificationSettings();
   loadNtfyTopic();
+}
+
+// Human-readable summary of an entry's optional trigger area. Kept next to
+// watchEntryLabel rather than in the editor module -- this is the read-only
+// "what did I configure" wording, which the editor itself never needs.
+function areaSummary(area) {
+  if (!area) return t('noAreaCondition');
+  const { units } = getSettings();
+  if (area.kind === 'circle') {
+    return `${t('areaCircleLabel')} · ${t('areaWithin')} ${formatDistance(area.radiusKm, units)}`;
+  }
+  if (area.kind === 'rectangle') {
+    return `${t('areaRectangleLabel')} · ${formatDistance(area.widthKm, units)} × ${formatDistance(area.heightKm, units)}`;
+  }
+  // A shape this build doesn't know about (an entry written by a newer
+  // version) still deserves a label rather than a blank -- rules.js
+  // separately refuses to match it, see satisfiesAreaCondition.
+  return t('areaEditorTitle');
 }
 
 function watchEntryLabel(entry) {
@@ -790,6 +899,9 @@ function watchEntryLabel(entry) {
   if (entry.altitudeOperator) {
     text += ` (${entry.altitudeOperator === 'below' ? t('below') : t('above')} ${entry.altitudeValue} ft)`;
   }
+  if (entry.area) {
+    text += ` · ${areaSummary(entry.area)}`;
+  }
   return text;
 }
 
@@ -799,8 +911,31 @@ function wireWatchlist(container) {
   const valueInput = container.querySelector('#mlpr-watch-value');
   const altOpSelect = container.querySelector('#mlpr-watch-alt-op');
   const altValueInput = container.querySelector('#mlpr-watch-alt-value');
+  const areaBtn = container.querySelector('#mlpr-watch-area');
+  const areaSummaryEl = container.querySelector('#mlpr-watch-area-summary');
   const addBtn = container.querySelector('#mlpr-watch-add');
   const errorEl = container.querySelector('#mlpr-watch-error');
+
+  // The area being built up for the entry that's about to be added --
+  // held here rather than read back off the DOM, since it's a structured
+  // object (shape + coordinates), not something a form control can hold.
+  // Reset alongside the other inputs after a successful add.
+  let pendingArea = null;
+
+  function refreshAreaUi() {
+    areaBtn.textContent = pendingArea ? t('editArea') : t('setArea');
+    areaSummaryEl.textContent = pendingArea ? areaSummary(pendingArea) : '';
+  }
+
+  areaBtn.addEventListener('click', async () => {
+    const result = await openAreaEditor(pendingArea);
+    // undefined = cancelled (leave whatever was there); null = explicitly
+    // cleared in the editor. Distinguishing the two is why the editor
+    // resolves rather than just returning an area.
+    if (result === undefined) return;
+    pendingArea = result;
+    refreshAreaUi();
+  });
 
   typeSelect.addEventListener('change', () => {
     if (typeSelect.value === 'type') {
@@ -847,6 +982,7 @@ function wireWatchlist(container) {
       matchValue: valueInput.value,
       altitudeOperator: altOpSelect.value || null,
       altitudeValue: altOpSelect.value ? Number(altValueInput.value) : null,
+      area: pendingArea,
     };
 
     const response = await fetch('/api/notifications/watchlist', {
@@ -865,9 +1001,12 @@ function wireWatchlist(container) {
     altOpSelect.value = '';
     altValueInput.value = '';
     altValueInput.style.display = 'none';
+    pendingArea = null;
+    refreshAreaUi();
     await loadWatchlist();
   });
 
+  refreshAreaUi();
   loadWatchlist();
 }
 

@@ -150,6 +150,24 @@ test('publishSmartHomeEvent includes matchedType/matchedValue for a watchlist ev
   assert.equal(payload.matchedValue, 'A388');
 });
 
+test('publishSmartHomeEvent includes squawk/squawkMeaning for a squawk event', () => {
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
+  smartHome.reconfigureSmartHome();
+
+  smartHome.publishSmartHomeEvent({
+    reason: 'squawk',
+    aircraft: aircraftFixture({ squawk: '7700' }),
+    squawkMeaning: 'Emergency',
+  });
+
+  const instance = FakeMqttClient.instances[0];
+  const publishes = instance.published.filter((p) => p.topic === 'mlpr/events/squawk');
+  assert.equal(publishes.length, 1);
+  const payload = JSON.parse(publishes[0].payload);
+  assert.equal(payload.squawk, '7700');
+  assert.equal(payload.squawkMeaning, 'Emergency');
+});
+
 test('publishSmartHomeEvent reports ground-level altitude as 0, not the last airborne altBaro', () => {
   updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
   smartHome.reconfigureSmartHome();

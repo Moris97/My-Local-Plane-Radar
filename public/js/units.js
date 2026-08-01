@@ -25,3 +25,21 @@ export function formatDistance(km, units) {
   if (typeof km !== 'number') return null;
   return units === 'imperial' ? `${Math.round(km / KM_PER_NM)} nm` : `${Math.round(km)} km`;
 }
+
+// The three below are for an *editable* distance (the trigger-area
+// editor's radius field), where formatDistance's baked-in rounding and
+// unit suffix get in the way: a form field needs the bare number in the
+// user's own unit, and needs to convert what they type back to the km the
+// server stores. Deliberately no rounding here -- rounding a radius on
+// every keystroke/drag would make it impossible to type "12.5".
+export function distanceUnitLabel(units) {
+  return units === 'imperial' ? 'nm' : 'km';
+}
+
+export function kmToDisplayDistance(km, units) {
+  return units === 'imperial' ? km / KM_PER_NM : km;
+}
+
+export function displayDistanceToKm(value, units) {
+  return units === 'imperial' ? value * KM_PER_NM : value;
+}

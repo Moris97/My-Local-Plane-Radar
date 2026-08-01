@@ -13,6 +13,13 @@ const DEFAULT_SETTINGS = {
   squawkCodes: { 7500: true, 7600: true, 7700: true },
   firstSeenEnabled: true,
   rangeRecordEnabled: true,
+  // Master on/off for the whole watch list, alongside the per-entry
+  // conditions. Added 2026-08-01 with the merged Notifications tab, which
+  // lists every rule as a checkbox -- the watch list was the one rule with
+  // no toggle of its own (entries were simply always live), which read as
+  // an omission next to the other three. Defaults true so existing installs
+  // behave exactly as before.
+  watchedEnabled: true,
 };
 
 export function getNotificationSettings() {

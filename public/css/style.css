@@ -706,15 +706,17 @@ html, body {
   font: 14px/1.5 system-ui, sans-serif;
 }
 
-/* List only (panels.js's PANELS.list/FULLSCREEN_MODALS.listFull `fill: true`)
-   -- reaches the true screen bottom instead of stopping above the bottom
-   bar, same as the map itself already does, so the table gets the full
-   available height rather than leaving a wasted strip below it. The
-   floating bottom-bar pills (z-index 30) end up on top of the last rows,
-   same visual relationship they already have with the map; the extra
-   bottom padding below keeps those rows reachable by scrolling past the
-   pills rather than truly hidden behind them. Settings/Stats/aircraft
-   details are unaffected -- they don't get this class.
+/* Every panel/modal (panels.js's PANELS/FULLSCREEN_MODALS `fill: true`) --
+   reaches the true screen bottom instead of stopping above the bottom bar,
+   same as the map itself already does. Originally List-only (the table
+   needed the full available height instead of leaving a wasted strip below
+   it); applied to every other panel/modal too once a short box was found to
+   leave a gap showing the live map (aircraft, trails, place labels) right
+   above the bar -- a real, reported visual bug, not something anyone wanted.
+   The floating bottom-bar pills (z-index 30) end up on top of the last row
+   of content, same visual relationship they already have with the map; the
+   extra bottom padding below keeps that content reachable by scrolling past
+   the pills rather than truly hidden behind them.
    Selector specificity (#panel.mlpr-panel-fill has higher specificity than
    the plain `#panel` selector inside the `@media (min-width: 900px)` block
    above) is what makes this win on both the mobile and desktop layouts
@@ -1723,4 +1725,202 @@ input[type='checkbox'] {
   #panel-resize-handle.mlpr-resize-active {
     background: rgba(61, 220, 132, 0.35);
   }
+}
+
+/* Trigger-area editor (area-editor.js) -- a full-screen map for drawing a
+   watch-list entry's area. Sits above *everything*, bottom bar included
+   (z-index 50 vs the bar's 30): unlike the panels, this is a modal editing
+   task with its own Save/Cancel, so leaving the bar reachable underneath
+   would just offer ways to navigate away mid-edit and strand the shape. */
+#area-editor {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: #05070a;
+  display: flex;
+  flex-direction: column;
+}
+
+#area-editor.hidden {
+  display: none;
+}
+
+.mlpr-area-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: space-between;
+  align-items: center;
+  padding: max(10px, env(safe-area-inset-top)) 12px 10px;
+  border-bottom: 1px solid #14212b;
+  flex-shrink: 0;
+}
+
+.mlpr-area-shapes,
+.mlpr-area-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mlpr-area-actions button {
+  background: #12202b;
+  color: #d8f3e6;
+  border: 1px solid #1c2e3a;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mlpr-area-actions .mlpr-area-save {
+  background: #123423;
+  color: #7fd8a8;
+  border-color: #245c3c;
+}
+
+.mlpr-area-shapes button[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The "tap the map to place it" prompt -- hidden by area-editor.js as soon
+   as a shape exists, since from then on the map click deliberately does
+   nothing and the instruction would be misleading. */
+.mlpr-area-hint {
+  margin: 0;
+  padding: 8px 12px;
+  font: 13px/1.4 system-ui, sans-serif;
+  color: #a9c4cf;
+  background: #0b1116;
+  border-bottom: 1px solid #14212b;
+  flex-shrink: 0;
+}
+
+.mlpr-area-map {
+  flex: 1;
+  min-height: 0;
+}
+
+.mlpr-area-pin {
+  color: #3ddc84;
+  cursor: grab;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.6));
+}
+
+.mlpr-area-pin svg path {
+  fill: currentColor;
+}
+
+/* The inner dot is punched out of the pin body in the app's background
+   colour rather than left transparent -- a transparent hole would show the
+   circle fill through it and read as a rendering glitch at some zooms. */
+.mlpr-area-pin svg circle {
+  fill: #05070a;
+}
+
+/* Deliberately a zero-size anchor rather than a flex row of
+   [dot][readout]: MapLibre centres a marker's whole element on its
+   coordinate, so with the readout box as a sibling in normal flow the
+   element's centre landed somewhere inside that box and the grab dot was
+   pushed well to the left of the coordinate -- i.e. visibly *inside* the
+   circle instead of on its outline (reported live, 2026-08-01). At 0x0 the
+   centring is a no-op, so the absolutely-centred dot below sits exactly on
+   the circumference, and the readout can float beside it without ever
+   moving the anchor again regardless of how wide it gets (a 4-digit radius,
+   a longer unit label). Children still take pointer events fine despite the
+   0x0 parent, so dragging is unaffected. */
+.mlpr-area-handle {
+  position: relative;
+  width: 0;
+  height: 0;
+  cursor: ew-resize;
+}
+
+.mlpr-area-handle-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #3ddc84;
+  border: 2px solid #05070a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.mlpr-area-readout {
+  position: absolute;
+  /* Clear of the dot's own radius (9px) plus a small gap. */
+  left: 16px;
+  top: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: #0b1116;
+  border: 1px solid #1c2e3a;
+  border-radius: 6px;
+  padding: 3px 6px;
+  color: #d8f3e6;
+  font: 12px system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.mlpr-area-radius-input {
+  width: 60px;
+  background: #12202b;
+  color: #d8f3e6;
+  border: 1px solid #1c2e3a;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font: 12px system-ui, sans-serif;
+  cursor: text;
+}
+
+/* Settings' "Configure ..." subviews (settings.js's wireNotificationSubviews)
+   -- a Back button plus a title, reading as a header for the swapped-in
+   content rather than another fieldset. */
+.mlpr-subview-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #14212b;
+}
+
+.mlpr-subview-back {
+  background: #12202b;
+  color: #d8f3e6;
+  border: 1px solid #1c2e3a;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.mlpr-subview-title {
+  font: 600 14px system-ui, sans-serif;
+  color: #d8f3e6;
+}
+
+.mlpr-notif-config-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mlpr-notif-config-actions button {
+  flex: 1;
+  min-width: 160px;
+  background: #12202b;
+  color: #d8f3e6;
+  border: 1px solid #1c2e3a;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
 }

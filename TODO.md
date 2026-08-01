@@ -101,13 +101,34 @@ Added to as they come up; picked up in a later stage when relevant.
     fold fixes back into `data/icon-types.json` -- this is now the
     practical path to clearing the `_needsVerification` list, replacing
     the originally-planned standalone Stage 4 script.
-- **Notification engine: radius-from-home geofence** — notify when *any*
-  aircraft (not just a watched one) enters a distance-from-home radius. The
-  watch-list's per-entry altitude condition (below/above threshold) shipped;
-  this general geofence rule, independent of the watch list, did not. Once
-  built, give it a `publishSmartHomeEvent()` call site too (see the smart-
-  home entry below) -- same pattern as first-seen/watchlist, not a design
-  question when the time comes.
+- **Trigger areas on watch-list entries — circle and rectangle shipped
+  2026-08-01, free shape still to do.** A watch-list entry can carry an
+  optional `area` (`{kind: 'circle', lat, lon, radiusKm}` or
+  `{kind: 'rectangle', lat, lon, widthKm, heightKm}`), matched server-side
+  in `rules.js`'s `satisfiesAreaCondition`; drawn in a full-screen map
+  editor (`public/js/area-editor.js`) opened from the watch-list form. The
+  centre is an **arbitrary point, deliberately not the receiver's home** —
+  the driving use case is watching a specific piece of sky that isn't
+  overhead (an airfield or approach path some km away). Still to build:
+  - **Free shape** — the button already renders in the editor's toolbar,
+    disabled. The groundwork is all in place: `watchlist.js`'s
+    `AREA_SIZE_FIELDS` and `area-editor.js`'s `HANDLE_SPECS` are both
+    per-shape tables, and `geo.js`'s `shapeRing` dispatch means the two map
+    layers never learn what shape they're drawing. A polygon is the one
+    shape that doesn't fit the existing "centre + size fields" model
+    though — it needs a vertex list, so it will need its own
+    `normalizeArea` branch rather than another `AREA_SIZE_FIELDS` row, plus
+    a point-in-polygon test server-side (ray casting, ~15 lines) instead of
+    a bounds check. The interaction is the real cost: vertex dragging,
+    click-a-side-to-add-a-vertex and loop closing — the point where
+    hand-writing it stops being obviously cheaper than a drawing library,
+    so weigh that (and its licence) then rather than assuming either way.
+  - A separate **"any aircraft within N km of home"** rule, independent of
+    the watch list, was considered and deliberately dropped (2026-08-01):
+    trigger areas cover the "watch this region" need, and an entry still
+    has to name a type/registration/flight, which is the intended scope.
+    Revisit only if "notify me about literally anything nearby" turns out
+    to be wanted on its own.
 - **Circling-aircraft notification** (effort: medium, impact: high,
   priority: low) — an aircraft that loops in roughly the same place for
   several minutes is usually doing something worth knowing about: police,
@@ -150,22 +171,19 @@ Added to as they come up; picked up in a later stage when relevant.
   readsb/SDR doesn't go unnoticed until someone happens to check the app.
   Requested 2026-07-28.
 - **Smart home integration (MQTT / Home Assistant) -- implemented
-  2026-07-29**, see CLAUDE.md's new "Smart home / MQTT integration"
-  section for the full picture. First-seen and watch-list notification
-  events now also publish a structured JSON event over MQTT (`mlpr/events/
-  first_seen`, `mlpr/events/watchlist`), tested against Home Assistant.
-  Deliberately scoped narrower than the original request: only the two
-  rules that already send a notification, not a general "aircraft count
-  within 10 km changed" state feed. Still-deferred ideas from the original
-  ask, not built:
-  - Squawk 7700/7600/7500 as a smart-home trigger too (currently NOT
-    wired -- explicit scope decision, not an oversight; easy to add, one
-    more `publishSmartHomeEvent()` call site in `rules.js` if wanted).
+  2026-07-29**, see CLAUDE.md's "Smart home / MQTT integration" section for
+  the full picture. First-seen, watch-list, and (since 2026-08-01) squawk
+  7500/7600/7700 notification events all publish a structured JSON event
+  over MQTT (`mlpr/events/first_seen`, `mlpr/events/watchlist`,
+  `mlpr/events/squawk`), tested against Home Assistant. Deliberately scoped
+  narrower than the original request: only rules that already send a
+  notification, not a general "aircraft count within 10 km changed" state
+  feed. Still-deferred ideas from the original ask, not built:
   - A general geofence-based trigger ("any aircraft within N km", not just
     watched ones) -- depends on the geofence feature below anyway.
   - Continuous/ambient state feed (aircraft count, messages/sec) rather
     than discrete events -- the original idea was "avoid extra load", and
-    the two-events-only version already satisfies that trivially; revisit
+    the discrete-events version already satisfies that trivially; revisit
     only if a real use case for continuous state (not discrete events)
     shows up.
 - **PTZ camera tracking ("Cam-Track")** — given the receiver's own GPS

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees, findNearestFarthest } from './geo.js';
+import { distanceKm, bearingDegrees, findNearestFarthest, destinationPoint, circleRing, rectangleRing, rectangleEdges } from './geo.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
@@ -60,4 +60,74 @@ test('findNearestFarthest with a single positioned aircraft: nearest and farthes
   const result = findNearestFarthest([only], home);
   assert.equal(result.nearest.hex, 'only');
   assert.equal(result.farthest.hex, 'only');
+});
+
+// Placeholder coordinates only -- never the real receiver location.
+const ORIGIN = { lat: 50.0, lon: 20.0 };
+
+test('destinationPoint round-trips against distanceKm/bearingDegrees', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 42, 137);
+  assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, point.lat, point.lon), 137, 0.5);
+  assertClose(bearingDegrees(ORIGIN.lat, ORIGIN.lon, point.lat, point.lon), 42, 0.5);
+});
+
+test('destinationPoint due north only changes latitude', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 0, 111);
+  assertClose(point.lon, ORIGIN.lon, 0.001);
+  assert.ok(point.lat > ORIGIN.lat);
+});
+
+test('circleRing returns a closed ring whose points are all the given radius away', () => {
+  const radiusKm = 25;
+  const ring = circleRing(ORIGIN.lat, ORIGIN.lon, radiusKm, 32);
+
+  // steps + 1: the first point is repeated to close the ring.
+  assert.equal(ring.length, 33);
+  assert.deepEqual(ring[0], ring[ring.length - 1]);
+
+  for (const [lon, lat] of ring) {
+    assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, lat, lon), radiusKm, 0.1);
+  }
+});
+
+test('circleRing covers the full compass, not just one side', () => {
+  const ring = circleRing(ORIGIN.lat, ORIGIN.lon, 25, 4);
+  const bearings = ring.slice(0, 4).map(([lon, lat]) => Math.round(bearingDegrees(ORIGIN.lat, ORIGIN.lon, lat, lon)));
+  assert.deepEqual(bearings.sort((a, b) => a - b), [0, 90, 180, 270]);
+});
+
+test('rectangleEdges puts each edge half the given dimension from the centre', () => {
+  const { north, south, east, west } = rectangleEdges(ORIGIN.lat, ORIGIN.lon, 40, 20);
+
+  // Height 20 km -> 10 km to each of the north/south edges.
+  assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, north, ORIGIN.lon), 10, 0.1);
+  assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, south, ORIGIN.lon), 10, 0.1);
+  // Width 40 km -> 20 km to each of the east/west edges.
+  assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, ORIGIN.lat, east), 20, 0.1);
+  assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, ORIGIN.lat, west), 20, 0.1);
+
+  assert.ok(north > south, 'north edge must be above the south edge');
+  assert.ok(east > west, 'east edge must be right of the west edge');
+});
+
+test('rectangleRing is a closed 4-corner ring', () => {
+  const ring = rectangleRing(ORIGIN.lat, ORIGIN.lon, 40, 20);
+  assert.equal(ring.length, 5); // 4 corners + the repeated first point
+  assert.deepEqual(ring[0], ring[4]);
+
+  // Opposite corners must differ on both axes -- catches a degenerate ring
+  // collapsed onto one edge.
+  const [swLon, swLat] = ring[3];
+  const [neLon, neLat] = ring[1];
+  assert.ok(neLat > swLat && neLon > swLon);
+});
+
+test('a wider rectangle grows only on its own axis', () => {
+  const narrow = rectangleEdges(ORIGIN.lat, ORIGIN.lon, 40, 20);
+  const wide = rectangleEdges(ORIGIN.lat, ORIGIN.lon, 80, 20);
+
+  assert.ok(wide.east > narrow.east, 'doubling width must move the east edge out');
+  // Height was unchanged, so the horizontal edges must not have moved.
+  assertClose(wide.north, narrow.north, 1e-9);
+  assertClose(wide.south, narrow.south, 1e-9);
 });

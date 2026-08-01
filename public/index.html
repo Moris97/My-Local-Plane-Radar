@@ -84,6 +84,14 @@
   <div id="fullscreen-modal-content"></div>
 </section>
 
+<!-- Trigger-area editor (area-editor.js) -- a full-screen map for drawing a
+     watch-list entry's optional area. Its own top-level element rather than
+     a FULLSCREEN_MODALS entry because it is parameterised (it edits an area
+     that's handed in) and resolves a value back to its caller, which that
+     registry's render(el) contract has no room for. Populated entirely by
+     area-editor.js; empty here. -->
+<section id="area-editor" class="hidden" aria-hidden="true"></section>
+
 <nav id="bottom-bar">
   <button type="button" class="mlpr-bar-btn" data-panel="list">
     <svg viewBox="0 0 24 24" fill="currentColor">

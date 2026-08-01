@@ -617,8 +617,7 @@ fix.
   a stray history entry. Both `PANELS.list` and
   `FULLSCREEN_MODALS.listFull` carry a `fill: true` flag that
   `openPanel`/`openFullscreenModal` turn into a `mlpr-panel-fill` class on
-  open: List (and only List — Settings/Stats/aircraft details don't get
-  this) now reaches the true screen bottom instead of stopping above the
+  open: List reaches the true screen bottom instead of stopping above the
   bottom bar, same as the map itself already does, so the table gets the
   full available height instead of leaving a wasted strip below it. The
   floating bottom-bar pills end up on top of the last rows (same visual
@@ -627,6 +626,21 @@ fix.
   scrolling past the pills. Selector specificity (an id+class selector
   beats the plain `#panel` id selector inside the `@media (min-width:
   900px)` desktop-layout block) is what makes one small rule apply
+
+  **Update, 2026-08-01: `fill: true` now applies to every panel/modal, not
+  just List.** Settings/Stats/aircraft-details were originally left out —
+  List got the flag purely because its table needed the extra height, and
+  the other three had no such need at the time. Left short, though, their
+  `#panel`/`#fullscreen-modal` box stops at `bottom: var(--bottom-bar-height)`
+  and the live map (aircraft, trails, place labels) is plainly visible
+  behind the floating bottom-bar pills in that gap — reported live as a
+  visual bug (screenshots of Stats and Settings both showing the map
+  bleeding through above the bar), not something anyone had wanted on
+  purpose. Since the CSS side of `mlpr-panel-fill` was already generic
+  (applies to any `#panel`/`#fullscreen-modal` with the class, not
+  List-specific selectors), the fix was just adding `fill: true` to
+  `PANELS.settings`, `PANELS.aircraft`, and `FULLSCREEN_MODALS.stats` too —
+  no new CSS mechanism needed.
   correctly on both the mobile and desktop layouts without duplicating it
   inside that media query.
 - **The side panel's width is drag-resizable** (2026-07-28, requested once
@@ -1127,8 +1141,26 @@ on the right side of this line:
 | General | units, language | `localStorage` |
 | Map | basemap mode, map theme, trails | `localStorage` |
 | Aircraft | marker color mode, icon size, altitude filter | `localStorage` |
-| Notifications | notification rules, ntfy topic, watch list | SQLite (shared) |
+| Notifications | notification rules, ntfy topic, watch list, *smart home* | SQLite (shared) |
 | Server | Settings password, server port, *receiver location* | SQLite (shared) |
+
+**Smart Home was its own sixth tab until 2026-08-01**, when it was folded
+into Notifications. The tab row is sized for five (`.mlpr-settings-tabs`
+falls back to horizontal scrolling beyond that), so the sixth had been
+quietly overflowing it. The merged tab shows the rule toggles ("what do I
+want to be notified about") plus two buttons — **Configure notifications**
+(ntfy topic, watch list) and **Configure smart home** (MQTT broker) — each
+opening a subview that replaces the toggles in place, with a Back button
+(`settings.js`'s `wireNotificationSubviews`). Deliberately *not* list.js's
+floating-window machinery: that exists because List's Configure must sit
+beside a live-updating table without disturbing it, and nothing here
+updates while you're editing, so an in-place swap is both simpler and
+identical on mobile and desktop. **The access-control split is unchanged
+and is the thing to be careful about when touching this**: smart home
+still does its own `passwordSet && !getStoredToken()` check inside
+`renderSmartHomeTab` (broker credentials are a real infrastructure
+secret), while the rule toggles, ntfy topic and watch list stay
+deliberately ungated. Sharing a tab must not become sharing a gate.
 
 - **Per-browser** settings live in `public/js/settings-state.js`
   (`localStorage`), so each person/device gets their own units, map look and
@@ -1224,14 +1256,109 @@ inversion: "today"'s max range briefly exceeded "all time"'s, since the two
 were computed by two independent, differently-filtered mechanisms), and a
 **watch list**
 (`watchlist.js`): entries `{id, matchType: type|registration|flight,
-matchValue, altitudeOperator: below|above|null, altitudeValue}`, stored as
-JSON in `config` (same pattern as notification settings). Matching is
-case-insensitive on `aircraft[typeCode|registration|flight]`; the altitude
+matchValue, altitudeOperator: below|above|null, altitudeValue, area}`,
+stored as JSON in `config` (same pattern as notification settings). Matching
+is case-insensitive on `aircraft[typeCode|registration|flight]`; the altitude
 condition treats `onGround` as altitude 0, and simply doesn't match if the
 needed altitude data isn't available (never a false positive from missing
-data). Each rule respects its own enabled/disabled toggle from Settings;
-**squawk and watch-list both have a per-hex cooldown** (first-seen and
-range-record are naturally one-shot per hex/record already).
+data). Each rule respects its own enabled/disabled toggle from Settings
+(the watch list's own `watchedEnabled` was added 2026-08-01 — it was the
+one rule with no toggle, which read as an omission once the merged
+Notifications tab listed them all side by side); **squawk and watch-list
+both have a per-hex cooldown** (first-seen and range-record are naturally
+one-shot per hex/record already).
+
+**Trigger area** (`area`, optional, added 2026-08-01): `{kind: 'circle',
+lat, lon, radiusKm}`, `{kind: 'rectangle', lat, lon, widthKm, heightKm}`,
+or `null`. Matched by `rules.js`'s `satisfiesAreaCondition` — area and
+altitude must **both** hold, and an aircraft with no position never matches
+an area-restricted entry (same "missing data is never a false positive"
+rule as altitude). An *unrecognised* `kind` also matches nothing rather
+than everything: an over-firing rule is worse than a silent one, and this
+is what an entry written by a newer version then read back after a
+downgrade looks like. The `kind` discriminator exists so more shapes can be
+added without migrating stored entries; free-form polygon is still to come
+(see TODO.md).
+
+**Every shape is centre-anchored** (`lat`/`lon` plus its own size fields)
+rather than corner- or vertex-based — it keeps "drag the middle to move the
+whole thing" uniform, and matches the editor's centre pin. Shape-specific
+knowledge lives in exactly three per-shape tables so adding one touches
+little else: `watchlist.js`'s `AREA_SIZE_FIELDS` (which size fields exist,
+driving both validation and the field-stripping in `normalizeArea` — a
+rectangle must not carry a stray `radiusKm`, or `rules.js` would have two
+plausible but conflicting sources of size), `area-editor.js`'s
+`HANDLE_SPECS` (where each resize handle sits and what it edits), and
+`geo.js`'s ring builders behind `shapeRing` (so the two map layers never
+learn which shape they're drawing).
+
+**The rectangle's bounds are derived with the same `destinationPoint()`
+calls on both sides** — `rules.js` for matching, `geo.js`'s
+`rectangleEdges`/`rectangleRing` for drawing — so "inside the box on
+screen" and "matches the rule" cannot drift apart. Only four corners are
+needed despite the circle using 128 points: a lat/lon-aligned box is a true
+rectangle in Web Mercator (constant latitude renders horizontal, constant
+longitude vertical), so subdividing would add vertices that all land on the
+straight lines already drawn between the corners. The longitude test
+handles a box straddling the antimeridian (`west > east`) — vanishingly
+unlikely for a home receiver, but getting it wrong would silently invert
+the test rather than fail loudly. Dragging a rectangle handle moves *both*
+opposite edges (the handle sits half a dimension from the centre, so
+`valueFromDrag` doubles it), keeping the box centred rather than stretching
+one side.
+
+**The centre is an arbitrary point, deliberately NOT the receiver's home**
+— the driving use case (explicit, 2026-08-01) is watching a *specific piece
+of sky that isn't overhead*: an airfield or approach path some km away.
+Nothing in the matching path reads `home.js` at all. `radiusKm` is the
+canonical stored unit regardless of the user's display preference, same as
+every other distance the server persists.
+
+Drawn in a full-screen map editor (`public/js/area-editor.js`,
+`#area-editor` in `index.html`) opened from the watch-list form. It's its
+own top-level element rather than a `FULLSCREEN_MODALS` entry because it's
+*parameterised* (it edits an area handed in) and *resolves a value back*
+(area / `null` = cleared / `undefined` = cancelled — the caller genuinely
+has to tell "cleared" from "cancelled" apart), which that registry's
+`render(el)` contract has no room for. It runs its own short-lived
+MapLibre instance; `basemap.js`'s `styleForSecondaryMap` gives it the
+user's configured basemap **without** touching `applyBasemapMode`'s
+module-level fallback state, which is scoped to the one long-lived main map
+(pointing that function at a second map would let a transient editor map
+overwrite the callbacks the main map's own error watcher fires with).
+Circle geometry reuses `geo.js`'s `destinationPoint`/`circleRing` (a
+globe circle is not a screen circle, so it's drawn as a polygon of points
+all exactly `radiusKm` out). The centre pin and every resize handle are
+plain draggable `maplibregl.Marker`s — dragging the pin moves the whole
+shape (size fields untouched, handles simply recomputed from the new
+centre), dragging a handle sets one size field. For the circle the drag's
+bearing is ignored (a circle has no orientation) and the handle snaps back
+due east on `dragend`. Each readout/input lives *in its own handle's
+element* so the number sits next to what you're dragging; the `<input>`
+stops `pointerdown` propagating so clicking into the field to type doesn't
+also start a drag. **The handle element is deliberately 0×0** with the dot
+absolutely centred on it: MapLibre centres a marker's whole element on its
+coordinate, so with the readout box in normal flow the element's centre
+landed inside that box and the dot sat visibly *inside* the shape instead
+of on its outline (reported live). At 0×0 the centring is a no-op, and the
+readout can grow (a 4-digit size, a longer unit) without ever moving the
+anchor again.
+
+**How each shape is created differs, deliberately**: a circle is
+click-to-place (its toolbar button just arms that mode), a rectangle
+appears immediately at the map centre the moment its button is pressed
+(explicit spec — there is no placing step). Switching shapes *clears* the
+current one rather than converting it: the shapes have no meaningful common
+size, and guessing one would quietly change an area the user had already
+tuned. `syncShapeButtons` also hides the "tap the map" hint whenever it
+wouldn't do anything (i.e. anything but an empty circle).
+
+A `try/catch` around the `Map` constructor closes the editor cleanly if
+WebGL is unavailable — otherwise the promise would reject with the overlay
+still on screen and no way out. Note this also means **the editor cannot be
+inspected in the WebGL-less sandbox at all** (it correctly closes itself on
+open); verifying anything in it needs the route-intercept FakeMap/FakeMarker
+stub technique described in the coverage-map section.
 
 **Delivery**: ntfy.sh (public instance), using its **JSON publish API** (POST
 to `https://ntfy.sh/` with `{topic, title, message, priority, tags}` as the
@@ -1281,12 +1408,18 @@ independent notification channel alongside ntfy (not a generalization of
 it): ntfy wants a human-readable `title`/`message` for a push notification,
 this wants a machine-readable JSON event for a home-automation rule engine
 to act on — e.g. dim the lights and change their color when a watched
-aircraft type (a landing A380, say) is picked up nearby. Deliberately wired
-to only two of `rules.js`'s four notification rules — **first-seen and
-watch-list matches**, not squawk emergencies or range records — an explicit
-scope decision (not an oversight) made when this was speced; extending it
-to squawk/range-record later is one more `publishSmartHomeEvent()` call
-site in `rules.js`, not a design change.
+aircraft type (a landing A380, say) is picked up nearby. Originally wired to only two of `rules.js`'s four notification rules —
+first-seen and watch-list matches, not squawk emergencies or range
+records — an explicit scope decision (not an oversight) made when this was
+speced. **Squawk 7500/7600/7700 joined them 2026-08-01** — exactly the
+"one more `publishSmartHomeEvent()` call site in `rules.js`" this section
+used to anticipate, in the same cooldown-gated block as the existing ntfy
+squawk notification. The payload adds `squawk`/`squawkMeaning` (the human-
+readable Hijack/Radio failure/Emergency text, so an HA automation doesn't
+need its own copy of `SQUAWK_MEANINGS`) on top of the usual aircraft
+fields. Range records remain the one rule still deliberately out of scope
+(a single pre-aggregated all-time number, not a discrete per-aircraft
+occurrence the way the other three are).
 
 **Hand-rolled MQTT client (`server/src/notifications/mqtt-client.js`), not
 the `mqtt` npm package** — deliberated explicitly with the user before
@@ -1350,7 +1483,8 @@ itself rather than waiting for the broker to notice — same end state either
 way, just faster/more deliberate for a routine restart than a crash.
 
 **Payload**: flat JSON (not nested under an `aircraft` key), one topic per
-reason (`<prefix>/events/first_seen`, `<prefix>/events/watchlist`) rather
+reason (`<prefix>/events/first_seen`, `<prefix>/events/watchlist`,
+`<prefix>/events/squawk`) rather
 than one shared topic with a `reason` field to filter on — lets a Home
 Assistant automation trigger on one specific topic instead of inspecting
 the payload. Fields: `reason`, `timestamp`, `hex`, `flight`, `registration`,
@@ -1362,8 +1496,10 @@ retained — this is a discrete occurrence, not persistent state; a retained
 event topic would make every fresh HA subscription immediately re-fire
 whatever the last event happened to be.
 
-**Settings**: a new "Smart Home" tab (`public/js/settings.js`), gated behind
-`requireSettingsAuth` **like the Server tab**, unlike the rest of the
+**Settings**: originally its own "Smart Home" tab (`public/js/settings.js`);
+since 2026-08-01 a "Configure smart home" subview *inside* the Notifications
+tab (see the Settings-scope section above), with its gating unchanged —
+behind `requireSettingsAuth` **like the Server tab**, unlike the rest of the
 Notifications tab (ntfy topic, watch list) which stays open — a deliberate
 exception, decided explicitly with the user: a broker username/password is
 a real infrastructure secret, a different kind of sensitive than a random
@@ -1951,6 +2087,27 @@ doesn't lose up to 45s of that day's aggregate. This is the one piece of
 "current state" worth saving on shutdown — live aircraft state staying
 RAM-only and getting dropped on restart (hard rule 6) is still fine and
 unchanged.
+
+**`closeWebSockets()` must be called before `await app.close()`** (added
+2026-08-01, `server.js` returns it alongside `app`/`broadcast`). An upgraded
+WebSocket is still one of the HTTP server's own connections and never ends
+on its own, so `app.close()` — which waits for every connection to drain —
+waited *forever* whenever any browser tab was open. In practice
+`systemctl restart` hung until systemd's `TimeoutStopSec` (90s by default)
+gave up and SIGKILLed, on every restart and every reboot with a tab open.
+Data was never at risk (all the flushes above already run before
+`app.close()`); it was purely a 90-second stall, which is exactly why it
+went unnoticed for so long — everything still worked, just slowly.
+Reproduced deterministically before and after: **no WS client → exits in
+~200ms; one WS client → never exits**; after the fix ~500ms with 0, 1 or 5
+clients. Uses `ws.terminate()`, not `ws.close()`: `close()` starts a
+closing handshake and waits for the peer to answer, which an unresponsive
+client may never do — the same hang in a smaller form. The process is
+exiting anyway and `app.js`'s own WebSocket `close` handler reconnects a
+second later, so dropping the socket outright is both safe and what a
+restart wants. If a future change adds another kind of long-lived
+connection, it needs the same treatment — the symptom to watch for is a
+log line saying "shutting down" with the process still alive afterwards.
 
 ### Stats history snapshot (`snapshotForPersistence`/`restoreFromSnapshot`
 in `stats-history.js`)

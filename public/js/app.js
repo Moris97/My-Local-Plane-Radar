@@ -15,6 +15,7 @@ import {
   setSelectedHex,
   setHoveredHex,
   setHoverRequestHandler,
+  setMapView,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { openPanel } from './panels.js';
@@ -418,6 +419,16 @@ function updateLabelZoomVisibility() {
   map.getContainer().classList.toggle('mlpr-labels-hidden', map.getZoom() < LABEL_MIN_ZOOM);
 }
 map.on('zoom', updateLabelZoomVisibility);
+
+// Mirrored into radar-state so the trigger-area editor can open on whatever
+// the user is currently looking at rather than jumping somewhere else --
+// see area-editor.js. 'moveend' rather than 'move' keeps this to once per
+// gesture instead of once per animation frame, and jumpTo/flyTo fire it
+// too, so the initial auto-centering is captured without a separate call.
+map.on('moveend', () => {
+  const center = map.getCenter();
+  setMapView({ lat: center.lat, lon: center.lng, zoom: map.getZoom() });
+});
 
 map.on('load', async () => {
   updateLabelZoomVisibility();
