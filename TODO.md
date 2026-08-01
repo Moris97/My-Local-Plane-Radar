@@ -110,8 +110,11 @@ Added to as they come up; picked up in a later stage when relevant.
   centre is an **arbitrary point, deliberately not the receiver's home** —
   the driving use case is watching a specific piece of sky that isn't
   overhead (an airfield or approach path some km away). Still to build:
-  - **Free shape** — the button already renders in the editor's toolbar,
-    disabled. The groundwork is all in place: `watchlist.js`'s
+  - **Free shape** — its toolbar button was removed for v2.1.0 rather than
+    left disabled (a greyed-out control still reads as a promise); re-add it
+    in `area-editor.js` alongside the implementation, its `areaPolygonLabel`
+    translation key is still in `i18n.js`. The groundwork is all in place:
+    `watchlist.js`'s
     `AREA_SIZE_FIELDS` and `area-editor.js`'s `HANDLE_SPECS` are both
     per-shape tables, and `geo.js`'s `shapeRing` dispatch means the two map
     layers never learn what shape they're drawing. A polygon is the one
@@ -232,3 +235,77 @@ Added to as they come up; picked up in a later stage when relevant.
     call; `list.js`'s `drawTable()` was calling it twice per render (total
     count, then again inside `visibleAircraft`). Now fetched once and
     reused for both.
+
+## From the 2026-08-02 whole-project review
+
+Twenty items were proposed across UI / UX / performance / other. All five UI
+items and the performance group are done (see the git log for 2026-08-02);
+two performance items were **dropped after measuring them** rather than
+implemented, and are recorded below so nobody re-proposes them without the
+numbers. What's left:
+
+### UX
+
+- **No connection-status indicator** (effort: small, impact: high) — when
+  the WebSocket drops, the data simply freezes and nothing says so. Hit
+  three times in one session while restarting the server during development
+  ("Add doesn't work", "the whole page died") — each time the real answer
+  was "the server isn't running". A small "disconnected / reconnecting"
+  strip would have answered it instantly. Pairs naturally with the next
+  item; do them together.
+- **WebSocket reconnect has no backoff** (effort: small, impact: medium) —
+  `app.js`'s `connect()` retries on a flat `setTimeout(connect, 1000)`
+  forever. With the server down that's one request a second indefinitely,
+  and the user is told nothing. Wants exponential backoff with a cap, and
+  to feed the status indicator above.
+- **Watch-list entries can't be edited** (effort: medium, impact: medium) —
+  only `POST` and `DELETE` exist (`server.js`). Since an entry now carries a
+  match type, an optional altitude condition *and* an optional trigger area
+  drawn on a map, "delete and re-add" means redrawing the area from scratch.
+  Needs a `PUT /api/notifications/watchlist/:id` plus an edit affordance on
+  each row, with the editor pre-loaded with the existing area.
+- **"Clear area" closes the whole editor** (effort: tiny, impact: small) —
+  `area-editor.js`'s button calls `close(null)`. Clearing the shape and
+  staying in the editor to draw a new one is the more obvious reading;
+  cancelling is already what Cancel/Escape are for.
+
+### Other
+
+- **No CI** (effort: small, impact: medium) — there is no
+  `.github/workflows`. 453 tests exist and pass, but nothing runs them on
+  push or PR, so a regression only surfaces when someone happens to run
+  `npm test` locally. A single workflow running `npm ci && npm test` on
+  Node 22/24 would cover it.
+- **`escapeHtml` is duplicated three times** (effort: tiny, impact: small) —
+  identical implementations in `app.js`, `stats.js` and
+  `aircraft-panel.js`. Wants one shared module, in the same spirit as
+  `geo.js`/`debounce.js`/`pending-queue.js`.
+- **`docs/README.md` is out of date** (effort: small, impact: medium) — it
+  still describes Smart Home as its own Settings tab in two places, which
+  stopped being true in v2.1.0 when it became a subview inside
+  Notifications. Also missing any mention of trigger areas, and the Settings
+  screenshots in `docs/images/` predate both changes. Worth doing alongside
+  whatever the next release is, so the screenshots are only retaken once.
+- **Audit the 29 silent `catch {}` blocks** (effort: medium, impact: low) —
+  most are deliberate and carry a comment saying why (offline, unauthorized,
+  storage disabled), but they were never reviewed as a group, and a few
+  could be hiding a real failure with nothing in the log. This is a read-
+  through, not a rewrite: the outcome should mostly be confirming the
+  existing behaviour, with a log line added where a failure would otherwise
+  be invisible.
+
+### Measured and deliberately NOT done
+
+- **Row-diffing the List table instead of rebuilding it.** Proposed as a
+  performance fix, then measured: a full rebuild costs **0.52 ms at 25
+  aircraft, 0.79 ms at 60, 1.95 ms at 150, 5.28 ms at 400**, once per
+  second. At any realistic traffic level that is far below the point where
+  anyone could perceive it, and diffing would put the selection highlight,
+  the hover cross-highlight and three per-row event listeners at risk for
+  no measurable gain. Revisit only if a real complaint appears, and measure
+  again first.
+- **Paginating `/api/stats/registrations` server-side.** It returns every
+  row and the client sorts/filters/pages over the array, which is a
+  deliberate, already-documented decision (see the "Registrations table"
+  section in CLAUDE.md). It is lazy-loaded behind a button and fetched once
+  per panel open, so there is nothing to fix at present scale.
