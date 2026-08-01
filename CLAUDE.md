@@ -186,6 +186,34 @@ won't see it (the fetch 401s, treated the same as "no home configured") —
 consistent with home location being Server-tab-gated everywhere else,
 not a special case that bypasses it.
 
+**Initial map center** (2026-08-01, `app.js`'s `map.on('load')` handler):
+before this, the map always started at a placeholder `[0, 0]`/zoom 2 (the
+middle of the Atlantic) until the first aircraft-with-position happened to
+arrive, then jumped there — effectively an arbitrary starting view, since
+"first aircraft in the snapshot's array order" has no relation to where the
+receiver actually is. Now `refreshHomeLocation()` is awaited (and moved
+earlier, *before* the queued-message flush) right there in the same
+handler; if a home location is configured (or auto-detected — same
+resolution as the home marker above, reused as-is, no new coordinate
+source), `map.jumpTo({ center: [homeLocation.lon, homeLocation.lat], zoom:
+INITIAL_ZOOM })` runs immediately and sets `hasCentered = true` before any
+queued snapshot is processed, so the old "first aircraft" jump in
+`applyAircraftUpdate` never fires. Falls through to that exact old fallback
+unchanged when no home is configured (or the browser isn't authorized to
+see it) — there's no other reference point to use in that case. Independent
+of `showHomeMarker`: whether the pulsing dot itself is drawn is a separate
+display preference, unrelated to whether the known coordinate is usable as
+a starting view.
+`INITIAL_ZOOM` (9) is shared between the two paths so they read as one
+deliberate starting zoom, not two coincidentally-equal magic numbers. This
+does **not** touch the pre-existing "jump to home on every reconnect"
+question — `hasCentered` still resets on every full snapshot (`resetAll()`,
+i.e. on every WS reconnect, not just the first page load) and the home
+recheck only lives in the one-time `map.on('load')` handler, so a
+mid-session reconnect still falls back to "first aircraft in the new
+snapshot" exactly as before — deliberately unchanged, out of scope for this
+fix.
+
 ## License policy
 
 - Project license: **MIT** (`LICENSE` at repo root).

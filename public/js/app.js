@@ -32,8 +32,17 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
+// [0, 0]/zoom 2 is a deliberately neutral placeholder -- shown only for the
+// brief moment before the map's real starting view is picked (home location
+// if one is configured, else wherever the first positioned aircraft happens
+// to be -- see the map.on('load') handler below). Never a real coordinate.
 const DEFAULT_CENTER = [0, 0];
 const DEFAULT_ZOOM = 2;
+// Shared by both ways the map can pick its initial view (home location, or
+// falling back to the first aircraft with a position) so the two read as
+// one deliberate "starting zoom" rather than two coincidentally-equal magic
+// numbers.
+const INITIAL_ZOOM = 9;
 
 const FADE_START_MS = 3000;
 const FADE_END_MS = 10000;
@@ -345,8 +354,16 @@ function applyIconSize(sizePx) {
 // consistent with home location being Server-tab-gated everywhere else
 // rather than a special case.
 let homeMarker = null;
-let homeLocation = null; // { lat, lon } | null -- null also covers "not configured" and "not authorized"
+// { lat, lon } | null -- null also covers "not configured" and "not
+// authorized". Also read by map.on('load') below to pick the map's initial
+// view -- see refreshHomeLocation.
+let homeLocation = null;
 
+// Also drives the map's initial center (map.on('load') below): home is
+// either a manual override (Settings -> Server) or auto-detected from
+// readsb's own receiver.json at startup (server/src/home.js's effective-home
+// resolution) -- never a hardcoded coordinate here or anywhere else in this
+// file.
 async function refreshHomeLocation() {
   try {
     const response = await fetch('/api/settings');
@@ -414,12 +431,22 @@ map.on('load', async () => {
   applyIconSize(initialSettings.aircraftIconSize);
   if (initialSettings.mapTheme === 'auto') await refreshDaylight();
   await switchBasemap(initialSettings.basemapMode, resolveMapTheme(initialSettings.mapTheme));
+  // Awaited (and done *before* the pendingMessages flush below) so a
+  // configured home location wins the initial view over the old fallback
+  // -- whichever aircraft happened to be first in the very first snapshot,
+  // essentially arbitrary. Falls through to that fallback unchanged when no
+  // home is configured (or the browser isn't authorized to see it -- see
+  // refreshHomeLocation's own comment).
+  await refreshHomeLocation();
+  if (homeLocation && !hasCentered) {
+    map.jumpTo({ center: [homeLocation.lon, homeLocation.lat], zoom: INITIAL_ZOOM });
+    hasCentered = true;
+  }
   mapReady = true;
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
   }
   refreshTrailForSettings();
-  refreshHomeLocation();
   refreshCoverage();
 });
 
@@ -854,7 +881,11 @@ function applyAircraftUpdate(aircraft) {
   }
 
   if (!hasCentered) {
-    map.jumpTo({ center: lngLat, zoom: 9 });
+    // Fallback for when no home location is configured (or the map.on('load')
+    // handler's own home-based centering above didn't apply) -- lands on
+    // whichever aircraft happens to be first, which is the best available
+    // reference point with no home location to go on.
+    map.jumpTo({ center: lngLat, zoom: INITIAL_ZOOM });
     hasCentered = true;
   }
 
