@@ -1284,6 +1284,48 @@ Notifications tab listed them all side by side); **squawk and watch-list
 both have a per-hex cooldown** (first-seen and range-record are naturally
 one-shot per hex/record already).
 
+**Receiver-silence watchdog** (`evaluateReceiverSilenceRule`, added
+2026-08-02) is a different shape of rule from every other one in this
+file: the others all fire on the *presence* of some condition on an
+aircraft; this fires on the *absence* of any aircraft at all — a receiver
+health check, not an aircraft-tracking one. `index.js`'s `pollOnce` calls
+it once per poll tick with a single boolean, computed **before** the
+existing `raw === null` early-return so a completely failed fetch counts
+too: `Array.isArray(raw?.aircraft) && raw.aircraft.length > 0`.
+"Activity" deliberately means **at least one tracked hex, position or
+not** — a Mode-S-only contact still proves the receiver and readsb are
+both alive, so requiring a position would both miss the point (a dead
+antenna produces zero hexes of any kind, not just zero positioned ones)
+and false-alarm in weak-MLAT areas. Threshold is a flat **1 hour**
+(`RECEIVER_SILENCE_MS`), not exposed as a setting — deliberately changed
+from the 5 minutes floated when this was first proposed (`TODO.md`,
+2026-07-28): the user pointed out 5 minutes is well within a normal
+quiet-traffic gap, especially overnight in a low-traffic area, and would
+have been a real false-alarm source, not a hypothetical one. State
+(`lastActivityAt`, seeded to the process's own start time so a fresh boot
+doesn't count time-since-epoch as an unbroken outage; `receiverSilenceNotified`,
+a latch so a multi-hour outage notifies once, not once per tick) is
+in-memory only, same "fine to lose on restart" reasoning as
+`pendingFirstSeen`/`cooldown.js` (hard rule 6) — a restart resets the
+countdown, which reads as "the receiver just came back", a reasonable
+thing to believe right after a restart anyway. The latch is set
+regardless of the `receiverSilenceEnabled` toggle (only whether `notify()`
+actually runs depends on it), so toggling the setting off and back on
+mid-outage doesn't immediately re-fire, and a disabled rule doesn't keep
+doing per-tick work once it already knows the answer for this outage.
+ntfy-only (no smart-home/MQTT publish) — same scope decision as the
+range-record rule, which is the other rule this was explicitly modelled
+on ("like the range-record notification, in the Notifications tab, with
+its own enable/disable toggle").
+
+**Fixed alongside this**: `server.js`'s `PUT /api/notifications/settings`
+validated-key whitelist was missing `watchedEnabled` entirely — the
+Notifications tab's "Watched aircraft" checkbox has called the endpoint
+with it since that toggle was added (2026-08-01), but the value was
+silently dropped before ever reaching `updateNotificationSettings`, so the
+checkbox had no effect. Found while adding `receiverSilenceEnabled` to
+that same list, not reported live.
+
 **Trigger area** (`area`, optional, added 2026-08-01): `{kind: 'circle',
 lat, lon, radiusKm}`, `{kind: 'rectangle', lat, lon, widthKm, heightKm}`,
 `{kind: 'polygon', lat, lon, points: [{lat, lon}, ...]}` (added

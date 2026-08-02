@@ -20,6 +20,10 @@ const DEFAULT_SETTINGS = {
   // an omission next to the other three. Defaults true so existing installs
   // behave exactly as before.
   watchedEnabled: true,
+  // Receiver-health watchdog (rules.js's evaluateReceiverSilenceRule) --
+  // defaults true like every other rule here, so an install that's never
+  // touched this setting still gets the safety net.
+  receiverSilenceEnabled: true,
 };
 
 export function getNotificationSettings() {

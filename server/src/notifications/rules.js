@@ -253,6 +253,77 @@ export function getAllTimeMaxRangeKm() {
   return Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
 }
 
+// A completely different kind of rule from everything above: those all fire
+// on the *presence* of some condition on an aircraft; this fires on the
+// *absence* of any aircraft at all, i.e. it's a receiver health check, not
+// an aircraft-tracking one. "Activity" deliberately means "at least one
+// tracked hex, position or not" -- a Mode-S-only contact with no ADS-B
+// position still proves the receiver and readsb are both alive, so counting
+// only aircraft-with-position would produce false alarms in weak-MLAT areas
+// and miss the point besides (a dead antenna produces zero hexes of any
+// kind, not just zero positioned ones).
+//
+// 1 hour, not the originally-floated 5 minutes: requested explicitly
+// (2026-08-02) after pointing out that 5 minutes is well within normal
+// quiet-hours traffic gaps for a receiver in a low-traffic area, especially
+// overnight -- a real false-alarm risk, not a hypothetical one. An hour is
+// long enough that most installs would see at least one contact (even a
+// distant airliner) in that window if the receiver were actually working.
+const RECEIVER_SILENCE_MS = 60 * 60 * 1000;
+// In-memory only, same "fine to lose on restart" reasoning as
+// pendingFirstSeen/cooldown.js above (hard rule 6) -- a restart just resets
+// the countdown, which reads as "the receiver just came back", a reasonable
+// thing to believe immediately after a restart anyway. Seeded to the
+// process's own start time (not 0/never) so a fresh boot doesn't count the
+// time since the Unix epoch as an unbroken silence and fire on its very
+// first unlucky poll.
+let lastActivityAt = Date.now();
+// Latches once fired so a silence spanning many poll ticks only ever
+// notifies once, not once per tick for the rest of the outage; cleared the
+// moment activity resumes so the *next* outage can notify again.
+let receiverSilenceNotified = false;
+
+// Test-only reset, same shape as cooldown.js's resetCooldowns -- lets each
+// test start from "just came online" instead of carrying over whatever the
+// previous test's clock left behind.
+export function resetReceiverSilenceState(now = Date.now()) {
+  lastActivityAt = now;
+  receiverSilenceNotified = false;
+}
+
+// `hasActivity` is the caller's job to define (index.js): true whenever the
+// most recent poll tick produced at least one tracked aircraft, false for
+// an empty snapshot **or** a poll that failed outright (source.fetchSnapshot
+// returning null) -- a source that can't even be read is at least as
+// concerning as one that reads but finds nothing.
+export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
+  if (hasActivity) {
+    lastActivityAt = now;
+    receiverSilenceNotified = false;
+    return;
+  }
+
+  if (receiverSilenceNotified) return;
+  if (now - lastActivityAt < RECEIVER_SILENCE_MS) return;
+
+  // Latched regardless of the enabled setting below, not just when it
+  // actually sends -- otherwise toggling the setting off and back on
+  // mid-outage would re-fire immediately, and a disabled rule shouldn't be
+  // doing per-tick work indefinitely once it already knows the answer.
+  receiverSilenceNotified = true;
+
+  const settings = getNotificationSettings();
+  if (!settings.receiverSilenceEnabled) return;
+
+  const hours = Math.round(RECEIVER_SILENCE_MS / 3600000);
+  notify({
+    title: 'Receiver silent',
+    message: `No aircraft seen (not even without a position) for over ${hours}h — check readsb/SDR`,
+    priority: 4,
+    tags: ['warning'],
+  });
+}
+
 export function evaluateRangeRecordRule(maxRangeKm) {
   if (typeof maxRangeKm !== 'number') return;
 

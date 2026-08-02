@@ -220,6 +220,7 @@ function renderSettingsForm(container) {
           <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
           <label><input type="checkbox" id="mlpr-notif-watched"> ${t('watchlist')}</label>
           <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
+          <label><input type="checkbox" id="mlpr-notif-receiversilence"> ${t('receiverSilenceAlert')}</label>
         </fieldset>
 
         <!-- Directly under the "Watched aircraft" toggle it configures,
@@ -813,6 +814,7 @@ function wireNotificationToggles(container) {
   const notifFirstSeenEl = container.querySelector('#mlpr-notif-firstseen');
   const notifWatchedEl = container.querySelector('#mlpr-notif-watched');
   const notifRangeRecordEl = container.querySelector('#mlpr-notif-rangerecord');
+  const notifReceiverSilenceEl = container.querySelector('#mlpr-notif-receiversilence');
 
   async function loadNotificationSettings() {
     const response = await fetch('/api/notifications/settings');
@@ -825,6 +827,7 @@ function wireNotificationToggles(container) {
     notifFirstSeenEl.checked = data.firstSeenEnabled;
     notifWatchedEl.checked = data.watchedEnabled;
     notifRangeRecordEl.checked = data.rangeRecordEnabled;
+    notifReceiverSilenceEl.checked = data.receiverSilenceEnabled;
   }
 
   async function putNotificationSettings(patch) {
@@ -847,6 +850,9 @@ function wireNotificationToggles(container) {
   );
   notifRangeRecordEl.addEventListener('change', (event) =>
     putNotificationSettings({ rangeRecordEnabled: event.target.checked }),
+  );
+  notifReceiverSilenceEl.addEventListener('change', (event) =>
+    putNotificationSettings({ receiverSilenceEnabled: event.target.checked }),
   );
 
   loadNotificationSettings();

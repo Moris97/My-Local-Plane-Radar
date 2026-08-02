@@ -392,7 +392,12 @@ export async function buildServer({ logger = true } = {}) {
     const body = request.body ?? {};
     const patch = {};
 
-    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled']) {
+    // watchedEnabled was missing from this list entirely -- the Notifications
+    // tab's "Watched aircraft" checkbox has called PUT with it since the
+    // toggle was added (2026-08-01), but every value silently never reached
+    // updateNotificationSettings, so the checkbox had no effect. Found
+    // 2026-08-02 while adding receiverSilenceEnabled to this same list.
+    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled', 'watchedEnabled', 'receiverSilenceEnabled']) {
       if (key in body) {
         if (typeof body[key] !== 'boolean') {
           return reply.code(400).send({ error: `${key} must be a boolean` });

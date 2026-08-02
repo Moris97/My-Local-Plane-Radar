@@ -113,6 +113,31 @@ Added to as they come up; picked up in a later stage when relevant.
   see CLAUDE.md for how the three shapes divide up.
 
 
+- **Notification/event history (the `events` table CLAUDE.md's architecture
+  diagram already promises)** (effort: medium, impact: medium, priority:
+  deferred — user wants to think it over) — SQLite today only has `config`,
+  `daily_stats`, `seen_aircraft`, `registrations`, and `seen_flights`; there
+  is no table actually recording individual notification/event occurrences
+  (squawk, first-seen, watch-list match, range record, and now
+  receiver-silence), even though the architecture section at the top of
+  CLAUDE.md has said "events + daily aggregates only" from the start. Today
+  a notification fires over ntfy/MQTT and leaves no trace in the app itself
+  — no way to see what fired while you weren't looking, or to sanity-check
+  that a rule/trigger area is actually working. One row per event (not per
+  position) fits hard rule 4 fine, and the write can batch into the
+  existing 45s `daily_stats` flush rather than adding a new SD-writing path.
+  Would want a retention cap (e.g. 90 days) and a simple timeline view
+  somewhere in the UI. Proposed 2026-08-02.
+- **Emergency squawk banner/marker on the live map** (effort: small, impact:
+  medium, priority: low) — squawk 7500/7600/7700 today only reaches ntfy/
+  MQTT; the map itself looks completely normal, which is an odd gap for a
+  radar display specifically built to be watched. A banner across the top
+  of the map, a distinct marker treatment (the existing selection-glow
+  mechanism reused with a red/pulsing variant rather than a new technique),
+  and optionally a WebAudio-generated tone (no audio file, no dependency,
+  consistent with the rest of this app's "hand-write it, it's a few dozen
+  lines" bias) would all be cheap given the existing squawk-detection code
+  in `rules.js` already fires per aircraft per tick. Proposed 2026-08-02.
 - **Circling-aircraft notification** (effort: medium, impact: high,
   priority: low) — an aircraft that loops in roughly the same place for
   several minutes is usually doing something worth knowing about: police,
@@ -149,11 +174,14 @@ Added to as they come up; picked up in a later stage when relevant.
   2026-07-28.
 - **Receiver health monitoring** (effort: small, impact: medium, priority:
   low) — an RSSI-vs-distance chart, detecting amplifier overload (a rising
-  count of `strong_signals`), monitoring `blocks_dropped` from `stats.json`
-  as a Pi-overload warning, and a messages-per-second-over-24h chart. Plus
-  a "receiver has been silent for 5 minutes" ntfy alert, so a crashed
-  readsb/SDR doesn't go unnoticed until someone happens to check the app.
-  Requested 2026-07-28.
+  count of `strong_signals`), and monitoring `blocks_dropped` from
+  `stats.json` as a Pi-overload warning. Requested 2026-07-28. **The "receiver
+  has been silent" alert half of this is now implemented, 2026-08-02** — see
+  CLAUDE.md's Notification engine section (`evaluateReceiverSilenceRule`).
+  Shipped at a 1-hour threshold, not the 5 minutes originally floated here:
+  the user pointed out 5 minutes is well within a normal quiet-traffic gap,
+  especially overnight in a low-traffic area, and would have been a real
+  false-alarm source. What's left of this bullet is just the two charts.
 - **Smart home integration (MQTT / Home Assistant) -- implemented
   2026-07-29**, see CLAUDE.md's "Smart home / MQTT integration" section for
   the full picture. First-seen, watch-list, and (since 2026-08-01) squawk

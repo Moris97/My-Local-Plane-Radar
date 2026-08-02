@@ -56,12 +56,14 @@ rules.setNotifySender((topic, payload) => {
 beforeEach(async () => {
   sent = [];
   resetCooldowns();
+  rules.resetReceiverSilenceState();
   updateNotificationSettings({
     squawkEnabled: true,
     squawkCodes: { 7500: true, 7600: true, 7700: true },
     firstSeenEnabled: true,
     rangeRecordEnabled: true,
     watchedEnabled: true,
+    receiverSilenceEnabled: true,
   });
   const { updateSmartHomeSettings } = await import('./settings.js');
   smartHome.shutdownSmartHome(); // force a fresh client each test, regardless of whether settings actually changed
@@ -198,6 +200,68 @@ test('rangeRecordEnabled=false still updates the record but sends nothing', () =
 
 test('getAllTimeMaxRangeKm reflects the record maintained by evaluateRangeRecordRule, regardless of notification toggle', () => {
   assert.equal(rules.getAllTimeMaxRangeKm(), 200);
+});
+
+function silentNotifications() {
+  return sent.filter((n) => n.payload.title === 'Receiver silent');
+}
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
+
+test('no notification before the silence threshold elapses', () => {
+  const start = Date.now();
+  rules.resetReceiverSilenceState(start);
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS - 1);
+  assert.equal(silentNotifications().length, 0);
+});
+
+test('fires once the receiver has been silent for over an hour, and only once', () => {
+  const start = Date.now();
+  rules.resetReceiverSilenceState(start);
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  assert.equal(silentNotifications().length, 1);
+
+  // Still silent an hour later -- must not fire again mid-outage.
+  rules.evaluateReceiverSilenceRule(false, start + 2 * ONE_HOUR_MS);
+  assert.equal(silentNotifications().length, 1);
+});
+
+test('any activity resets the timer, so a brief gap does not trigger it', () => {
+  const start = Date.now();
+  rules.resetReceiverSilenceState(start);
+  // A contact 59 minutes in resets the clock -- the next hour is measured
+  // from there, not from `start`.
+  rules.evaluateReceiverSilenceRule(true, start + ONE_HOUR_MS - 60_000);
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  assert.equal(silentNotifications().length, 0);
+});
+
+test('a silence period can notify again after activity resumes and then stops once more', () => {
+  const start = Date.now();
+  rules.resetReceiverSilenceState(start);
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  assert.equal(silentNotifications().length, 1);
+
+  rules.evaluateReceiverSilenceRule(true, start + ONE_HOUR_MS + 2);
+  rules.evaluateReceiverSilenceRule(false, start + 2 * ONE_HOUR_MS + 3);
+  assert.equal(silentNotifications().length, 2);
+});
+
+test('receiverSilenceEnabled=false suppresses the notification but still latches, so re-enabling mid-outage does not immediately fire', () => {
+  const start = Date.now();
+  rules.resetReceiverSilenceState(start);
+  updateNotificationSettings({ receiverSilenceEnabled: false });
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  assert.equal(silentNotifications().length, 0);
+
+  updateNotificationSettings({ receiverSilenceEnabled: true });
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 2);
+  assert.equal(silentNotifications().length, 0);
+
+  // The next outage, after activity resumes in between, does notify.
+  rules.evaluateReceiverSilenceRule(true, start + ONE_HOUR_MS + 3);
+  rules.evaluateReceiverSilenceRule(false, start + 2 * ONE_HOUR_MS + 4);
+  assert.equal(silentNotifications().length, 1);
 });
 
 function watchedNotifications() {

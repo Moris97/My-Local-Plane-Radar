@@ -16,7 +16,7 @@ import {
   restoreFromSnapshot,
 } from './stats-history.js';
 import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeenFlight } from './db.js';
-import { evaluateAircraftRules, evaluateRangeRecordRule, prunePendingFirstSeen } from './notifications/rules.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
@@ -49,6 +49,16 @@ const source = createSource();
 
 async function pollOnce(broadcast) {
   const raw = await source.fetchSnapshot();
+
+  // "Activity" means at least one tracked hex this tick, position or not --
+  // a Mode-S-only contact still proves the receiver is alive. Evaluated
+  // before the raw===null bail-out below, and specifically treats a failed
+  // fetch itself as "no activity": a source that can't even be read is at
+  // least as concerning to the watchdog as one that reads fine and finds
+  // nothing. See evaluateReceiverSilenceRule for why this triggers on
+  // absence rather than presence, unlike every other notification rule.
+  evaluateReceiverSilenceRule(Array.isArray(raw?.aircraft) && raw.aircraft.length > 0);
+
   if (raw === null) return;
 
   const updated = applyRawSnapshot(raw);
