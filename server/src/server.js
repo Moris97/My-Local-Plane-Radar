@@ -53,6 +53,7 @@ const mapDataDir = join(__dirname, '..', '..', 'data', 'naturalearth');
 // public/ unconditionally, so a dev-only page can't live there without a
 // second, NODE_ENV-gated mechanism (see below).
 const devDir = join(__dirname, '..', '..', 'dev');
+const appVersion = require('../../package.json').version;
 
 export async function buildServer({ logger = true } = {}) {
   const app = Fastify({ logger });
@@ -220,6 +221,11 @@ export async function buildServer({ logger = true } = {}) {
     if (!home) return { isDaylight: null };
     return { isDaylight: isDaylight(home.lat, home.lon) };
   });
+
+  // Read from package.json rather than kept in a second place that could
+  // disagree with it. Ungated and deliberately so: the credits panel shows
+  // it to every browser, and a version number is not a secret.
+  app.get('/api/version', async () => ({ version: appVersion }));
 
   app.get('/api/server/port', { preHandler: requireSettingsAuth }, async () => {
     const { port, source } = resolvePort();

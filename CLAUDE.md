@@ -388,6 +388,22 @@ fix.
     "While the lower right corner is traditional, any corner of the map is
     acceptable") that this isn't a license constraint — moving corners is
     purely to dodge the new overlap.
+    **Below 720px it moves to the top-right corner instead** (2026-08-02,
+    requested): the bottom of a phone screen is the busiest part of the app
+    (floating pills, the "i" button, a bottom sheet sliding up over all of
+    it) while the top edge is empty map. Only the credit moves — the "i"
+    credits button stays in the bottom-left stack — which is why it's a
+    `position: fixed` override on `#mlpr-attribution` in a `max-width: 719px`
+    block rather than a reordering inside `#mlpr-corner-info`'s flex column.
+    Same OSM guideline as above covers it ("any corner of the map is
+    acceptable"), and OpenFreeMap's terms specify the wording, not the
+    placement.
+  - **Credits panel byline**: "MLPR v<version> by Maurycy Kaczmarek", the
+    whole line a link to the GitHub repo. The version comes from
+    `GET /api/version` (`server.js`, reading `package.json` — ungated, a
+    version number is not a secret) and is filled in by `panels.js`, so a
+    release only ever has to bump `package.json`; a failed fetch just leaves
+    the byline reading as it did before.
 - Icons: inline SVG only, authored in-repo. No icon libraries, icon fonts, or
   CDNs — everything must work fully offline.
 
@@ -1418,6 +1434,56 @@ report ("double-click doesn't remove a vertex on PC", 2026-08-02) and the
 original test missed both by dispatching a synthetic `dblclick`, which
 bypasses hit-testing and the pointer-events mechanism alike -- verify this
 kind of interaction with real pointer input.
+
+**Touch removes a vertex by long press (`LONG_PRESS_MS`, 450ms); the
+right-click menu is desktop-only** (2026-08-02, explicit request). On a
+phone that menu had exactly one item, so it was a menu for the sake of
+being one — the press itself now does the removal, and the `contextmenu`
+handler's only remaining job on touch is keeping the *native* menu off the
+screen (mobile browsers raise one at ~500ms, which is why our deadline sits
+just under it). Whether a press is touch is read from the last
+`pointerdown`'s `pointerType`, not from the `contextmenu` event, which is
+still a plain `MouseEvent` outside very recent Chrome. A press only stops
+being a long press once the vertex has actually moved `TAP_DRIFT_PX` —
+reusing the same measured threshold the double-tap fix needed, for the same
+reason: MapLibre's own `dragstart` fires at 3px, which a fingertip crosses
+while holding still.
+
+**A gesture that removes a vertex also mutes the map click that follows it**
+(`MAP_CLICK_MUTE_MS`). The press that completes a double-tap or a long press
+is still turned into a click on the map underneath, landing exactly where
+the vertex used to be — i.e. right by the edge that just closed over it — so
+the same gesture could insert a vertex straight back. Related, and the
+reason `map.on('click')` also ignores clicks whose `originalEvent.target`
+sits inside a marker element: markers are DOM children of the canvas
+container, so a click on one arrives at the map handler like any other, and
+a vertex is an endpoint of two edges, matching the insert hit-test at
+distance 0 every time.
+
+**The back gesture closes the editor and only the editor**
+(`public/js/history-overlay.js`, 2026-08-02). The editor is a top-level
+overlay opened from *inside* the Settings panel, so it can't reuse
+`panels.js`'s single "a panel or modal is open" history entry — it stacks a
+second one on top and registers what a pop should do; `panels.js`'s
+`popstate` listener gives that overlay first refusal before closing anything
+of its own. Closing by any other route (Save/Cancel/Escape) consumes the
+entry itself, and the `popstate` that `history.back()` then fires is
+swallowed — without that flag it falls through to `panels.js` and closes the
+Settings panel underneath, the same trap that file already documents for its
+own panel/modal split. Its own module rather than an export from `panels.js`
+purely to avoid the import cycle (`panels.js` → `settings.js` →
+`area-editor.js`). Unit-tested against a stubbed global `history`
+(`history-overlay.test.js`) — no DOM needed, and the swallow flag is exactly
+the kind of thing worth pinning down.
+
+**"Clear area" clears the shape and stays open** (2026-08-02, was on
+`TODO.md`) — it used to call `close(null)`, i.e. behave as a second Cancel.
+It also resets the shape selector to circle rather than leaving, say,
+"polygon" active with nothing drawn: an already-active shape button ignores
+its own click, so that state would leave no way to draw anything again.
+Saving with nothing drawn is still how an area gets removed from an entry,
+so the caller's cleared (`null`) / cancelled (`undefined`) distinction is
+untouched.
 
 A self-intersecting polygon is allowed rather than rejected: the server's
 even-odd ray casting gives a defined, stable answer for one (the lobes

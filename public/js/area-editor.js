@@ -34,6 +34,7 @@ import {
   destinationPoint,
 } from './geo.js';
 import { kmToDisplayDistance, displayDistanceToKm, distanceUnitLabel } from './units.js';
+import { openHistoryOverlay } from './history-overlay.js';
 
 const SOURCE_ID = 'mlpr-area';
 const FILL_LAYER_ID = 'mlpr-area-fill';
@@ -97,6 +98,17 @@ const VERTEX_MENU_OFFSET_PX = 12;
 // completes the pair, short enough that the gesture is available again by
 // the time a hand could reach for it.
 const TAP_ZOOM_MUTE_MS = 500;
+// Touch only: how long a vertex has to be held before it's removed. The
+// right-click menu is the desktop affordance for the same action and stays
+// exactly as it was -- on a phone that menu had a single item ("remove"),
+// which is a menu for the sake of having one, so the long press just does
+// it. Deliberately a touch under the ~500ms at which mobile browsers raise
+// their own `contextmenu`, so ours is the answer to the gesture.
+const LONG_PRESS_MS = 450;
+// How long map clicks are ignored after a vertex removal -- see
+// removeVertex. Only has to outlast the click the removing gesture itself
+// produces, which the browser dispatches as soon as the finger lifts.
+const MAP_CLICK_MUTE_MS = 500;
 // Below ~100 m a shape is smaller than the pin drawn on top of it, and
 // sizes this large are nonsense for a single receiver -- these only exist
 // to keep the drag interaction from producing a degenerate shape, not as a
@@ -243,6 +255,13 @@ export function openAreaEditor(initialArea = null) {
     let draggedSinceLastTap = false;
     let dragOriginPoint = null;
     let tapZoomTimer = null;
+    let longPressTimer = null;
+    // Which input started the press currently in progress. Read by the
+    // `contextmenu` handler, which is a plain MouseEvent in most browsers
+    // (only very recent Chrome makes it a PointerEvent), so it can't be
+    // asked about `pointerType` itself.
+    let lastPointerWasTouch = false;
+    let ignoreMapClicksUntil = 0;
     // Which shape the toolbar is currently set to build. Kept separate from
     // area?.kind because it also has to survive "cleared, nothing drawn yet".
     let shapeKind = initialArea?.kind ?? 'circle';
@@ -318,6 +337,22 @@ export function openAreaEditor(initialArea = null) {
         tapZoomTimer = null;
         map?.doubleClickZoom?.enable();
       }, TAP_ZOOM_MUTE_MS);
+    }
+
+    function cancelLongPress() {
+      if (!longPressTimer) return;
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+
+    // Mobile browsers raise their own `contextmenu` on a long press, which
+    // would put a native menu (or a text-selection callout) on screen right
+    // as ours removes the vertex. The vertex's own handler stops the event
+    // before it ever gets here, so this only covers presses that land
+    // anywhere else in the editor -- including the one that fires after a
+    // long-pressed vertex has already been removed and its element is gone.
+    function suppressNativeContextMenu(event) {
+      event.preventDefault();
     }
 
     function closeVertexMenu() {
@@ -450,6 +485,10 @@ export function openAreaEditor(initialArea = null) {
             const now = map.project([lng, lat]);
             if (Math.hypot(now.x - dragOriginPoint.x, now.y - dragOriginPoint.y) >= TAP_DRIFT_PX) {
               draggedSinceLastTap = true;
+              // Moving it is not holding it still: the same measured
+              // threshold decides both, so a fingertip's jitter doesn't
+              // cancel a long press any more than it fakes a drag.
+              cancelLongPress();
             }
           }
           area.points[index] = { lat, lon: lng };
@@ -469,6 +508,13 @@ export function openAreaEditor(initialArea = null) {
         // vertex actually goes.
         element.addEventListener('pointerdown', (event) => {
           const now = Date.now();
+          // Nothing from the previous press survives into this one -- in
+          // particular a long press armed by the first tap of a double-tap
+          // must not fire after the second tap has already removed the
+          // vertex and reindexed everything behind it.
+          cancelLongPress();
+          lastPointerWasTouch = event.pointerType === 'touch';
+
           const isDoubleTap =
             // A press that followed an actual drag isn't the second half of
             // a double-tap, however quickly it came -- otherwise nudging a
@@ -494,6 +540,17 @@ export function openAreaEditor(initialArea = null) {
             return;
           }
           lastTap = { index, time: now, x: event.clientX, y: event.clientY };
+
+          // Touch's own removal gesture -- see LONG_PRESS_MS. A mouse press
+          // deliberately arms nothing: holding a mouse button down is how
+          // you drag, and the right-click menu already covers removal.
+          if (lastPointerWasTouch) {
+            longPressTimer = setTimeout(() => {
+              longPressTimer = null;
+              lastTap = { index: -1, time: 0, x: 0, y: 0 };
+              removeVertex(index);
+            }, LONG_PRESS_MS);
+          }
         });
 
         // The removal itself is handled above; this only stops the map
@@ -507,9 +564,16 @@ export function openAreaEditor(initialArea = null) {
         // to discover on touch but not obvious with a mouse, so the right
         // button offers it explicitly (and can say *why* it's unavailable
         // at the minimum, which a silently-ignored double-click can't).
+        //
+        // Touch gets no menu: a mobile browser raises `contextmenu` on a
+        // long press too, and a menu whose only item is "remove" is a menu
+        // for the sake of one -- the long press itself has already removed
+        // the vertex by the time this fires (LONG_PRESS_MS is shorter), so
+        // all that's left to do is keep the native menu off the screen.
         element.addEventListener('contextmenu', (event) => {
           event.preventDefault();
           event.stopPropagation();
+          if (lastPointerWasTouch) return;
           openVertexMenu(event.clientX, event.clientY, index);
         });
 
@@ -556,6 +620,13 @@ export function openAreaEditor(initialArea = null) {
     }
 
     function removeVertex(index) {
+      // Every removal gesture (double-tap, long press) ends with a press
+      // the browser still turns into a click on the map underneath, and
+      // that click lands exactly where the vertex used to be -- i.e. right
+      // next to the edge that just closed over it. Without this the same
+      // gesture that removed a vertex could immediately insert one back.
+      ignoreMapClicksUntil = Date.now() + MAP_CLICK_MUTE_MS;
+
       if (area.points.length <= POLYGON_MIN_POINTS) {
         // Nothing encloses an area with fewer than three corners. Say so
         // rather than ignoring the gesture, which would just read as the
@@ -662,12 +733,20 @@ export function openAreaEditor(initialArea = null) {
       hintTimer = null;
       if (tapZoomTimer) clearTimeout(tapZoomTimer);
       tapZoomTimer = null;
+      if (longPressTimer) clearTimeout(longPressTimer);
+      longPressTimer = null;
       map?.remove();
       map = null;
       overlay.classList.add('hidden');
       overlay.setAttribute('aria-hidden', 'true');
       overlay.innerHTML = '';
       document.removeEventListener('keydown', onKeydown);
+      document.removeEventListener('pointerup', cancelLongPress);
+      document.removeEventListener('pointercancel', cancelLongPress);
+      document.removeEventListener('contextmenu', suppressNativeContextMenu);
+      // No-op when the back gesture is what got us here -- it consumed the
+      // entry itself.
+      releaseHistory();
       resolve(result);
     }
 
@@ -682,10 +761,37 @@ export function openAreaEditor(initialArea = null) {
       close(undefined);
     }
     document.addEventListener('keydown', onKeydown);
+    // A finger lifted before the long-press deadline is just a tap.
+    // Listened for on the document, not the vertex element: MapLibre sets
+    // `pointer-events: none` on a marker element for the duration of a drag
+    // (see TAP_DRIFT_PX), so the matching pointerup may never reach it.
+    document.addEventListener('pointerup', cancelLongPress);
+    document.addEventListener('pointercancel', cancelLongPress);
+    document.addEventListener('contextmenu', suppressNativeContextMenu);
+
+    // The back gesture closes the editor and only the editor -- the
+    // Settings panel it was opened from stays open, which is exactly what
+    // "cancel" already means here.
+    const releaseHistory = openHistoryOverlay(() => close(undefined));
 
     overlay.querySelector('#mlpr-area-cancel').addEventListener('click', () => close(undefined));
     overlay.querySelector('#mlpr-area-save').addEventListener('click', () => close(area));
-    overlay.querySelector('#mlpr-area-clear').addEventListener('click', () => close(null));
+    // Clears the shape and stays in the editor rather than closing -- that's
+    // what Cancel and Escape are for, and "clear" reading as "close" left no
+    // way to start a different shape over. Saving with nothing drawn is
+    // still how an area gets removed from the entry (close(null)), so the
+    // caller's cleared/cancelled distinction is unchanged.
+    overlay.querySelector('#mlpr-area-clear').addEventListener('click', () => {
+      area = null;
+      // Back to the empty starting state, not "polygon selected but no
+      // polygon": a shape button that's already active does nothing when
+      // clicked, so leaving it selected with nothing drawn would strand the
+      // user with no way to draw anything again.
+      shapeKind = 'circle';
+      rebuildMarkers();
+      redrawShape();
+      syncShapeButtons();
+    });
 
     const shapeButtons = [...overlay.querySelectorAll('.mlpr-area-shapes button[data-shape]')];
 
@@ -824,6 +930,16 @@ export function openAreaEditor(initialArea = null) {
       // Any click closes an open vertex menu, matching how a native context
       // menu behaves.
       closeVertexMenu();
+
+      if (Date.now() < ignoreMapClicksUntil) return;
+
+      // A marker is a DOM child of the map's canvas container, so a click on
+      // one bubbles up and arrives here like any click on the map itself.
+      // Without this, clicking a vertex would insert a second vertex right
+      // on top of it: the vertex is an endpoint of two edges, so the
+      // edge hit-test below matches it at distance 0 every time.
+      const target = event.originalEvent?.target;
+      if (target instanceof Element && target.closest('.mlpr-area-vertex, .mlpr-area-handle, .mlpr-area-pin')) return;
 
       // Clicking an edge of a polygon inserts a vertex there. The edges are
       // part of the GeoJSON fill/line layers, not DOM elements, so there is

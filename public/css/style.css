@@ -436,6 +436,27 @@ html, body {
   display: none;
 }
 
+/* On a phone the credit leaves the bottom-left stack entirely and goes to
+   the top-right corner (requested): the bottom of a phone screen is the
+   busiest part of this app -- the floating bottom-bar pills, the "i"
+   button, and a bottom sheet that slides up over all of it -- while the top
+   edge is empty map. The "i" button stays where it is, so this is the one
+   width where the two aren't stacked together, which is why it's
+   position: fixed rather than an ordering change inside the flex column.
+   Permitted by both credits' terms: OSM's attribution guidelines say "any
+   corner of the map is acceptable", and OpenFreeMap only specifies the
+   wording, not the placement. */
+@media (max-width: 719px) {
+  #mlpr-attribution {
+    position: fixed;
+    top: max(6px, env(safe-area-inset-top));
+    right: 6px;
+    left: auto;
+    max-width: calc(100vw - 12px);
+    text-align: right;
+  }
+}
+
 /* The credits toggle reuses .mlpr-info-icon's own circular "i" look
    (Settings' hint icons) but is its own click-toggled panel, not that
    class's hover tooltip -- the credits list needs real links inside it,
@@ -493,6 +514,17 @@ html, body {
   padding-top: 6px;
   border-top: 1px solid #1c2e3a;
   color: #7fa3b3;
+}
+
+/* The byline is one link to the project, so it deliberately does NOT take
+   .mlpr-credits-panel a's green link color above -- it should still read as
+   a signature line, not as another entry in the thanks list. */
+.mlpr-credits-byline a {
+  color: inherit;
+}
+
+.mlpr-credits-byline a:hover {
+  color: #bcd7e8;
 }
 
 .mlpr-chart-attribution {

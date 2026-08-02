@@ -4,6 +4,7 @@ import { renderStatsPanel } from './stats.js';
 import { renderSettingsPanel } from './settings.js';
 import { renderAircraftDetailsPanel, aircraftDetailsPanelTitle } from './aircraft-panel.js';
 import { getSettings, updateSettings } from './settings-state.js';
+import { handleOverlayPop } from './history-overlay.js';
 
 // Bottom-sheet on phones / side panel on desktop (see the @media block in
 // style.css). `fill: true` makes the panel reach the true screen bottom
@@ -141,6 +142,18 @@ modalCloseBtn.setAttribute('aria-label', t('close'));
   const creditsPanel = document.getElementById('mlpr-credits-panel');
   creditsToggle.setAttribute('aria-label', t('creditsLabel'));
   document.getElementById('mlpr-credits-heading').textContent = t('specialThanksTo');
+
+  // Byline version. Fetched rather than baked into index.html so a release
+  // only has to bump package.json. Silently stays absent if the request
+  // fails -- the byline reads exactly as it did before, which is a fine
+  // outcome for a decoration.
+  fetch('/api/version')
+    .then((response) => (response.ok ? response.json() : null))
+    .then((data) => {
+      if (!data?.version) return;
+      document.getElementById('mlpr-version').textContent = ` v${data.version}`;
+    })
+    .catch(() => {});
 
   function closeCreditsPanel() {
     creditsPanel.classList.add('hidden');
@@ -390,6 +403,11 @@ modalCloseBtn.addEventListener('click', () => closeFullscreenModal());
 panelEl.addEventListener('keydown', (event) => trapFocus(panelEl, event));
 modalEl.addEventListener('keydown', (event) => trapFocus(modalEl, event));
 window.addEventListener('popstate', () => {
+  // An overlay stacked on top of a panel (the trigger-area editor) owns the
+  // topmost history entry while it's open, so it gets first refusal on the
+  // back gesture -- otherwise back would close the Settings panel out from
+  // under it.
+  if (handleOverlayPop()) return;
   closePanel({ fromPopstate: true });
   closeFullscreenModal({ fromPopstate: true });
 });

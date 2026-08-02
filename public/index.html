@@ -42,7 +42,12 @@
       <li><a href="https://github.com/wiedehopf/tar1090-db" target="_blank" rel="noopener">tar1090-db</a> (Mictronics)</li>
       <li><a href="https://www.planespotters.net/" target="_blank" rel="noopener">Planespotters.net</a></li>
     </ul>
-    <p class="mlpr-credits-byline">MLPR by Maurycy Kaczmarek</p>
+    <!-- The version is filled in by panels.js from GET /api/version, so it
+         can't drift from package.json the way a hardcoded one would. The
+         whole byline is the link to the project. -->
+    <p class="mlpr-credits-byline">
+      <a href="https://github.com/Moris97/My-Local-Plane-Radar" target="_blank" rel="noopener">MLPR<span id="mlpr-version"></span> by Maurycy Kaczmarek</a>
+    </p>
   </div>
   <div id="mlpr-attribution">
     <a href="https://maplibre.org/" target="_blank" rel="noopener">MapLibre</a>

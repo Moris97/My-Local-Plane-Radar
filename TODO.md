@@ -245,10 +245,6 @@ numbers. What's left:
   drawn on a map, "delete and re-add" means redrawing the area from scratch.
   Needs a `PUT /api/notifications/watchlist/:id` plus an edit affordance on
   each row, with the editor pre-loaded with the existing area.
-- **"Clear area" closes the whole editor** (effort: tiny, impact: small) —
-  `area-editor.js`'s button calls `close(null)`. Clearing the shape and
-  staying in the editor to draw a new one is the more obvious reading;
-  cancelling is already what Cancel/Escape are for.
 
 ### Other
 
