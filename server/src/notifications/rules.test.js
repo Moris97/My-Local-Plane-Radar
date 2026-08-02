@@ -385,6 +385,68 @@ test('a rectangle is not a circle: the corners are inside, unlike an equivalent 
   assert.equal(watchedNotifications().length, 1);
 });
 
+// A 1-degree square, so "inside"/"outside" are obvious by inspection.
+const SQUARE_POINTS = [
+  { lat: 50.0, lon: 20.0 },
+  { lat: 51.0, lon: 20.0 },
+  { lat: 51.0, lon: 21.0 },
+  { lat: 50.0, lon: 21.0 },
+];
+
+test('polygon area matches an aircraft inside the shape', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'polygon', lat: 50.5, lon: 20.5, points: SQUARE_POINTS },
+  });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', lat: 50.5, lon: 20.5 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('polygon area rejects an aircraft outside the shape', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'polygon', lat: 50.5, lon: 20.5, points: SQUARE_POINTS },
+  });
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'west', typeCode: 'B738', lat: 50.5, lon: 19.5 }));
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'north', typeCode: 'B738', lat: 51.5, lon: 20.5 }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
+test('a concave polygon really is concave: the notch is outside', () => {
+  // An L/chevron shape. A point in the notch sits inside the shape's
+  // bounding box but outside the shape itself -- which is the whole reason
+  // free-form areas exist, and what a bounds check would get wrong.
+  const chevron = [
+    { lat: 50.0, lon: 20.0 },
+    { lat: 51.0, lon: 20.0 },
+    { lat: 51.0, lon: 21.0 },
+    { lat: 50.6, lon: 21.0 },
+    { lat: 50.6, lon: 20.4 },
+    { lat: 50.0, lon: 20.4 },
+  ];
+  addWatchEntry({ matchType: 'type', matchValue: 'B738', area: { kind: 'polygon', lat: 50.5, lon: 20.5, points: chevron } });
+
+  // In the notch: inside the bounding box, outside the shape.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'notch', typeCode: 'B738', lat: 50.2, lon: 20.8 }));
+  assert.equal(watchedNotifications().length, 0);
+
+  // In the solid arm of the shape.
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'arm', typeCode: 'B738', lat: 50.2, lon: 20.2 }));
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('an area-restricted polygon entry still never matches a position-less aircraft', () => {
+  addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { kind: 'polygon', lat: 50.5, lon: 20.5, points: SQUARE_POINTS },
+  });
+  rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' }));
+  assert.equal(watchedNotifications().length, 0);
+});
+
 test('an unrecognised area kind matches nothing rather than everything', () => {
   // Deliberately bypasses addWatchEntry (validateArea would reject this
   // shape) -- simulates an entry written by a future version with a shape

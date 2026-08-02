@@ -125,9 +125,12 @@ test('validateArea accepts null/undefined (the area condition is optional)', () 
 });
 
 test('validateArea rejects an unsupported shape', () => {
-  // 'polygon' is the next shape planned but not implemented -- until it is,
-  // it must be rejected rather than stored as something rules.js can't match.
-  assert.match(watchlist.validateArea({ ...VALID_CIRCLE, kind: 'polygon' }), /kind/);
+  // Deliberately a kind that will never exist, rather than "the next shape
+  // we plan to add" -- this test had to be rewritten when 'rectangle'
+  // shipped and again when 'polygon' did. What it's really guarding is that
+  // an unknown kind is refused rather than stored as something rules.js
+  // can't match.
+  assert.match(watchlist.validateArea({ ...VALID_CIRCLE, kind: 'not-a-real-shape' }), /kind/);
 });
 
 test('validateArea rejects an out-of-range latitude/longitude', () => {
@@ -179,4 +182,59 @@ test("a rectangle does not pick up the circle's radiusKm, nor vice versa", () =>
   });
   assert.equal(circle.area.widthKm, undefined);
   assert.equal(circle.area.heightKm, undefined);
+});
+
+const VALID_POLYGON = {
+  kind: 'polygon',
+  lat: 50.5,
+  lon: 20.5,
+  points: [
+    { lat: 50.0, lon: 20.0 },
+    { lat: 51.0, lon: 20.0 },
+    { lat: 51.0, lon: 21.0 },
+  ],
+};
+
+test('a polygon area round-trips through storage', () => {
+  const entry = watchlist.addWatchEntry({ matchType: 'type', matchValue: 'B738', area: { ...VALID_POLYGON } });
+  assert.deepEqual(entry.area, VALID_POLYGON);
+  assert.deepEqual(watchlist.getWatchList()[0].area, VALID_POLYGON);
+});
+
+test('validateArea requires at least three polygon points', () => {
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: VALID_POLYGON.points.slice(0, 2) }), /at least 3/);
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: [] }), /at least 3/);
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: 'nope' }), /must be an array/);
+});
+
+test('validateArea caps the polygon point count', () => {
+  // Bounded because this lands in the SQLite config table -- see the
+  // POLYGON_MAX_POINTS comment in watchlist.js.
+  const many = Array.from({ length: 61 }, (_, i) => ({ lat: 50 + i * 0.001, lon: 20 }));
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: many }), /at most 60/);
+});
+
+test('validateArea rejects a malformed polygon vertex', () => {
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: [...VALID_POLYGON.points, { lat: 91, lon: 20 }] }), /lat/);
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: [...VALID_POLYGON.points, { lat: 50 }] }), /lon/);
+  assert.match(watchlist.validateArea({ ...VALID_POLYGON, points: [...VALID_POLYGON.points, null] }), /must be an object/);
+});
+
+test('polygon vertices are stripped to lat/lon, like every other stored field', () => {
+  const entry = watchlist.addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { ...VALID_POLYGON, points: VALID_POLYGON.points.map((p) => ({ ...p, note: 'smuggled' })) },
+  });
+  assert.deepEqual(entry.area.points, VALID_POLYGON.points);
+});
+
+test('a polygon does not pick up circle/rectangle size fields', () => {
+  const entry = watchlist.addWatchEntry({
+    matchType: 'type',
+    matchValue: 'B738',
+    area: { ...VALID_POLYGON, radiusKm: 99, widthKm: 99 },
+  });
+  assert.equal(entry.area.radiusKm, undefined);
+  assert.equal(entry.area.widthKm, undefined);
 });

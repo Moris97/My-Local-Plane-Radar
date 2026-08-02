@@ -9,12 +9,15 @@ const ALTITUDE_OPERATORS = new Set(['below', 'above']);
 // inside this region"). The `kind` discriminator was there from the first
 // (circle-only) version precisely so more shapes could be added without
 // migrating already-stored entries -- 'rectangle' joined it 2026-08-01,
-// free-form polygon is still to come (see TODO.md).
+// 'polygon' on 2026-08-02.
 //
-// Every shape is centre-anchored (`lat`/`lon` plus its own size fields)
-// rather than corner- or vertex-based: it keeps "drag the middle to move
-// the whole thing" uniform across shapes, and matches how the editor's
-// centre pin works.
+// Every shape carries a `lat`/`lon` centre, which is what the editor's
+// centre pin drags to move the whole shape. Circle and rectangle are
+// *defined* by that centre plus size fields; a polygon is defined by its
+// vertex list instead, and its centre is a derived convenience (the
+// centroid the client keeps up to date). That's why polygon gets its own
+// branch below rather than another AREA_SIZE_FIELDS row -- it's the one
+// shape that doesn't fit the centre+size model.
 //
 // The centre is an arbitrary lat/lon, NOT the receiver's home location:
 // the whole point is watching a *specific* piece of sky that isn't
@@ -24,30 +27,59 @@ const ALTITUDE_OPERATORS = new Set(['below', 'above']);
 // All distances are stored in km regardless of the user's display
 // preference, same as every other distance the server persists (range.js,
 // antenna-stats.js); the client converts for display only.
-const AREA_KINDS = new Set(['circle', 'rectangle']);
+const AREA_KINDS = new Set(['circle', 'rectangle', 'polygon']);
 
 // Per-shape size fields, all of which must be finite and positive. Adding a
-// shape means adding a line here plus a branch in rules.js's
-// satisfiesAreaCondition -- nothing else in this file changes.
+// centre+size shape means adding a line here plus a branch in rules.js's
+// satisfiesAreaCondition -- nothing else in this file changes. Polygon is
+// deliberately absent: it has no size fields, see POLYGON_* below.
 const AREA_SIZE_FIELDS = {
   circle: ['radiusKm'],
   rectangle: ['widthKm', 'heightKm'],
 };
 
+// Three is the least that encloses any area at all. The upper bound is not
+// about geometry -- it's that this ends up as JSON in the SQLite `config`
+// table, and hard rule 4/5 are about keeping that table small and its
+// writes rare. 60 vertices is far more than anyone traces by hand around an
+// airfield, while keeping a single entry to roughly two kilobytes.
+const POLYGON_MIN_POINTS = 3;
+const POLYGON_MAX_POINTS = 60;
+
 function isFiniteNumber(value) {
   return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidLat(value) {
+  return isFiniteNumber(value) && value >= -90 && value <= 90;
+}
+
+function isValidLon(value) {
+  return isFiniteNumber(value) && value >= -180 && value <= 180;
 }
 
 export function validateArea(area) {
   if (area === null || area === undefined) return null;
   if (typeof area !== 'object') return 'area must be an object or null';
-  if (!AREA_KINDS.has(area.kind)) return 'area.kind must be "circle" or "rectangle"';
+  if (!AREA_KINDS.has(area.kind)) return 'area.kind must be "circle", "rectangle" or "polygon"';
 
-  if (!isFiniteNumber(area.lat) || area.lat < -90 || area.lat > 90) {
-    return 'area.lat must be a number between -90 and 90';
-  }
-  if (!isFiniteNumber(area.lon) || area.lon < -180 || area.lon > 180) {
-    return 'area.lon must be a number between -180 and 180';
+  if (!isValidLat(area.lat)) return 'area.lat must be a number between -90 and 90';
+  if (!isValidLon(area.lon)) return 'area.lon must be a number between -180 and 180';
+
+  if (area.kind === 'polygon') {
+    if (!Array.isArray(area.points)) return 'area.points must be an array';
+    if (area.points.length < POLYGON_MIN_POINTS) {
+      return `area.points must have at least ${POLYGON_MIN_POINTS} points`;
+    }
+    if (area.points.length > POLYGON_MAX_POINTS) {
+      return `area.points must have at most ${POLYGON_MAX_POINTS} points`;
+    }
+    for (const point of area.points) {
+      if (!point || typeof point !== 'object') return 'each area.points entry must be an object';
+      if (!isValidLat(point.lat)) return 'each area.points entry needs a lat between -90 and 90';
+      if (!isValidLon(point.lon)) return 'each area.points entry needs a lon between -180 and 180';
+    }
+    return null;
   }
 
   for (const field of AREA_SIZE_FIELDS[area.kind]) {
@@ -61,10 +93,17 @@ export function validateArea(area) {
 
 // Only the recognised fields, so a client can't smuggle arbitrary keys into
 // the stored config blob -- same spirit as addWatchEntry's explicit field
-// list below rather than spreading `input`.
+// list below rather than spreading `input`. Applies to the points too: a
+// vertex is exactly {lat, lon}, nothing else.
 function normalizeArea(area) {
   if (!area) return null;
   const normalized = { kind: area.kind, lat: area.lat, lon: area.lon };
+
+  if (area.kind === 'polygon') {
+    normalized.points = area.points.map((point) => ({ lat: point.lat, lon: point.lon }));
+    return normalized;
+  }
+
   for (const field of AREA_SIZE_FIELDS[area.kind]) {
     normalized[field] = area[field];
   }

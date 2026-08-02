@@ -64,6 +64,33 @@ function satisfiesAltitudeCondition(aircraft, entry) {
   return true;
 }
 
+// Standard ray-casting (even-odd) point-in-polygon test: count how many
+// edges a ray cast east from the point crosses; odd means inside. Treating
+// lat/lon as plain planar coordinates is right here rather than a
+// simplification to apologise for -- it's exactly what the editor draws,
+// since a polygon's edges render as straight lines between vertices in Web
+// Mercator, so "inside the shape on screen" and "matches" agree by
+// construction. (The rectangle's bounds check relies on the same property.)
+//
+// Even-odd also gives a defined, stable answer for a self-intersecting
+// polygon, which the editor allows the user to create by dragging one
+// vertex across another -- the enclosed lobes simply alternate. Rejecting
+// such shapes outright would be more surprising than honouring them.
+function isInsidePolygon(lat, lon, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+    const { lat: latI, lon: lonI } = points[i];
+    const { lat: latJ, lon: lonJ } = points[j];
+    // Does this edge straddle the point's latitude, and if so, is the
+    // crossing east of the point?
+    const straddles = latI > lat !== latJ > lat;
+    if (!straddles) continue;
+    const lonAtLat = lonI + ((lat - latI) / (latJ - latI)) * (lonJ - lonI);
+    if (lon < lonAtLat) inside = !inside;
+  }
+  return inside;
+}
+
 // Optional per-entry trigger area (watchlist.js's `area`) -- "only notify
 // when this aircraft is actually inside this region". The centre is an
 // arbitrary point, not necessarily the receiver's own location: the point
@@ -104,6 +131,10 @@ function satisfiesAreaCondition(aircraft, entry) {
     return west <= east
       ? aircraft.lon >= west && aircraft.lon <= east
       : aircraft.lon >= west || aircraft.lon <= east;
+  }
+
+  if (entry.area.kind === 'polygon') {
+    return isInsidePolygon(aircraft.lat, aircraft.lon, entry.area.points);
   }
 
   // An unknown shape (e.g. an entry written by a newer version, then
