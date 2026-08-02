@@ -138,6 +138,27 @@ Added to as they come up; picked up in a later stage when relevant.
   consistent with the rest of this app's "hand-write it, it's a few dozen
   lines" bias) would all be cheap given the existing squawk-detection code
   in `rules.js` already fires per aircraft per tick. Proposed 2026-08-02.
+- **Major airports shown on the offline basemap** (effort: small, impact:
+  medium, priority: low) — offline mode's Natural Earth layer
+  (`scripts/fetch-mapdata.sh`, coastlines/borders/rivers/major cities) has
+  no airports at all; online mode already gets them for free from
+  OpenFreeMap's vector tiles (`online-dark.json`'s airports/runways/
+  taxiways layers), so this is only a gap in the no-internet path. Scope
+  deliberately narrow — **major international airports only**, not a full
+  aerodrome/private-strip database (that's what OSM's live vector tiles are
+  for in online mode) — fetched once at install time via an **Overpass
+  Turbo query** for `aeroway=aerodrome` nodes/ways with both an `icao` tag
+  and a size signal (e.g. `iata` present, or filtered by a passenger/
+  runway-length threshold), same one-shot-fetch-into-`data/`,
+  never-committed pattern as `fetch-mapdata.sh`/`fetch-airlines.mjs`. Comes
+  from the 2026-08-02 conversation about whether OSM could stand in for
+  OpenFlights' `airports.dat` (routes.dat itself was ruled out separately —
+  frozen since 2014, no live route-matching value) — this is the
+  practical, scoped-down piece of that idea that's actually worth building:
+  a label/dot for the label-free offline map, not a lookup table for
+  anything else. Needs a rendering pass matching the existing
+  `OFFLINE_PALETTES` light/dark treatment in `basemap.js`. Proposed
+  2026-08-02.
 - **Circling-aircraft notification** (effort: medium, impact: high,
   priority: low) — an aircraft that loops in roughly the same place for
   several minutes is usually doing something worth knowing about: police,
