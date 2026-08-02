@@ -1372,7 +1372,32 @@ only on mouseup. A few pixels of drift while double-clicking a small dot is
 normal, so `click` -- and therefore `dblclick` -- never reaches the
 element. `pointerdown` always does, and covers mouse and touch in one path.
 A press that followed an actual drag is excluded, so nudging a vertex and
-immediately regrabbing it doesn't delete it. **`event.button` is not
+immediately regrabbing it doesn't delete it — but **"an actual drag" must be
+measured, not taken from MapLibre's `dragstart`**, and that distinction is
+the whole of the phone-only follow-up bug (reported 2026-08-02: removal
+worked on a PC, never on a touchscreen). A `Marker` starts dragging after
+3px of movement (`clickTolerance`, defaulted from the map), and a fingertip
+practically never holds a 16px dot to within 3px, so on touch *every* tap
+fired `dragstart` and disqualified the next press from ever completing the
+pair. A mouse click usually doesn't move at all, which is exactly why it
+looked fine on desktop. The `drag` handler now sets the flag itself, only
+once the vertex has travelled `TAP_DRIFT_PX` (12) in **screen pixels**
+(`map.project`, measured from the vertex's own position at `pointerdown`,
+not the pointer's — `map.project`'s origin is the canvas, not the viewport)
+— the same "did they mean it" question the user actually sees, at any zoom.
+The tap window/slop were widened at the same time (450ms / 32px) for a
+finger rather than a mouse. **The map's own double-tap zoom has to be muted
+separately** (`suppressTapZoom`, `TAP_ZOOM_MUTE_MS`): the `dblclick`
+listener on each vertex only blocks the *mouse* half, while on touch
+MapLibre's `TapZoomHandler` answers the same gesture off touchstart/touchend
+bubbling to the canvas container — so a removal would also zoom the map out
+from under the finger. Stopping those events from bubbling is not an option:
+`Marker._addDragHandler` is registered as `map.on('touchstart')` and
+listens for the very same bubbled event, so blocking them kills vertex
+dragging outright. Disabling `map.doubleClickZoom` for the rest of the
+gesture (re-enabled on a timer) leaves dragging alone. It is muted *before*
+`removeVertex`, so a removal refused at the three-vertex floor doesn't leave
+a zoom as the gesture's only visible answer. **`event.button` is not
 checked** -- either mouse button counts, and so does a mixed pair (explicit
 request). That is also why the right-click menu is offset off the pointer
 rather than flush to it: sitting under the click position it would swallow

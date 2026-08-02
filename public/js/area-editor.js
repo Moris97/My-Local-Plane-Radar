@@ -74,11 +74,29 @@ const EDGE_HIT_TOLERANCE_PX = 14;
 // `pointerdown` always arrives (pointer-events is only suppressed *during*
 // a drag, and is back to 'auto' before the next press), covers mouse and
 // touch with one path, and doesn't care how far the pointer drifted.
-const DOUBLE_TAP_MS = 350;
-const DOUBLE_TAP_PX = 24;
+//
+// The window and slop are sized for a fingertip, not a mouse: reported
+// 2026-08-02 as "double-tap doesn't remove a vertex, but only on a phone".
+const DOUBLE_TAP_MS = 450;
+const DOUBLE_TAP_PX = 32;
+// How far the vertex has to actually travel during a press before that
+// press counts as a real drag (and so disqualifies the *next* press from
+// completing a double-tap). This cannot be left to MapLibre's own
+// `dragstart`, which is the other half of the phone-only bug above: Marker
+// starts dragging at 3px of movement (`clickTolerance`, defaulted from the
+// map), and a finger practically never holds a 16px dot to within 3px, so
+// on touch every single tap fired `dragstart` and marked itself as a drag.
+// A mouse click usually doesn't move at all, which is exactly why this went
+// unnoticed on desktop.
+const TAP_DRIFT_PX = 12;
 // Clear of the vertex dot's 16px width, so the right-click menu never sits
 // over the spot the next press would land on -- see openVertexMenu.
 const VERTEX_MENU_OFFSET_PX = 12;
+// How long the map's own double-tap zoom stays muted after a vertex
+// double-tap -- see suppressTapZoom. Comfortably past the touchend that
+// completes the pair, short enough that the gesture is available again by
+// the time a hand could reach for it.
+const TAP_ZOOM_MUTE_MS = 500;
 // Below ~100 m a shape is smaller than the pin drawn on top of it, and
 // sizes this large are nonsense for a single receiver -- these only exist
 // to keep the drag interaction from producing a degenerate shape, not as a
@@ -220,7 +238,11 @@ export function openAreaEditor(initialArea = null) {
     // Hand-rolled double-tap state, shared across vertex markers because a
     // rebuild replaces every marker (and every index) -- see DOUBLE_TAP_MS.
     let lastTap = { index: -1, time: 0, x: 0, y: 0 };
+    // Set only once a press has moved the vertex further than TAP_DRIFT_PX,
+    // never merely because MapLibre decided a drag had begun.
     let draggedSinceLastTap = false;
+    let dragOriginPoint = null;
+    let tapZoomTimer = null;
     // Which shape the toolbar is currently set to build. Kept separate from
     // area?.kind because it also has to survive "cleared, nothing drawn yet".
     let shapeKind = initialArea?.kind ?? 'circle';
@@ -277,6 +299,25 @@ export function openAreaEditor(initialArea = null) {
       if (!area && shapeKind === 'circle') return showHint(t('areaEditorHint'));
       if (area?.kind === 'polygon') return showHint(t('areaPolygonHint'));
       return showHint('');
+    }
+
+    // A double-tap on a vertex bubbles to the map like any other touch, and
+    // MapLibre's tap-zoom handler answers it by zooming in -- so removing a
+    // vertex would move the whole map under the user's finger at the same
+    // time. The `dblclick` listener on each vertex only blocks the *mouse*
+    // half of this; the touch half is driven by touchstart/touchend on the
+    // canvas container, which can't be stopped from bubbling without also
+    // stopping MapLibre's Marker drag handler (it listens for the very same
+    // bubbled events). Muting the zoom handler for the rest of the gesture
+    // leaves dragging untouched.
+    function suppressTapZoom() {
+      if (!map?.doubleClickZoom) return;
+      map.doubleClickZoom.disable();
+      if (tapZoomTimer) clearTimeout(tapZoomTimer);
+      tapZoomTimer = setTimeout(() => {
+        tapZoomTimer = null;
+        map?.doubleClickZoom?.enable();
+      }, TAP_ZOOM_MUTE_MS);
     }
 
     function closeVertexMenu() {
@@ -402,6 +443,15 @@ export function openAreaEditor(initialArea = null) {
 
         marker.on('drag', () => {
           const { lng, lat } = marker.getLngLat();
+          // Measured in screen pixels against where the press started, so
+          // "did they mean to move it" is judged the same way the user sees
+          // it, at any zoom -- see TAP_DRIFT_PX.
+          if (dragOriginPoint && !draggedSinceLastTap) {
+            const now = map.project([lng, lat]);
+            if (Math.hypot(now.x - dragOriginPoint.x, now.y - dragOriginPoint.y) >= TAP_DRIFT_PX) {
+              draggedSinceLastTap = true;
+            }
+          }
           area.points[index] = { lat, lon: lng };
           syncPolygonCentre();
           redrawShape();
@@ -429,17 +479,21 @@ export function openAreaEditor(initialArea = null) {
             Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) < DOUBLE_TAP_PX;
 
           draggedSinceLastTap = false;
+          // The vertex's own screen position, not the pointer's: `drag`
+          // compares against this, and map.project's origin is the canvas,
+          // not the viewport.
+          dragOriginPoint = map.project(marker.getLngLat());
 
           if (isDoubleTap) {
             lastTap = { index: -1, time: 0, x: 0, y: 0 };
+            // Before removeVertex, not after: it returns early at the
+            // three-vertex floor, and a refused removal must not leave the
+            // map zooming in as the only visible answer to the gesture.
+            suppressTapZoom();
             removeVertex(index);
             return;
           }
           lastTap = { index, time: now, x: event.clientX, y: event.clientY };
-        });
-
-        marker.on('dragstart', () => {
-          draggedSinceLastTap = true;
         });
 
         // The removal itself is handled above; this only stops the map
@@ -606,6 +660,8 @@ export function openAreaEditor(initialArea = null) {
       removeMarkers();
       if (hintTimer) clearTimeout(hintTimer);
       hintTimer = null;
+      if (tapZoomTimer) clearTimeout(tapZoomTimer);
+      tapZoomTimer = null;
       map?.remove();
       map = null;
       overlay.classList.add('hidden');
