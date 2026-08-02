@@ -1270,15 +1270,15 @@ one-shot per hex/record already).
 
 **Trigger area** (`area`, optional, added 2026-08-01): `{kind: 'circle',
 lat, lon, radiusKm}`, `{kind: 'rectangle', lat, lon, widthKm, heightKm}`,
-or `null`. Matched by `rules.js`'s `satisfiesAreaCondition` — area and
+`{kind: 'polygon', lat, lon, points: [{lat, lon}, ...]}` (added
+2026-08-02), or `null`. Matched by `rules.js`'s `satisfiesAreaCondition` — area and
 altitude must **both** hold, and an aircraft with no position never matches
 an area-restricted entry (same "missing data is never a false positive"
 rule as altitude). An *unrecognised* `kind` also matches nothing rather
 than everything: an over-firing rule is worse than a silent one, and this
 is what an entry written by a newer version then read back after a
 downgrade looks like. The `kind` discriminator exists so more shapes can be
-added without migrating stored entries; free-form polygon is still to come
-(see TODO.md).
+added without migrating stored entries -- all three shapes now exist.
 
 **Every shape is centre-anchored** (`lat`/`lon` plus its own size fields)
 rather than corner- or vertex-based — it keeps "drag the middle to move the
@@ -1290,7 +1290,8 @@ rectangle must not carry a stray `radiusKm`, or `rules.js` would have two
 plausible but conflicting sources of size), `area-editor.js`'s
 `HANDLE_SPECS` (where each resize handle sits and what it edits), and
 `geo.js`'s ring builders behind `shapeRing` (so the two map layers never
-learn which shape they're drawing).
+learn which shape they're drawing). Polygon opts out of `HANDLE_SPECS`
+entirely: its handles are the vertices, built by `addVertexMarkers`.
 
 **The rectangle's bounds are derived with the same `destinationPoint()`
 calls on both sides** — `rules.js` for matching, `geo.js`'s
@@ -1345,9 +1346,60 @@ readout can grow (a 4-digit size, a longer unit) without ever moving the
 anchor again.
 
 **How each shape is created differs, deliberately**: a circle is
-click-to-place (its toolbar button just arms that mode), a rectangle
-appears immediately at the map centre the moment its button is pressed
-(explicit spec — there is no placing step). Switching shapes *clears* the
+click-to-place (its toolbar button just arms that mode); a rectangle and a
+polygon both appear immediately at the map centre the moment their button
+is pressed (explicit spec — there is no placing step). A fresh polygon is a
+**hexagon**, chosen so it already reads as "reshape me" rather than as a
+finished shape, and so several vertices can be removed before hitting the
+three-point floor.
+
+**Polygon editing** (all explicit spec, 2026-08-02): drag a vertex to move
+it; **tap an edge** to insert a vertex there; **double-tap/double-click a
+vertex** to remove it; on desktop, **right-click a vertex** for a menu with
+the same removal, shown *disabled* at the three-vertex floor so the reason
+is visible rather than the gesture silently doing nothing. Edge insertion
+is hit-tested in **screen space** (`map.project`, `EDGE_HIT_TOLERANCE_PX`)
+rather than lat/lon: the question is "did they click near that line", which
+is about what they see — a lat/lon threshold would make edges progressively
+harder to hit the further north you are. The new vertex lands on the
+closest point *of the edge*, not where the finger was, so the outline
+doesn't jump. **Double-tap is detected by hand, from consecutive `pointerdown`s -- never
+the native `dblclick`.** A draggable MapLibre marker cannot reliably
+produce one: `Marker._onMove` sets `element.style.pointerEvents = 'none'`
+the moment the pointer drifts past `clickTolerance` (3px), deliberately, to
+"suppress click event so that popups don't toggle on drag", restoring it
+only on mouseup. A few pixels of drift while double-clicking a small dot is
+normal, so `click` -- and therefore `dblclick` -- never reaches the
+element. `pointerdown` always does, and covers mouse and touch in one path.
+A press that followed an actual drag is excluded, so nudging a vertex and
+immediately regrabbing it doesn't delete it. **`event.button` is not
+checked** -- either mouse button counts, and so does a mixed pair (explicit
+request). That is also why the right-click menu is offset off the pointer
+rather than flush to it: sitting under the click position it would swallow
+the second press of a right-button double-click. The `dblclick` listener that
+remains only suppresses the map's double-click zoom. (Read out of the
+installed maplibre-gl source, not re-derived -- same discipline the popup
+focus bug needed.)
+
+**The vertex dot must be a real child element, not a `::after`.** A
+pseudo-element is painted but generates no hit-test target, so on the 0x0
+marker root `document.elementFromPoint()` over the dot returns `null`:
+nothing is clickable, and MapLibre's drag handler -- gated on
+`element.contains(event.target)` -- never recognises the marker either, so
+the vertex can't be dragged at all. `.mlpr-area-handle-dot` (circle/
+rectangle) had this right already; the polygon vertex broke from that
+pattern and had to be brought back. Both bugs surfaced together as one
+report ("double-click doesn't remove a vertex on PC", 2026-08-02) and the
+original test missed both by dispatching a synthetic `dblclick`, which
+bypasses hit-testing and the pointer-events mechanism alike -- verify this
+kind of interaction with real pointer input.
+
+A self-intersecting polygon is allowed rather than rejected: the server's
+even-odd ray casting gives a defined, stable answer for one (the lobes
+alternate), and refusing to let a vertex cross another would be more
+surprising than honouring it. The hint strip carries the standing
+instruction while a polygon is being edited, and doubles as transient
+feedback when a removal is refused. Switching shapes *clears* the
 current one rather than converting it: the shapes have no meaningful common
 size, and guessing one would quietly change an area the user had already
 tuned. `syncShapeButtons` also hides the "tap the map" hint whenever it

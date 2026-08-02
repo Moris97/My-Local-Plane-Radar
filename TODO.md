@@ -101,37 +101,18 @@ Added to as they come up; picked up in a later stage when relevant.
     fold fixes back into `data/icon-types.json` -- this is now the
     practical path to clearing the `_needsVerification` list, replacing
     the originally-planned standalone Stage 4 script.
-- **Trigger areas on watch-list entries — circle and rectangle shipped
-  2026-08-01, free shape still to do.** A watch-list entry can carry an
-  optional `area` (`{kind: 'circle', lat, lon, radiusKm}` or
-  `{kind: 'rectangle', lat, lon, widthKm, heightKm}`), matched server-side
-  in `rules.js`'s `satisfiesAreaCondition`; drawn in a full-screen map
-  editor (`public/js/area-editor.js`) opened from the watch-list form. The
-  centre is an **arbitrary point, deliberately not the receiver's home** —
-  the driving use case is watching a specific piece of sky that isn't
-  overhead (an airfield or approach path some km away). Still to build:
-  - **Free shape** — its toolbar button was removed for v2.1.0 rather than
-    left disabled (a greyed-out control still reads as a promise); re-add it
-    in `area-editor.js` alongside the implementation, its `areaPolygonLabel`
-    translation key is still in `i18n.js`. The groundwork is all in place:
-    `watchlist.js`'s
-    `AREA_SIZE_FIELDS` and `area-editor.js`'s `HANDLE_SPECS` are both
-    per-shape tables, and `geo.js`'s `shapeRing` dispatch means the two map
-    layers never learn what shape they're drawing. A polygon is the one
-    shape that doesn't fit the existing "centre + size fields" model
-    though — it needs a vertex list, so it will need its own
-    `normalizeArea` branch rather than another `AREA_SIZE_FIELDS` row, plus
-    a point-in-polygon test server-side (ray casting, ~15 lines) instead of
-    a bounds check. The interaction is the real cost: vertex dragging,
-    click-a-side-to-add-a-vertex and loop closing — the point where
-    hand-writing it stops being obviously cheaper than a drawing library,
-    so weigh that (and its licence) then rather than assuming either way.
-  - A separate **"any aircraft within N km of home"** rule, independent of
-    the watch list, was considered and deliberately dropped (2026-08-01):
-    trigger areas cover the "watch this region" need, and an entry still
-    has to name a type/registration/flight, which is the intended scope.
-    Revisit only if "notify me about literally anything nearby" turns out
-    to be wanted on its own.
+- **Trigger areas on watch-list entries — complete as of 2026-08-02.** A
+  watch-list entry can carry an optional `area`, and only fires while the
+  aircraft is inside it. All three shapes are implemented: `circle`
+  (`radiusKm`), `rectangle` (`widthKm`/`heightKm`) and `polygon` (`points`,
+  3–60 vertices), matched server-side in `rules.js`'s
+  `satisfiesAreaCondition`, drawn in `public/js/area-editor.js`. The centre
+  is an **arbitrary point, deliberately not the receiver's home** — the
+  driving use case is watching a specific piece of sky that isn't overhead
+  (an airfield or approach path some km away). Nothing outstanding here;
+  see CLAUDE.md for how the three shapes divide up.
+
+
 - **Circling-aircraft notification** (effort: medium, impact: high,
   priority: low) — an aircraft that loops in roughly the same place for
   several minutes is usually doing something worth knowing about: police,
