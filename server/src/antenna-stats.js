@@ -20,16 +20,15 @@ export const ALTITUDE_BANDS = [
   { label: '40,000+ ft', maxFt: Infinity },
 ];
 
-// 3° per sector (raised from an initial 5°/72 sectors after seeing the
-// coarser version live on the map -- a real contact's wedge was visibly
-// wider than the true track). At a strong receiver's realistic max range
-// (roughly 300-400 km), one sector now "speaks for" ~15-21 km of arc.
-// Storage/CPU cost of going finer is not a real constraint here -- each
-// recorded sample still only ever touches one sector regardless of
-// SECTOR_COUNT, and BAND_SLOTS * SECTOR_COUNT * TOP_K stays a few thousand
-// floats at any resolution discussed (72/90/120) -- so this was raised as
-// far as made sense rather than picking a number to save space. The real
-// limit going finer is statistical, not architectural: each (band, sector)
+// 2° per sector (raised from 120 sectors/3° -- see CLAUDE.md for the two
+// earlier bumps, 16->72->120 -- after confirming again, 2026-08-02, that
+// storage/CPU/network cost of going finer stays trivial at any resolution:
+// BAND_SLOTS * SECTOR_COUNT * TOP_K is still only 9,000 floats at 180
+// sectors (was 6,000 at 120), and the coverage endpoint's two GeoJSON
+// rings grow from ~242 to ~362 points -- a few KB either way. At a strong
+// receiver's realistic max range (roughly 300-400 km), one sector now
+// "speaks for" ~10-14 km of arc (was ~15-21 km at 120). The real limit
+// going finer is statistical, not architectural: each (band, sector)
 // cell accumulates fewer real contacts the finer sectors get, so a single-
 // band map view can stay sparse for a while on a new install (though the
 // "all altitudes" view, which merges across all 10 band slots per sector,
@@ -37,7 +36,7 @@ export const ALTITUDE_BANDS = [
 // data accumulates over weeks/months; it doesn't get worse over time the
 // way it would if this were unbounded storage. Easy constant to retune
 // again later; nothing else hardcodes this number.
-export const SECTOR_COUNT = 120;
+export const SECTOR_COUNT = 180;
 
 // One extra internal-only slot for samples with no altitude data at all
 // (Mode-S-only contacts, or a transient decode gap) -- these still carry

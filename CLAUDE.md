@@ -2017,7 +2017,7 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   ft up to 40k+, on-ground aircraft counted as 0 ft — same "ground = 0"
   convention as the watch list's altitude condition) and a **directional
   coverage rose chart** (`public/js/chart.js`'s new `renderRoseChartSvg`,
-  120-sector compass rose — see the redesign note below for the resolution
+  180-sector compass rose — see the redesign note below for the resolution
   history — one filled pie-wedge "petal" per sector reaching to a radius proportional to
   that sector's range figure). Persisted as one JSON blob (`antennaStats`
   config key) **only when actually dirty** (`flushAntennaStatsIfDirty` — a
@@ -2049,26 +2049,32 @@ The Stats view grew three new top sections (each a `.mlpr-stats-section` in
   — smoother and more representative than before, a quality improvement
   independent of the map feature.
 
-  **Sector count**: 16 → 72 → **120** (3° each), the second bump made after
-  seeing the 72-sector version live on the map: a real contact's wedge was
-  visibly wider than its true track (screenshot evidence, not just theory).
-  Reasoning discussed explicitly with the user both times: too coarse and a
-  single sector "speaks for" a wide swath of real geography at long range
-  (arc length at radius r is r·θ, so a 22.5° sector covers ~10x the ground
-  at 300 km that it does at 30 km) — literally flattening a wedge of real,
-  possibly-varying coverage into one number too coarsely; too fine and most
-  sectors would rarely accumulate enough real contacts for a `top-5` figure
-  to mean anything for a typical home receiver's traffic density. Storage/
-  CPU cost is **not** the limiting factor at any resolution discussed (72,
-  90, 120) — each recorded sample only ever touches one sector regardless
-  of `SECTOR_COUNT`, and `BAND_SLOTS × SECTOR_COUNT × TOP_K` stays a few
-  thousand floats even at 120 — so once the coarser version visibly
-  under-delivered, there was no real reason not to go as fine as still made
-  statistical sense; 120 (3°, ~15–21 km of arc at a strong receiver's
-  realistic max range) is that point. The sparsity concern above is real
-  but self-corrects as more data accumulates over weeks/months, and hits
-  per-band views harder than the "all altitudes" one (which merges across
-  all 10 band slots per sector, so it stays well-populated much sooner).
+  **Sector count**: 16 → 72 → 120 → **180** (2° each), the third bump made
+  2026-08-02 on request, after this exact tradeoff was walked through in
+  conversation rather than just picked: too coarse and a single sector
+  "speaks for" a wide swath of real geography at long range (arc length at
+  radius r is r·θ, so a 22.5° sector covers ~10x the ground at 300 km that
+  it does at 30 km) — literally flattening a wedge of real, possibly-varying
+  coverage into one number too coarsely; too fine and most sectors would
+  rarely accumulate enough real contacts for a `top-5` figure to mean
+  anything for a typical home receiver's traffic density. Storage/CPU/
+  network cost is **not** the limiting factor at any resolution discussed
+  (72, 90, 120, 180, 360 were all compared) — each recorded sample only ever
+  touches one sector regardless of `SECTOR_COUNT`, `BAND_SLOTS × SECTOR_COUNT
+  × TOP_K` only grows from 6,000 to 9,000 floats going 120→180, and the
+  coverage endpoint's two GeoJSON rings only grow from ~242 to ~362 points —
+  a few KB either way, trivial against hard rule 8's 150 MB backend budget
+  and a non-issue for the browser rendering it. 360 was considered and
+  explicitly **not** taken this round — same statistical-sparsity reasoning
+  as below, just more of it, and 180 was picked as the next incremental step
+  to observe live rather than jumping straight to the finest option
+  discussed; nothing rules out 360 later once 180's real-world sparsity is
+  seen firsthand. 180 (2°, ~10–14 km of arc at a strong receiver's
+  realistic max range, down from ~15–21 km at 120) is where this lands. The
+  sparsity concern above is real but self-corrects as more data accumulates
+  over weeks/months, and hits per-band views harder than the "all
+  altitudes" one (which merges across all 10 band slots per sector, so it
+  stays well-populated much sooner).
   An extra, internal-only "unknown altitude" band slot (`UNKNOWN_BAND_SLOT`)
   preserves a sample's directional information even when it has no altitude
   data at
