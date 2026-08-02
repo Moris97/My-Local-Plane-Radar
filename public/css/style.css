@@ -1919,6 +1919,105 @@ input[type='checkbox'] {
   cursor: pointer;
 }
 
+/* Polygon vertex handle. Deliberately a different shape from the circle's
+   and rectangle's size handles (.mlpr-area-handle-dot, which carries a
+   readout beside it): a vertex is a position you drag, not a number you
+   set, so it gets a plain grab dot and no attached value. Same zero-size
+   anchoring trick as that handle -- MapLibre centres a marker's element on
+   its coordinate, so an absolutely-centred dot inside a 0x0 parent lands
+   exactly on the vertex. */
+.mlpr-area-vertex {
+  position: relative;
+  width: 0;
+  height: 0;
+}
+
+/* A real child element, never a ::after -- a pseudo-element is painted but
+   is not a hit-test target, so on a 0x0 root nothing under the dot is
+   clickable or draggable at all (see vertexMarkerElement's comment).
+   Same zero-size anchoring as .mlpr-area-handle-dot: MapLibre centres a
+   marker's element on its coordinate, so an absolutely-centred dot inside a
+   0x0 parent lands exactly on the vertex.
+   `move` (four arrows) rather than `grab`: it reads as "this goes wherever
+   you put it", which is what dragging a vertex does. */
+.mlpr-area-vertex-dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #3ddc84;
+  border: 2px solid #05070a;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  cursor: move;
+  /* Only these two, deliberately: `transform` carries the centring, so
+     transitioning `all` would make every dot visibly slide into place each
+     time a rebuild recreates it. */
+  transition: box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+/* Hover: a ring bloomed outside the dot rather than a thicker border --
+   growing the border would change the dot's size and nudge the outline it
+   sits on, which reads as the shape shifting under the cursor. A
+   spread-only box-shadow grows outside the box and leaves the geometry
+   alone; the lighter border lifts it off the map at the same time. */
+.mlpr-area-vertex-dot:hover {
+  border-color: #d8f3e6;
+  box-shadow: 0 0 0 5px rgba(61, 220, 132, 0.28), 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.mlpr-area-vertex-dot:active {
+  box-shadow: 0 0 0 7px rgba(61, 220, 132, 0.35), 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mlpr-area-vertex-dot {
+    transition: none;
+  }
+}
+
+/* Right-click menu on a vertex. position: fixed because it is placed from
+   the pointer's viewport coordinates, and it lives inside #area-editor
+   (z-index 50) so it sits above the map without needing its own stacking
+   fight. */
+.mlpr-area-vertex-menu {
+  position: fixed;
+  z-index: 5;
+  background: #0b1116;
+  border: 1px solid #1c2e3a;
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+}
+
+.mlpr-area-vertex-menu button {
+  background: none;
+  border: none;
+  color: #d8f3e6;
+  font: 13px system-ui, sans-serif;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mlpr-area-vertex-menu button:hover:not(:disabled) {
+  background: rgba(127, 216, 168, 0.12);
+}
+
+.mlpr-area-vertex-menu button:disabled {
+  color: #6f8a97;
+  cursor: not-allowed;
+}
+
+/* Transient warning state for the hint strip (a refused corner removal),
+   as opposed to its standing instruction. */
+.mlpr-area-hint-warn {
+  color: #f2b807;
+}
+
 /* Keyboard focus. The app has full focus management already (panels.js
    traps Tab within an open panel and restores focus on close), but nothing
    ever *showed* where focus was: every interactive control here is

@@ -107,6 +107,35 @@ export function rectangleRing(lat, lon, widthKm, heightKm) {
   ];
 }
 
+// points: [{lat, lon}, ...] in order. Returns the closed GeoJSON ring.
+// Nothing is interpolated between vertices, deliberately: the server's
+// point-in-polygon test treats the edges as straight lines in lat/lon too,
+// so drawing them any other way would make the shape on screen disagree
+// with the shape that actually matches.
+export function polygonRing(points) {
+  const ring = points.map((point) => [point.lon, point.lat]);
+  ring.push(ring[0]);
+  return ring;
+}
+
+// Plain average of the vertices, not the area-weighted centroid. For the
+// editor's "drag the middle to move the whole shape" pin that's the better
+// behaviour: it always sits inside a convex shape, moves predictably as
+// vertices are added, and -- unlike the true centroid -- doesn't lurch
+// sideways when the user adds several vertices along one edge. It is never
+// used for matching, only as a grab handle and as the stored `lat`/`lon`.
+export function polygonCentroid(points) {
+  const sum = points.reduce((acc, p) => ({ lat: acc.lat + p.lat, lon: acc.lon + p.lon }), { lat: 0, lon: 0 });
+  return { lat: sum.lat / points.length, lon: sum.lon / points.length };
+}
+
+// A regular n-gon around a centre, used for the shape a fresh free-form
+// area starts as. Starts at due north so the first vertex sits at the top,
+// which is what someone expects to grab first.
+export function regularPolygonPoints(lat, lon, radiusKm, sides) {
+  return Array.from({ length: sides }, (_, i) => destinationPoint(lat, lon, (i * 360) / sides, radiusKm));
+}
+
 // aircraftList: normalized aircraft objects (radar-state.js's getLiveAircraft()).
 // home: { lat, lon } | null. Returns { nearest, farthest }, each either null
 // (no home configured, or no aircraft with a position) or the original

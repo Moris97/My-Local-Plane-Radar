@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees, findNearestFarthest, destinationPoint, circleRing, rectangleRing, rectangleEdges } from './geo.js';
+import { distanceKm, bearingDegrees, findNearestFarthest, destinationPoint, circleRing, rectangleRing, rectangleEdges, polygonRing, polygonCentroid, regularPolygonPoints } from './geo.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
@@ -130,4 +130,46 @@ test('a wider rectangle grows only on its own axis', () => {
   // Height was unchanged, so the horizontal edges must not have moved.
   assertClose(wide.north, narrow.north, 1e-9);
   assertClose(wide.south, narrow.south, 1e-9);
+});
+
+test('polygonRing closes the ring and keeps vertex order', () => {
+  const points = [
+    { lat: 50.0, lon: 20.0 },
+    { lat: 51.0, lon: 20.0 },
+    { lat: 51.0, lon: 21.0 },
+  ];
+  const ring = polygonRing(points);
+  assert.equal(ring.length, 4); // 3 vertices + the repeated first
+  assert.deepEqual(ring[0], [20.0, 50.0]); // [lon, lat], GeoJSON order
+  assert.deepEqual(ring[0], ring[3]);
+  assert.deepEqual(ring[2], [21.0, 51.0]);
+});
+
+test('polygonCentroid averages the vertices', () => {
+  const centre = polygonCentroid([
+    { lat: 50.0, lon: 20.0 },
+    { lat: 52.0, lon: 20.0 },
+    { lat: 52.0, lon: 22.0 },
+    { lat: 50.0, lon: 22.0 },
+  ]);
+  assertClose(centre.lat, 51.0, 1e-9);
+  assertClose(centre.lon, 21.0, 1e-9);
+});
+
+test('regularPolygonPoints builds an n-gon with every vertex the same distance out', () => {
+  const points = regularPolygonPoints(ORIGIN.lat, ORIGIN.lon, 40, 6);
+  assert.equal(points.length, 6);
+  for (const point of points) {
+    assertClose(distanceKm(ORIGIN.lat, ORIGIN.lon, point.lat, point.lon), 40, 0.1);
+  }
+  // First vertex due north, so there's a predictable one to grab first.
+  assertClose(points[0].lon, ORIGIN.lon, 1e-6);
+  assert.ok(points[0].lat > ORIGIN.lat);
+});
+
+test('a regular polygon centroid lands back on the centre it was built around', () => {
+  const points = regularPolygonPoints(ORIGIN.lat, ORIGIN.lon, 40, 6);
+  const centre = polygonCentroid(points);
+  assertClose(centre.lat, ORIGIN.lat, 0.01);
+  assertClose(centre.lon, ORIGIN.lon, 0.01);
 });

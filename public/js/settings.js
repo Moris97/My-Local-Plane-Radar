@@ -885,6 +885,12 @@ function areaSummary(area) {
   if (area.kind === 'rectangle') {
     return `${t('areaRectangleLabel')} · ${formatDistance(area.widthKm, units)} × ${formatDistance(area.heightKm, units)}`;
   }
+  if (area.kind === 'polygon') {
+    // A free-form shape has no single dimension worth quoting, so the
+    // corner count is the honest summary -- it at least distinguishes two
+    // different polygons at a glance.
+    return `${t('areaPolygonLabel')} · ${area.points.length} ${t('areaVertices')}`;
+  }
   // A shape this build doesn't know about (an entry written by a newer
   // version) still deserves a label rather than a blank -- rules.js
   // separately refuses to match it, see satisfiesAreaCondition.

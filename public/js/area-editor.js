@@ -1,12 +1,18 @@
 // Full-screen map editor for a watch-list entry's optional trigger area
 // (server/src/notifications/watchlist.js's `area`).
 //
-// Only the circle shape is implemented; the rectangle and free-shape
-// buttons are rendered but disabled, deliberately visible so the intended
-// final shape of this UI is obvious rather than looking like the feature
-// only ever supported circles. Adding them later means a new
-// buildShape()/handles pair here plus a `kind` in watchlist.js's
-// validateArea -- the surrounding editor chrome does not need to change.
+// Three shapes, each with its own way in and its own handles:
+//   circle    -- click the map to place it, one handle sets the radius
+//   rectangle -- appears at the map centre, one handle per axis
+//   polygon   -- appears at the map centre as a hexagon; the handles ARE
+//                the vertices, and the outline is edited by dragging,
+//                adding (tap an edge) and removing (double-tap a vertex,
+//                or its right-click menu) them
+//
+// The first two are defined by centre + size, so their handles are derived
+// from the shape and snap back onto it after every drag. A polygon inverts
+// that: the vertices are the shape and the centre trails them, existing
+// only as the "move the whole thing" grab handle.
 //
 // The area's centre is an arbitrary point, NOT the receiver's home: the
 // whole point is watching a specific piece of sky (an airfield, an approach
@@ -17,7 +23,16 @@ import { t } from './i18n.js';
 import { getSettings } from './settings-state.js';
 import { getMapView } from './radar-state.js';
 import { styleForSecondaryMap, addOfflineLayers } from './basemap.js';
-import { circleRing, rectangleRing, rectangleEdges, distanceKm, destinationPoint } from './geo.js';
+import {
+  circleRing,
+  rectangleRing,
+  rectangleEdges,
+  polygonRing,
+  polygonCentroid,
+  regularPolygonPoints,
+  distanceKm,
+  destinationPoint,
+} from './geo.js';
 import { kmToDisplayDistance, displayDistanceToKm, distanceUnitLabel } from './units.js';
 
 const SOURCE_ID = 'mlpr-area';
@@ -30,6 +45,40 @@ const OUTLINE_LAYER_ID = 'mlpr-area-outline';
 const DEFAULT_RADIUS_KM = 50;
 const DEFAULT_WIDTH_KM = 80;
 const DEFAULT_HEIGHT_KM = 60;
+// A fresh free-form area starts as a hexagon: enough sides to read as
+// "drag these around" rather than a shape in its own right, few enough that
+// the vertices aren't crowded at the default zoom.
+const DEFAULT_POLYGON_SIDES = 6;
+const DEFAULT_POLYGON_RADIUS_KM = 40;
+// Must match watchlist.js's POLYGON_MIN_POINTS/POLYGON_MAX_POINTS -- the
+// server rejects anything outside this, so the editor simply never lets you
+// get there rather than letting Save fail.
+const POLYGON_MIN_POINTS = 3;
+const POLYGON_MAX_POINTS = 60;
+// How close (in screen pixels) a click has to land to an edge to count as
+// "on it" and insert a vertex there. Generous enough for a fingertip
+// without swallowing clicks meant for the empty map.
+const EDGE_HIT_TOLERANCE_PX = 14;
+// Double-tap detection is done by hand rather than with the native
+// `dblclick` event, because a draggable MapLibre marker cannot reliably
+// produce one. From maplibre-gl's own Marker._onMove: as soon as the
+// pointer moves past `clickTolerance` (3px by default) it sets
+// `element.style.pointerEvents = 'none'` -- deliberately, to "suppress
+// click event so that popups don't toggle on drag" -- and only restores it
+// on mouseup. A few pixels of drift while double-clicking a small dot is
+// the norm, so `click` (and therefore `dblclick`) simply never reaches the
+// element. Reported as "double-click doesn't remove a vertex on PC",
+// 2026-08-02; the original test missed it by dispatching a synthetic
+// dblclick, which bypasses that whole mechanism.
+//
+// `pointerdown` always arrives (pointer-events is only suppressed *during*
+// a drag, and is back to 'auto' before the next press), covers mouse and
+// touch with one path, and doesn't care how far the pointer drifted.
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_PX = 24;
+// Clear of the vertex dot's 16px width, so the right-click menu never sits
+// over the spot the next press would land on -- see openVertexMenu.
+const VERTEX_MENU_OFFSET_PX = 12;
 // Below ~100 m a shape is smaller than the pin drawn on top of it, and
 // sizes this large are nonsense for a single receiver -- these only exist
 // to keep the drag interaction from producing a degenerate shape, not as a
@@ -57,6 +106,7 @@ function emptyCollection() {
 function shapeRing(area) {
   if (area.kind === 'circle') return circleRing(area.lat, area.lon, area.radiusKm);
   if (area.kind === 'rectangle') return rectangleRing(area.lat, area.lon, area.widthKm, area.heightKm);
+  if (area.kind === 'polygon') return polygonRing(area.points);
   return null;
 }
 
@@ -101,6 +151,46 @@ function handleMarkerElement(units) {
   return el;
 }
 
+// A polygon vertex: just the grab dot, no readout. Unlike the circle's and
+// rectangle's handles there is no single number to show -- a vertex is a
+// position, and the shape's "size" is the whole outline.
+//
+// The dot MUST be a real child element, not a ::after on the 0x0 root, and
+// this is not a style preference: a pseudo-element is painted but generates
+// no hit-test target of its own, so with a 0x0 originating element
+// `document.elementFromPoint()` over the dot returns null. Nothing can be
+// clicked, and MapLibre's drag handler -- which gates on
+// `element.contains(event.target)` -- never recognises the marker either,
+// so the vertex can't even be dragged. Found 2026-08-02 while chasing "the
+// double-click doesn't remove a vertex"; .mlpr-area-handle-dot had it right
+// all along and this broke from that pattern.
+function vertexMarkerElement() {
+  const el = document.createElement('div');
+  el.className = 'mlpr-area-vertex';
+  const dot = document.createElement('span');
+  dot.className = 'mlpr-area-vertex-dot';
+  el.appendChild(dot);
+  return el;
+}
+
+// Perpendicular distance from p to segment a-b, plus the closest point on
+// it, all in screen pixels. Done in screen space rather than lat/lon
+// because the question being asked is "did the user click near this line",
+// which is inherently about what they see: at high latitudes a degree of
+// longitude is a fraction of the on-screen distance a degree of latitude
+// is, so a lat/lon distance would make edges harder to hit the further
+// north you are.
+function closestPointOnSegment(p, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  // Degenerate segment (two vertices dragged onto each other): the "closest
+  // point" is just the vertex, and the projection below would divide by 0.
+  const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq));
+  const point = { x: a.x + t * dx, y: a.y + t * dy };
+  return { point, distance: Math.hypot(p.x - point.x, p.y - point.y) };
+}
+
 // Resolves to:
 //   an area object -- saved
 //   null           -- explicitly cleared
@@ -124,9 +214,17 @@ export function openAreaEditor(initialArea = null) {
     // out of `area` and how to put itself back on the shape's edge, so the
     // shared drag/typing plumbing below doesn't branch on shape at all.
     let handles = [];
+    // Polygon only -- one per vertex, index-aligned with area.points.
+    let vertexMarkers = [];
+    let vertexMenuEl = null;
+    // Hand-rolled double-tap state, shared across vertex markers because a
+    // rebuild replaces every marker (and every index) -- see DOUBLE_TAP_MS.
+    let lastTap = { index: -1, time: 0, x: 0, y: 0 };
+    let draggedSinceLastTap = false;
     // Which shape the toolbar is currently set to build. Kept separate from
     // area?.kind because it also has to survive "cleared, nothing drawn yet".
     let shapeKind = initialArea?.kind ?? 'circle';
+    let hintTimer = null;
 
     overlay.classList.remove('hidden');
     overlay.setAttribute('aria-hidden', 'false');
@@ -136,14 +234,10 @@ export function openAreaEditor(initialArea = null) {
     overlay.setAttribute('aria-label', t('areaEditorTitle'));
     overlay.innerHTML = `
       <div class="mlpr-area-toolbar">
-        <!-- The free-shape (polygon) button is deliberately absent, not
-             disabled: a greyed-out control still reads as a promise, and
-             this one has no implementation behind it yet. Re-add it here
-             alongside the polygon work (see TODO.md) -- its translation
-             keys (areaPolygonLabel) are already in i18n.js. -->
         <div class="mlpr-area-shapes">
           <button type="button" class="mlpr-range-btn" data-shape="circle">${t('areaCircleLabel')}</button>
           <button type="button" class="mlpr-range-btn" data-shape="rectangle">${t('areaRectangleLabel')}</button>
+          <button type="button" class="mlpr-range-btn" data-shape="polygon">${t('areaPolygonLabel')}</button>
         </div>
         <div class="mlpr-area-actions">
           <button type="button" id="mlpr-area-clear">${t('clearArea')}</button>
@@ -156,6 +250,71 @@ export function openAreaEditor(initialArea = null) {
     `;
 
     const hintEl = overlay.querySelector('#mlpr-area-hint');
+
+    // One hint strip, two jobs: the standing instruction for the current
+    // shape, and transient feedback for something that just happened (a
+    // refused vertex removal). A transient message reverts to the standing
+    // one rather than leaving the strip blank, so the instruction is never
+    // lost after a warning.
+    function showHint(text, transient = false) {
+      if (hintTimer) clearTimeout(hintTimer);
+      hintEl.textContent = text;
+      hintEl.classList.toggle('mlpr-area-hint-warn', transient);
+      hintEl.style.display = text ? '' : 'none';
+      if (transient) {
+        hintTimer = setTimeout(() => {
+          hintTimer = null;
+          refreshStandingHint();
+        }, 2600);
+      }
+    }
+
+    // What the strip says when nothing has just happened: how to start for
+    // an empty circle, how to edit for a polygon, nothing at all otherwise
+    // (a placed circle or rectangle is self-explanatory -- drag the pin or
+    // an edge handle).
+    function refreshStandingHint() {
+      if (!area && shapeKind === 'circle') return showHint(t('areaEditorHint'));
+      if (area?.kind === 'polygon') return showHint(t('areaPolygonHint'));
+      return showHint('');
+    }
+
+    function closeVertexMenu() {
+      vertexMenuEl?.remove();
+      vertexMenuEl = null;
+    }
+
+    // Right-click on a vertex. Deliberately a real menu rather than an
+    // immediate delete: the right button removing something with no
+    // confirmation would be a surprising amount of destruction for one
+    // misclick.
+    function openVertexMenu(x, y, index) {
+      closeVertexMenu();
+      vertexMenuEl = document.createElement('div');
+      vertexMenuEl.className = 'mlpr-area-vertex-menu';
+      // Offset off the pointer, not flush to it. Two reasons, and the
+      // second is load-bearing: a menu whose first item sits directly under
+      // the cursor is easy to trigger by accident, and -- since a
+      // double-click with *either* button removes a vertex -- a menu
+      // covering the click position would swallow the second press and
+      // stop the right-button double-click from ever being detected.
+      vertexMenuEl.style.left = `${x + VERTEX_MENU_OFFSET_PX}px`;
+      vertexMenuEl.style.top = `${y + VERTEX_MENU_OFFSET_PX}px`;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = t('areaRemoveVertex');
+      // Shown disabled rather than hidden, so the reason the action is
+      // unavailable is visible instead of the menu just looking empty.
+      button.disabled = area.points.length <= POLYGON_MIN_POINTS;
+      button.addEventListener('click', () => {
+        closeVertexMenu();
+        removeVertex(index);
+      });
+
+      vertexMenuEl.appendChild(button);
+      overlay.appendChild(vertexMenuEl);
+    }
 
     // Per-shape handle definitions: which field each handle edits, where it
     // sits on the shape, and how a drag position turns into a value. Adding
@@ -205,7 +364,10 @@ export function openAreaEditor(initialArea = null) {
 
     function redrawShape() {
       map?.getSource(SOURCE_ID)?.setData(shapeCollection(area));
-      hintEl.style.display = area ? 'none' : '';
+      // Hint visibility is refreshStandingHint's job, not this one's -- a
+      // polygon keeps a standing instruction *while* it exists, so tying
+      // the strip to "is there a shape" would hide it on every redraw.
+      if (!hintTimer) refreshStandingHint();
     }
 
     function positionHandles() {
@@ -221,10 +383,142 @@ export function openAreaEditor(initialArea = null) {
       centreMarker = null;
       for (const handle of handles) handle.marker.remove();
       handles = [];
+      for (const marker of vertexMarkers) marker.remove();
+      vertexMarkers = [];
+      closeVertexMenu();
+    }
+
+    // Polygon only: one draggable dot per vertex. Unlike the circle's and
+    // rectangle's handles -- which are *derived* from the centre and size,
+    // and snap back onto the shape after every drag -- these ARE the shape.
+    // Dragging one edits area.points directly and the centre follows them,
+    // not the other way round.
+    function addVertexMarkers() {
+      area.points.forEach((point, index) => {
+        const element = vertexMarkerElement();
+        const marker = new maplibregl.Marker({ element, draggable: true })
+          .setLngLat([point.lon, point.lat])
+          .addTo(map);
+
+        marker.on('drag', () => {
+          const { lng, lat } = marker.getLngLat();
+          area.points[index] = { lat, lon: lng };
+          syncPolygonCentre();
+          redrawShape();
+        });
+
+        // Double-tap/double-click removes the vertex -- detected from
+        // consecutive pointerdowns rather than the native dblclick, which a
+        // draggable marker can't reliably deliver (see DOUBLE_TAP_MS).
+        //
+        // `event.button` is deliberately not checked: either button counts,
+        // and so does a mixed pair (explicit request, 2026-08-02). The
+        // right button additionally opens the menu below on the first
+        // press; that menu is offset off the pointer so it can't intercept
+        // the second one, and it is torn down with the markers when the
+        // vertex actually goes.
+        element.addEventListener('pointerdown', (event) => {
+          const now = Date.now();
+          const isDoubleTap =
+            // A press that followed an actual drag isn't the second half of
+            // a double-tap, however quickly it came -- otherwise nudging a
+            // vertex and immediately grabbing it again would delete it.
+            !draggedSinceLastTap &&
+            lastTap.index === index &&
+            now - lastTap.time < DOUBLE_TAP_MS &&
+            Math.hypot(event.clientX - lastTap.x, event.clientY - lastTap.y) < DOUBLE_TAP_PX;
+
+          draggedSinceLastTap = false;
+
+          if (isDoubleTap) {
+            lastTap = { index: -1, time: 0, x: 0, y: 0 };
+            removeVertex(index);
+            return;
+          }
+          lastTap = { index, time: now, x: event.clientX, y: event.clientY };
+        });
+
+        marker.on('dragstart', () => {
+          draggedSinceLastTap = true;
+        });
+
+        // The removal itself is handled above; this only stops the map
+        // underneath from double-click-zooming on the same gesture.
+        element.addEventListener('dblclick', (event) => {
+          event.stopPropagation();
+          event.preventDefault();
+        });
+
+        // Desktop affordance for the same action -- a double-click is easy
+        // to discover on touch but not obvious with a mouse, so the right
+        // button offers it explicitly (and can say *why* it's unavailable
+        // at the minimum, which a silently-ignored double-click can't).
+        element.addEventListener('contextmenu', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openVertexMenu(event.clientX, event.clientY, index);
+        });
+
+        vertexMarkers.push(marker);
+      });
+    }
+
+    // The stored centre is only a grab handle for "move the whole shape",
+    // so it trails the vertices rather than defining them.
+    function syncPolygonCentre() {
+      const centre = polygonCentroid(area.points);
+      area.lat = centre.lat;
+      area.lon = centre.lon;
+      centreMarker?.setLngLat([centre.lon, centre.lat]);
+    }
+
+    // clickPoint is MapLibre's {x, y} screen position for the click. Finds
+    // the closest polygon edge and, if the click landed within
+    // EDGE_HIT_TOLERANCE_PX of it, splits that edge at the nearest point on
+    // it -- so the new vertex lands on the outline rather than wherever the
+    // finger actually was, and the shape doesn't visibly jump.
+    function insertVertexNearClick(clickPoint) {
+      if (area.points.length >= POLYGON_MAX_POINTS) {
+        showHint(t('areaMaxVerticesHint'), true);
+        return;
+      }
+
+      const projected = area.points.map((p) => map.project([p.lon, p.lat]));
+      let best = null;
+      for (let i = 0; i < projected.length; i += 1) {
+        const next = (i + 1) % projected.length;
+        const { point, distance } = closestPointOnSegment(clickPoint, projected[i], projected[next]);
+        if (distance <= EDGE_HIT_TOLERANCE_PX && (!best || distance < best.distance)) {
+          best = { distance, insertAt: next, point };
+        }
+      }
+      if (!best) return;
+
+      const lngLat = map.unproject(best.point);
+      area.points.splice(best.insertAt, 0, { lat: lngLat.lat, lon: lngLat.lng });
+      syncPolygonCentre();
+      rebuildMarkers();
+      redrawShape();
+    }
+
+    function removeVertex(index) {
+      if (area.points.length <= POLYGON_MIN_POINTS) {
+        // Nothing encloses an area with fewer than three corners. Say so
+        // rather than ignoring the gesture, which would just read as the
+        // double-click not having registered.
+        showHint(t('areaMinVerticesHint'), true);
+        return;
+      }
+      area.points.splice(index, 1);
+      syncPolygonCentre();
+      rebuildMarkers();
+      redrawShape();
     }
 
     // Torn down and rebuilt wholesale rather than patched, since switching
-    // shape changes how many handles there are and what each one edits.
+    // shape changes how many handles there are and what each one edits --
+    // and for a polygon, every vertex marker's closure captures its own
+    // index, which shifts as soon as one is inserted or removed.
     function rebuildMarkers() {
       removeMarkers();
       if (!area || !map) return;
@@ -232,16 +526,38 @@ export function openAreaEditor(initialArea = null) {
       centreMarker = new maplibregl.Marker({ element: centreMarkerElement(), draggable: true, anchor: 'bottom' })
         .setLngLat([area.lon, area.lat])
         .addTo(map);
+
+      // A polygon has no size fields to leave alone, so moving it means
+      // translating every vertex by however far the pin moved. Captured at
+      // dragstart because the drag handler only ever sees the new position.
+      let dragFrom = null;
+      centreMarker.on('dragstart', () => {
+        dragFrom = { lat: area.lat, lon: area.lon };
+      });
+
       centreMarker.on('drag', () => {
-        // Dragging the pin moves the whole shape: the centre follows the
-        // pointer and the size fields are untouched, so the handles are
-        // just recomputed from the new centre rather than dragged along.
+        // Dragging the pin moves the whole shape: for circle/rectangle the
+        // size fields are untouched and the handles are just recomputed
+        // from the new centre; for a polygon every vertex shifts with it.
         const { lng, lat } = centreMarker.getLngLat();
+        if (area.kind === 'polygon' && dragFrom) {
+          const dLat = lat - dragFrom.lat;
+          const dLon = lng - dragFrom.lon;
+          area.points = area.points.map((p) => ({ lat: p.lat + dLat, lon: p.lon + dLon }));
+          dragFrom = { lat, lon: lng };
+          vertexMarkers.forEach((marker, i) => marker.setLngLat([area.points[i].lon, area.points[i].lat]));
+        }
         area.lat = lat;
         area.lon = lng;
         redrawShape();
         positionHandles();
       });
+
+      if (area.kind === 'polygon') {
+        addVertexMarkers();
+        positionHandles();
+        return;
+      }
 
       for (const spec of HANDLE_SPECS[area.kind] ?? []) {
         const element = handleMarkerElement(units);
@@ -288,6 +604,8 @@ export function openAreaEditor(initialArea = null) {
       // MapLibre isn't left holding a WebGL context for a display:none
       // element that may never be shown again.
       removeMarkers();
+      if (hintTimer) clearTimeout(hintTimer);
+      hintTimer = null;
       map?.remove();
       map = null;
       overlay.classList.add('hidden');
@@ -298,7 +616,14 @@ export function openAreaEditor(initialArea = null) {
     }
 
     function onKeydown(event) {
-      if (event.key === 'Escape') close(undefined);
+      if (event.key !== 'Escape') return;
+      // Escape dismisses the vertex menu first, if one is open -- otherwise
+      // reaching for it to close a menu would discard the whole edit.
+      if (vertexMenuEl) {
+        closeVertexMenu();
+        return;
+      }
+      close(undefined);
     }
     document.addEventListener('keydown', onKeydown);
 
@@ -312,10 +637,7 @@ export function openAreaEditor(initialArea = null) {
       for (const button of shapeButtons) {
         button.classList.toggle('active', button.dataset.shape === shapeKind);
       }
-      // The click-the-map prompt only applies to the circle; a rectangle is
-      // placed the moment its button is pressed, so leaving the hint up
-      // would be telling the user to do something that does nothing.
-      hintEl.style.display = !area && shapeKind === 'circle' ? '' : 'none';
+      refreshStandingHint();
     }
 
     for (const button of shapeButtons) {
@@ -324,11 +646,11 @@ export function openAreaEditor(initialArea = null) {
         if (kind === shapeKind) return;
         shapeKind = kind;
 
+        const centre = map.getCenter();
         if (kind === 'rectangle') {
           // Appears immediately, centred on whatever the map is showing --
           // there's no "click to place" step for a rectangle (explicit
           // spec), so it has to land somewhere sensible on its own.
-          const centre = map.getCenter();
           area = {
             kind: 'rectangle',
             lat: centre.lat,
@@ -336,9 +658,16 @@ export function openAreaEditor(initialArea = null) {
             widthKm: DEFAULT_WIDTH_KM,
             heightKm: DEFAULT_HEIGHT_KM,
           };
+        } else if (kind === 'polygon') {
+          // Same "appears immediately" rule as the rectangle. A hexagon
+          // rather than a triangle so it already looks like something to
+          // reshape, and so vertices can be removed without immediately
+          // hitting the three-point floor.
+          const points = regularPolygonPoints(centre.lat, centre.lng, DEFAULT_POLYGON_RADIUS_KM, DEFAULT_POLYGON_SIDES);
+          area = { kind: 'polygon', ...polygonCentroid(points), points };
         } else {
           // Switching to the circle drops back to click-to-place rather
-          // than silently converting the rectangle: the two have no
+          // than silently converting whatever was there: the shapes have no
           // meaningful common size, and guessing one would quietly change
           // an area the user had already tuned.
           area = null;
@@ -436,6 +765,20 @@ export function openAreaEditor(initialArea = null) {
     // does nothing once a shape exists (moving it is the pin's own drag),
     // so an accidental click while adjusting can't teleport the shape.
     map.on('click', (event) => {
+      // Any click closes an open vertex menu, matching how a native context
+      // menu behaves.
+      closeVertexMenu();
+
+      // Clicking an edge of a polygon inserts a vertex there. The edges are
+      // part of the GeoJSON fill/line layers, not DOM elements, so there is
+      // nothing to attach a listener to -- the click is hit-tested against
+      // each segment in screen space instead, and ignored if it isn't close
+      // to one (so a stray click on open map does nothing).
+      if (area?.kind === 'polygon') {
+        insertVertexNearClick(event.point);
+        return;
+      }
+
       if (area || shapeKind !== 'circle') return;
       area = { kind: 'circle', lat: event.lngLat.lat, lon: event.lngLat.lng, radiusKm: DEFAULT_RADIUS_KM };
       rebuildMarkers();
