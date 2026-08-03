@@ -24,7 +24,7 @@ feature-specific walkthroughs (starting with
 see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
 
 <p>
-  <img src="./docs/images/map-view" alt="Map view screenshoot" width="49%">
+  <img src="./docs/images/map-view.png" alt="Map view screenshoot" width="49%">
 </p>
 
 ## Features
