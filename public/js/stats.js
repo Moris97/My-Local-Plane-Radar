@@ -8,6 +8,8 @@ import {
   renderDoughnutSvg,
   renderRoseChartSvg,
   doughnutSlices,
+  formatBucketLabel,
+  defaultFormatValue,
   DOUGHNUT_COLORS,
 } from './chart.js';
 import { formatDistance, formatAltitude, formatSpeed } from './units.js';
@@ -104,6 +106,80 @@ function escapeHtml(value) {
 
 function legendItemHtml(color, label, value) {
   return `<span class="mlpr-chart-legend-item"><span class="mlpr-chart-legend-swatch" style="background:${color}"></span>${escapeHtml(label)}${value != null ? `: ${escapeHtml(value)}` : ''}</span>`;
+}
+
+// Hover tooltip shared by every bucketed chart (line/area/bar): shows
+// exactly which bucket the pointer is over and each series' precise value
+// there, on request (2026-08-03) -- until now a chart's only readout was
+// the Y-axis's max/mid/zero labels and whatever the legend showed for the
+// *last* bucket, with nothing in between.
+//
+// Deliberately does not recompute "which bucket is the pointer over" from
+// coordinates -- that geometry already exists once, in chart.js's own
+// pointHitRegionsSvg/bar hit regions, as real (invisible) DOM elements
+// carrying a `data-i` bucket index. This only reads that index back off
+// whatever element a pointer event landed on, the same "hit-test and
+// drawing must share one source of truth" reasoning the trigger-area
+// editor's rectangle bounds already document -- two independently computed
+// x-to-bucket mappings could silently disagree, one shared one can't.
+//
+// `series` here also carries a `label` per entry (added at each call site
+// alongside `key`/`color`) purely for this tooltip's row text -- the
+// existing legend-building calls elsewhere are untouched and keep writing
+// their own labels by hand.
+function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormatValue, formatBucket = formatBucketLabel } = {}) {
+  if (!wrapEl || buckets.length === 0) return;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'mlpr-chart-tooltip';
+  wrapEl.appendChild(tooltip);
+
+  function setActiveIndex(index) {
+    for (const el of wrapEl.querySelectorAll('.active')) el.classList.remove('active');
+    if (index == null) return;
+    for (const el of wrapEl.querySelectorAll(`[data-i="${index}"]`)) el.classList.add('active');
+  }
+
+  function positionNear(clientX, clientY) {
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const left = Math.max(4, Math.min(clientX - wrapRect.left + 12, wrapRect.width - tooltip.offsetWidth - 4));
+    const top = Math.max(4, clientY - wrapRect.top - tooltip.offsetHeight - 12);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function showBucket(index, clientX, clientY) {
+    const bucket = buckets[index];
+    if (!bucket) return;
+    const rows = series
+      .map(
+        (s) =>
+          `<div class="mlpr-chart-tooltip-row"><span class="mlpr-chart-tooltip-swatch" style="background:${s.color}"></span>${escapeHtml(s.label ?? s.key)}<span class="mlpr-chart-tooltip-value">${escapeHtml(formatValue(bucket[s.key] ?? 0))}</span></div>`,
+      )
+      .join('');
+    tooltip.innerHTML = `<div class="mlpr-chart-tooltip-date">${escapeHtml(formatBucket(bucket.bucket))}</div>${rows}`;
+    tooltip.classList.add('visible');
+    setActiveIndex(index);
+    positionNear(clientX, clientY);
+  }
+
+  function onPointerActive(event) {
+    const hit = event.target.closest('.mlpr-chart-hit');
+    if (!hit) return;
+    showBucket(Number(hit.dataset.i), event.clientX, event.clientY);
+  }
+
+  function onPointerLeave() {
+    tooltip.classList.remove('visible');
+    setActiveIndex(null);
+  }
+
+  // pointerdown too, not just pointermove: on touch there's no hover state,
+  // so a tap needs to raise the tooltip immediately rather than only ever
+  // updating once a drag is already under way.
+  wrapEl.addEventListener('pointerdown', onPointerActive);
+  wrapEl.addEventListener('pointermove', onPointerActive);
+  wrapEl.addEventListener('pointerleave', onPointerLeave);
 }
 
 function tileHtml(label, value) {
@@ -389,14 +465,15 @@ export function renderStatsPanel(container) {
       return;
     }
     const series = [
-      { key: 'avgAircraft', color: '#3d8bdc' },
-      { key: 'maxAircraft', color: '#3ddc84' },
+      { key: 'avgAircraft', color: '#3d8bdc', label: t('chartAircraftCountAvg') },
+      { key: 'maxAircraft', color: '#3ddc84', label: t('chartAircraftCountMax') },
     ];
     el.innerHTML = renderLineChartSvg(history, series);
     const lastAvg = Math.round(history[history.length - 1].avgAircraft);
     const lastMax = history[history.length - 1].maxAircraft;
     legendEl.innerHTML =
       legendItemHtml('#3d8bdc', t('chartAircraftCountAvg'), lastAvg) + legendItemHtml('#3ddc84', t('chartAircraftCountMax'), lastMax);
+    wireChartTooltip(el, history, series);
   }
 
   function drawPositionChart(history) {
@@ -408,11 +485,12 @@ export function renderStatsPanel(container) {
       return;
     }
     const series = [
-      { key: 'avgWithPos', color: '#3ddc84' },
-      { key: 'avgWithoutPos', color: '#e03131' },
+      { key: 'avgWithPos', color: '#3ddc84', label: t('chartWithPos') },
+      { key: 'avgWithoutPos', color: '#e03131', label: t('chartWithoutPos') },
     ];
     el.innerHTML = renderAreaChartSvg(history, series);
     legendEl.innerHTML = legendItemHtml('#3ddc84', t('chartWithPos')) + legendItemHtml('#e03131', t('chartWithoutPos'));
+    wireChartTooltip(el, history, series);
   }
 
   function drawRangeChart(history) {
@@ -425,14 +503,16 @@ export function renderStatsPanel(container) {
       return;
     }
     const series = [
-      { key: 'maxRangeKm', color: '#3ddc84' },
-      { key: 'rangeTopAvgKm', color: '#3d8bdc' },
+      { key: 'maxRangeKm', color: '#3ddc84', label: t('chartRangeMax') },
+      { key: 'rangeTopAvgKm', color: '#3d8bdc', label: t('chartRangeTopAvg') },
     ];
-    el.innerHTML = renderBarChartSvg(history, series, { formatValue: (v) => formatDistance(v, units) });
+    const formatValue = (v) => formatDistance(v, units);
+    el.innerHTML = renderBarChartSvg(history, series, { formatValue });
     const last = history[history.length - 1];
     legendEl.innerHTML =
       legendItemHtml('#3ddc84', t('chartRangeMax'), formatDistance(last.maxRangeKm, units)) +
       legendItemHtml('#3d8bdc', t('chartRangeTopAvg'), formatDistance(last.rangeTopAvgKm, units));
+    wireChartTooltip(el, history, series, { formatValue });
   }
 
   function drawNewRegistrationsChart(buckets) {
@@ -441,7 +521,9 @@ export function renderStatsPanel(container) {
       emptyChartMessage(el);
       return;
     }
-    el.innerHTML = renderBarChartSvg(buckets, [{ key: 'count', color: '#3ddc84' }]);
+    const series = [{ key: 'count', color: '#3ddc84', label: t('chartNewRegistrations') }];
+    el.innerHTML = renderBarChartSvg(buckets, series);
+    wireChartTooltip(el, buckets, series);
   }
 
   function drawDoughnut(elId, legendId, items, labelFor) {
@@ -466,9 +548,10 @@ export function renderStatsPanel(container) {
       emptyChartMessage(legendEl);
       return;
     }
-    const series = topKeys.map((key, i) => ({ key, color: DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length] }));
+    const series = topKeys.map((key, i) => ({ key, color: DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length], label: labelFor(key) }));
     el.innerHTML = renderLineChartSvg(buckets, series);
     legendEl.innerHTML = topKeys.map((key, i) => legendItemHtml(DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length], labelFor(key))).join('');
+    wireChartTooltip(el, buckets, series);
   }
 
   async function drawTopChart(kind, elId, legendId, countsUrl, labelFor, extractKey, forceRefresh = true) {
@@ -599,16 +682,17 @@ export function renderStatsPanel(container) {
       return;
     }
 
-    bandsEl.innerHTML = renderBarChartSvg(
-      data.altitudeBands.map((b) => ({ bucket: b.label, maxRangeKm: b.maxRangeKm, topAvgRangeKm: b.topAvgRangeKm })),
-      [
-        { key: 'maxRangeKm', color: '#3ddc84' },
-        { key: 'topAvgRangeKm', color: '#3d8bdc' },
-      ],
-      { formatValue: (v) => formatDistance(v, units), formatBucket: (label) => label },
-    );
+    const bandBuckets = data.altitudeBands.map((b) => ({ bucket: b.label, maxRangeKm: b.maxRangeKm, topAvgRangeKm: b.topAvgRangeKm }));
+    const bandSeries = [
+      { key: 'maxRangeKm', color: '#3ddc84', label: t('chartRangeMax') },
+      { key: 'topAvgRangeKm', color: '#3d8bdc', label: t('chartRangeTopAvg') },
+    ];
+    const bandFormatValue = (v) => formatDistance(v, units);
+    const bandFormatBucket = (label) => label;
+    bandsEl.innerHTML = renderBarChartSvg(bandBuckets, bandSeries, { formatValue: bandFormatValue, formatBucket: bandFormatBucket });
     bandsLegendEl.innerHTML =
       legendItemHtml('#3ddc84', t('chartRangeMax')) + legendItemHtml('#3d8bdc', t('chartRangeTopAvg'));
+    wireChartTooltip(bandsEl, bandBuckets, bandSeries, { formatValue: bandFormatValue, formatBucket: bandFormatBucket });
     // The rose uses the outlier-resistant top-5 average as its petal radius
     // (not the single all-time max) -- the whole point of the redesign was
     // to avoid VRS's/tar1090's spiky single-sample plots; the map coverage

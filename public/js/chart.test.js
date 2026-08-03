@@ -54,7 +54,7 @@ test('renderAreaChartSvg stacks series -- the first series alone reaches its own
 test('renderAreaChartSvg draws stacked bar-like rects instead of a zero-width sliver for a single bucket', () => {
   const svg = renderAreaChartSvg([{ a: 10, b: 20 }], [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }]);
   assert.ok(!svg.includes('<polygon'));
-  assert.equal(countOccurrences(svg, '<rect'), 2);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-area"'), 2);
 });
 
 test('renderAreaChartSvg returns an empty svg for no buckets', () => {
@@ -66,7 +66,7 @@ test('renderBarChartSvg draws buckets.length * series.length rects', () => {
   const buckets = [{ a: 1, b: 2 }, { a: 3, b: 4 }, { a: 5, b: 6 }];
   const series = [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }];
   const svg = renderBarChartSvg(buckets, series);
-  assert.equal(countOccurrences(svg, '<rect'), 6);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-bar"'), 6);
 });
 
 test('renderBarChartSvg never emits a negative bar height', () => {
@@ -200,4 +200,61 @@ test('renderRoseChartSvg labels the outer ring with the max value, unit-formatte
 test('renderRoseChartSvg never produces NaN in its path data, even with a single item', () => {
   const svg = renderRoseChartSvg([{ label: 'N', value: 10 }]);
   assert.ok(!svg.includes('NaN'));
+});
+
+// ---- hover affordances: hit regions, cursor guide, per-bucket point markers ----
+
+test('renderLineChartSvg emits one hit region and one cursor line per bucket, plus one point per bucket per series', () => {
+  const buckets = [{ v: 10, w: 5 }, { v: 20, w: 8 }, { v: 15, w: 12 }];
+  const series = [{ key: 'v', color: '#3ddc84' }, { key: 'w', color: '#3d8bdc' }];
+  const svg = renderLineChartSvg(buckets, series);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-hit"'), 3);
+  assert.equal(countOccurrences(svg, '<line class="mlpr-chart-cursor"'), 3);
+  assert.equal(countOccurrences(svg, '<circle class="mlpr-chart-point"'), 6);
+  for (const i of [0, 1, 2]) {
+    assert.ok(svg.includes(`data-i="${i}"`), `expected a data-i="${i}" element`);
+  }
+});
+
+test('renderLineChartSvg still emits exactly one hit region for a single bucket', () => {
+  const svg = renderLineChartSvg([{ v: 5 }], [{ key: 'v', color: '#fff' }]);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-hit"'), 1);
+  assert.ok(svg.includes('data-i="0"'));
+});
+
+test("renderLineChartSvg's hit regions tile the plot edge-to-edge with no gaps or overlaps", () => {
+  const buckets = [{ v: 1 }, { v: 2 }, { v: 3 }, { v: 4 }];
+  const svg = renderLineChartSvg(buckets, [{ key: 'v', color: '#fff' }], { width: 400 });
+  const xs = [...svg.matchAll(/<rect class="mlpr-chart-hit" data-i="\d+" x="([\d.]+)" y="[\d.]+" width="([\d.]+)"/g)].map((m) => [
+    Number(m[1]),
+    Number(m[2]),
+  ]);
+  assert.equal(xs.length, 4);
+  for (let i = 1; i < xs.length; i += 1) {
+    const prevRight = xs[i - 1][0] + xs[i - 1][1];
+    assert.ok(Math.abs(prevRight - xs[i][0]) < 0.05, `expected region ${i} to start where region ${i - 1} ends`);
+  }
+});
+
+test('renderAreaChartSvg emits one point per bucket per series, at the top of that series own stacked layer', () => {
+  const buckets = [{ a: 10, b: 20 }, { a: 12, b: 18 }];
+  const series = [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }];
+  const svg = renderAreaChartSvg(buckets, series);
+  assert.equal(countOccurrences(svg, '<circle class="mlpr-chart-point"'), 4);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-hit"'), 2);
+});
+
+test('renderBarChartSvg emits one hit region per bucket (not per bar)', () => {
+  const buckets = [{ a: 1, b: 2 }, { a: 3, b: 4 }, { a: 5, b: 6 }];
+  const series = [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }];
+  const svg = renderBarChartSvg(buckets, series);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-hit"'), 3);
+});
+
+test('renderBarChartSvg tags every bar with its bucket index so a hover can highlight the whole group', () => {
+  const buckets = [{ a: 1, b: 2 }, { a: 3, b: 4 }];
+  const series = [{ key: 'a', color: '#3ddc84' }, { key: 'b', color: '#3d8bdc' }];
+  const svg = renderBarChartSvg(buckets, series);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-bar" data-i="0"'), 2);
+  assert.equal(countOccurrences(svg, '<rect class="mlpr-chart-bar" data-i="1"'), 2);
 });

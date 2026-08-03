@@ -9,7 +9,10 @@ function emptyChartSvg(width, height) {
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart"></svg>`;
 }
 
-function defaultFormatValue(value) {
+// Exported so stats.js's hover tooltip can fall back to the exact same
+// default the charts themselves use for their Y-axis labels when a chart
+// was drawn without its own formatValue.
+export function defaultFormatValue(value) {
   return String(Math.round(value));
 }
 
@@ -39,6 +42,49 @@ export function formatBucketLabel(key) {
 
 function plotX(i, count, left, plotWidth) {
   return left + (count <= 1 ? plotWidth / 2 : (i / (count - 1)) * plotWidth);
+}
+
+// Invisible full-height hit regions, one per bucket, tiled edge-to-edge
+// across the plot so hovering anywhere above/below a point (not just
+// exactly on the line) still targets that bucket -- a bare few-pixel-wide
+// <circle> would be a tiny, easy-to-miss target otherwise. Each bucket's
+// region is a Voronoi-style slice: it extends halfway to its neighbours on
+// either side (or to the plot edge for the first/last bucket), so there's
+// no dead zone between points and no ambiguity about which bucket a given
+// x belongs to. stats.js reads back the `data-i` index on
+// pointer/mouse events rather than recomputing this geometry itself --
+// same reasoning as the rectangle trigger area's shared destinationPoint()
+// calls: the hit-test and the drawing must come from the exact same
+// numbers or they can silently disagree.
+function pointHitRegionsSvg(buckets, left, plotWidth, top, plotHeight) {
+  if (buckets.length <= 1) {
+    return `<rect class="mlpr-chart-hit" data-i="0" x="${left.toFixed(1)}" y="${top.toFixed(1)}" width="${plotWidth.toFixed(1)}" height="${plotHeight.toFixed(1)}" />`;
+  }
+  const xs = buckets.map((b, i) => plotX(i, buckets.length, left, plotWidth));
+  return buckets
+    .map((b, i) => {
+      const x0 = i === 0 ? left : (xs[i - 1] + xs[i]) / 2;
+      const x1 = i === buckets.length - 1 ? left + plotWidth : (xs[i] + xs[i + 1]) / 2;
+      return `<rect class="mlpr-chart-hit" data-i="${i}" x="${x0.toFixed(1)}" y="${top.toFixed(1)}" width="${(x1 - x0).toFixed(1)}" height="${plotHeight.toFixed(1)}" />`;
+    })
+    .join('');
+}
+
+// One vertical guide per bucket, hidden by default (style.css) and toggled
+// on via the `.active` class by stats.js's hover handler -- positioning
+// stays entirely in this file rather than being recomputed in the DOM
+// layer, so it can never drift from where the data actually is.
+function cursorLinesSvg(buckets, left, plotWidth, top, plotHeight) {
+  if (buckets.length <= 1) {
+    const x = (left + plotWidth / 2).toFixed(1);
+    return `<line class="mlpr-chart-cursor" data-i="0" x1="${x}" x2="${x}" y1="${top.toFixed(1)}" y2="${(top + plotHeight).toFixed(1)}" />`;
+  }
+  return buckets
+    .map((b, i) => {
+      const x = plotX(i, buckets.length, left, plotWidth).toFixed(1);
+      return `<line class="mlpr-chart-cursor" data-i="${i}" x1="${x}" x2="${x}" y1="${top.toFixed(1)}" y2="${(top + plotHeight).toFixed(1)}" />`;
+    })
+    .join('');
 }
 
 function gridLinesSvg(left, top, plotWidth, plotHeight) {
@@ -90,30 +136,43 @@ export function renderLineChartSvg(
   const plotHeight = height - top - PAD_BOTTOM;
   const maxValue = Math.max(1, ...buckets.flatMap((b) => series.map((s) => b[s.key] ?? 0)));
 
+  // Points are collected alongside the polylines (same coords, one pass)
+  // rather than recomputed separately -- both a hover dot per bucket and
+  // the fallback single-bucket dot need the exact same y as the line
+  // itself, so there's one source of truth for "where does this series
+  // sit at bucket i" instead of two formulas that could drift apart.
+  let points = '';
   const polylines = series
     .map((s) => {
       const coords = buckets.map((b, i) => [
         plotX(i, buckets.length, left, plotWidth),
         top + plotHeight - ((b[s.key] ?? 0) / maxValue) * plotHeight,
       ]);
-      const points = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+      points += coords
+        .map(([x, y], i) => `<circle class="mlpr-chart-point" data-i="${i}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${s.color}" />`)
+        .join('');
       // A single point produces an invisible polyline (needs >=2 points to
       // draw a segment) -- always common for "all time" on a fresh install
       // with only today's data. Draw it as a dot instead of silently
-      // showing nothing.
+      // showing nothing. Drawn full-size and always visible (not one of
+      // the hidden-until-hover dots above) since it's the chart's only
+      // visible mark either way.
       if (coords.length === 1) {
         const [x, y] = coords[0];
         return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${s.color}" />`;
       }
-      return `<polyline points="${points}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
+      return `<polyline class="mlpr-chart-line" points="${coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ')}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" />`;
     })
     .join('');
 
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart">
     ${gridLinesSvg(left, top, plotWidth, plotHeight)}
     ${polylines}
+    ${cursorLinesSvg(buckets, left, plotWidth, top, plotHeight)}
+    ${points}
     ${yAxisLabelsSvg(left, top, plotHeight, maxValue, formatValue)}
     ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
+    ${pointHitRegionsSvg(buckets, left, plotWidth, top, plotHeight)}
   </svg>`;
 }
 
@@ -143,6 +202,11 @@ export function renderAreaChartSvg(
   const barWidth = plotWidth * 0.3;
   const barX = left + plotWidth / 2 - barWidth / 2;
 
+  // Hover dot per series sits at the TOP edge of that layer's own slice of
+  // the stack at each bucket -- the one point on a filled, stacked shape
+  // that unambiguously belongs to a single series rather than the
+  // combined total underneath it.
+  let points = '';
   let cumulative = buckets.map(() => 0);
   const layers = series.map((s) => {
     const nextCumulative = buckets.map((b, i) => cumulative[i] + (b[s.key] ?? 0));
@@ -150,16 +214,19 @@ export function renderAreaChartSvg(
     if (singleBucket) {
       const yTop = toY(nextCumulative[0]);
       const yBottom = toY(cumulative[0]);
-      const rect = `<rect x="${barX.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${(yBottom - yTop).toFixed(1)}" fill="${s.color}" fill-opacity="0.7" />`;
+      const rect = `<rect class="mlpr-chart-area" x="${barX.toFixed(1)}" y="${yTop.toFixed(1)}" width="${barWidth.toFixed(1)}" height="${(yBottom - yTop).toFixed(1)}" fill="${s.color}" fill-opacity="0.7" />`;
+      points += `<circle class="mlpr-chart-point" data-i="0" cx="${(barX + barWidth / 2).toFixed(1)}" cy="${yTop.toFixed(1)}" r="3" fill="${s.color}" />`;
       cumulative = nextCumulative;
       return rect;
     }
 
-    const topPoints = buckets.map((b, i) => `${plotX(i, buckets.length, left, plotWidth).toFixed(1)},${toY(nextCumulative[i]).toFixed(1)}`);
-    const bottomPoints = buckets
-      .map((b, i) => `${plotX(i, buckets.length, left, plotWidth).toFixed(1)},${toY(cumulative[i]).toFixed(1)}`)
-      .reverse();
-    const polygon = `<polygon points="${[...topPoints, ...bottomPoints].join(' ')}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1" />`;
+    const xs = buckets.map((b, i) => plotX(i, buckets.length, left, plotWidth));
+    const topPoints = buckets.map((b, i) => `${xs[i].toFixed(1)},${toY(nextCumulative[i]).toFixed(1)}`);
+    const bottomPoints = buckets.map((b, i) => `${xs[i].toFixed(1)},${toY(cumulative[i]).toFixed(1)}`).reverse();
+    const polygon = `<polygon class="mlpr-chart-area" points="${[...topPoints, ...bottomPoints].join(' ')}" fill="${s.color}" fill-opacity="0.55" stroke="${s.color}" stroke-width="1" />`;
+    points += buckets
+      .map((b, i) => `<circle class="mlpr-chart-point" data-i="${i}" cx="${xs[i].toFixed(1)}" cy="${toY(nextCumulative[i]).toFixed(1)}" r="3" fill="${s.color}" />`)
+      .join('');
     cumulative = nextCumulative;
     return polygon;
   });
@@ -167,8 +234,11 @@ export function renderAreaChartSvg(
   return `<svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" class="mlpr-chart">
     ${gridLinesSvg(left, top, plotWidth, plotHeight)}
     ${layers.join('')}
+    ${cursorLinesSvg(buckets, left, plotWidth, top, plotHeight)}
+    ${points}
     ${yAxisLabelsSvg(left, top, plotHeight, maxTotal, formatValue)}
     ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
+    ${pointHitRegionsSvg(buckets, left, plotWidth, top, plotHeight)}
   </svg>`;
 }
 
@@ -196,8 +266,19 @@ export function renderBarChartSvg(
         const barHeight = (value / maxValue) * plotHeight;
         const bx = groupX + si * barWidth;
         const by = top + plotHeight - barHeight;
-        return `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barWidth * 0.85).toFixed(1)}" height="${Math.max(0, barHeight).toFixed(1)}" fill="${s.color}" rx="1.5" />`;
+        return `<rect class="mlpr-chart-bar" data-i="${i}" x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${(barWidth * 0.85).toFixed(1)}" height="${Math.max(0, barHeight).toFixed(1)}" fill="${s.color}" rx="1.5" />`;
       });
+    })
+    .join('');
+
+  // One hit region per bucket's whole group column (not per bar) -- hovering
+  // anywhere in a bucket's column, including the gaps between/around its
+  // bars, should still target that bucket rather than requiring a precise
+  // hit on a thin bar.
+  const hitRegions = buckets
+    .map((b, i) => {
+      const x = left + i * groupWidth;
+      return `<rect class="mlpr-chart-hit" data-i="${i}" x="${x.toFixed(1)}" y="${top.toFixed(1)}" width="${groupWidth.toFixed(1)}" height="${plotHeight.toFixed(1)}" />`;
     })
     .join('');
 
@@ -206,6 +287,7 @@ export function renderBarChartSvg(
     ${bars}
     ${yAxisLabelsSvg(left, top, plotHeight, maxValue, formatValue)}
     ${xAxisLabelsSvg(buckets, left, plotWidth, height - 4, formatBucket)}
+    ${hitRegions}
   </svg>`;
 }
 

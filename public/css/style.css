@@ -1302,6 +1302,128 @@ html, body {
   display: inline-block;
 }
 
+/* Positioning root for the hover tooltip below -- it's appended as an
+   absolutely-positioned sibling of the chart <svg>, so this element (the
+   div stats.js sets .innerHTML on) has to establish the containing block.
+   One shared selector rather than adding a class to each of the six chart
+   markup blocks in stats.js's template. */
+[id^="mlpr-chart-"],
+#mlpr-antenna-chart-bands {
+  position: relative;
+}
+
+/* Invisible full-height strips, one per bucket (see chart.js's
+   pointHitRegionsSvg/bar hit regions) -- these are what actually receive
+   the pointer events; everything else in the chart (line, area fill, bars)
+   has pointer-events left alone or explicitly disabled below so hovering
+   always resolves to "which bucket", never "did I land exactly on a
+   1px-wide line". */
+.mlpr-chart-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+
+/* Vertical guide + per-series dot, both hidden until stats.js's hover
+   handler adds .active to whichever bucket index the pointer is over (see
+   chart.js's cursor lines / point markers, both tagged with the same
+   data-i the hit regions carry). pointer-events: none so these purely
+   decorative marks can never themselves become the event target -- the
+   hit region underneath must always win. */
+.mlpr-chart-cursor {
+  stroke: #3a5566;
+  stroke-width: 1;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.mlpr-chart-cursor.active {
+  opacity: 1;
+}
+
+.mlpr-chart-point {
+  opacity: 0;
+  stroke: #05070a;
+  stroke-width: 1.3;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+.mlpr-chart-point.active {
+  opacity: 1;
+}
+
+/* Bar charts have no separate point marker to highlight -- the bars
+   themselves are the mark, so hovering just brightens the whole group
+   (every bar sharing the hovered bucket's data-i, see chart.js). */
+.mlpr-chart-bar {
+  transition: filter 0.1s ease;
+}
+
+.mlpr-chart-bar.active {
+  filter: brightness(1.4);
+}
+
+/* Same visual language as .mlpr-info-icon .mlpr-tooltip (background/
+   border/shadow/font) -- this is the same kind of small floating readout,
+   just positioned dynamically under the pointer by stats.js instead of
+   pinned by CSS to a fixed spot under a button. opacity+visibility
+   (not display) so offsetWidth/offsetHeight are always measurable for
+   positioning, never 0 from being display:none at the moment of the
+   measurement. */
+.mlpr-chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  font: 400 11.5px/1.5 system-ui, sans-serif;
+  padding: 7px 9px;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.1s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.mlpr-chart-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.mlpr-chart-tooltip-date {
+  font-weight: 600;
+  color: #d8f3e6;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+.mlpr-chart-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mlpr-chart-tooltip-row + .mlpr-chart-tooltip-row {
+  margin-top: 2px;
+}
+
+.mlpr-chart-tooltip-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.mlpr-chart-tooltip-value {
+  margin-left: 14px;
+  font-family: ui-monospace, monospace;
+  color: #d8f3e6;
+  font-variant-numeric: tabular-nums;
+}
+
 .mlpr-settings-tabs {
   display: flex;
   gap: 4px;

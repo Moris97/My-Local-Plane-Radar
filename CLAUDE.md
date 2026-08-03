@@ -1924,6 +1924,69 @@ development (the legend showed real numbers while the chart area itself was
 blank), not by the original tests, which only checked for absence of
 `NaN`. Regression tests were added for both.
 
+**Hover tooltip** (requested 2026-08-03): every bucketed chart
+(line/area/bar — "which bar/line is this and what's its exact value" was
+previously answerable only from the Y-axis's max/mid/zero labels and
+whatever the legend showed for the *last* bucket). Split the same way as
+everything else in this file: `chart.js` stays pure/DOM-free and only
+gains **more markup**, not behavior — each bucket gets an invisible
+full-height `<rect class="mlpr-chart-hit" data-i="N">` (`pointHitRegionsSvg`
+for line/area, inlined for bar), tiled edge-to-edge with no gaps
+(Voronoi-style: a bucket's region extends halfway to each neighbour, so
+hovering *near* a point, not just exactly on the line, still resolves to
+it). Line/area also get a per-bucket vertical guide (`cursorLinesSvg`) and
+one `<circle class="mlpr-chart-point" data-i="N">` per bucket per series
+(area's sits at the *top* of that series' own stacked slice — the one
+point on a filled stack that unambiguously belongs to one series rather
+than the combined total under it) — both hidden by default
+(`style.css`, `opacity: 0`) and revealed via a `.active` class. Bar charts
+skip the guide/points (the bars themselves are already the visual anchor)
+and instead get `class="mlpr-chart-bar" data-i="N"` on every bar so a
+hover can brighten the whole group at once (`filter: brightness(1.4)` on
+`.active`); their hit region is the bucket's whole group column, not just
+the bar itself, so hovering the gap between bars in a group still counts.
+
+All the actual DOM/pointer logic lives in `stats.js`'s `wireChartTooltip`,
+called once after every `el.innerHTML = renderXChartSvg(...)` (aircraft
+count, position, range, new registrations, the top-type/airline trend
+line view, and the antenna range-by-altitude bars). It deliberately
+**never recomputes which bucket a screen position belongs to** — it only
+reads the `data-i` back off whatever element a `pointerdown`/`pointermove`
+landed on (`event.target.closest('.mlpr-chart-hit')`), then toggles
+`.active` on every element sharing that index and builds the tooltip's
+rows from the `buckets`/`series` arrays already in the caller's closure.
+Same "the hit-test and the drawing must share one source of truth"
+reasoning as the trigger-area editor's rectangle bounds
+(`rectangleEdges`/`rectangleRing` computed once, used by both matching and
+drawing) — two independently-computed x-to-bucket mappings could silently
+disagree; reading back a real DOM attribute the renderer itself wrote
+can't. `pointerdown` is wired alongside `pointermove` specifically for
+touch, which has no hover state — a tap needs to raise the tooltip
+immediately, not only ever update once a drag is already under way.
+
+`series` arrays gained a `label` field (alongside the pre-existing
+`key`/`color`) at each call site, purely for the tooltip's row text — the
+separately-built legend HTML at those same call sites is untouched and
+still writes its own labels by hand, so this is additive, not a
+refactor of working code. The tooltip reuses whatever `formatValue`/
+`formatBucket` the chart itself was rendered with (imported
+`defaultFormatValue`/`formatBucketLabel` as the fallback when a call site
+didn't pass its own), so the number/date format in the tooltip can never
+disagree with the chart's own Y-axis/X-axis labels.
+
+Positioned from the real `pointermove`/`pointerdown` event's
+`clientX`/`clientY` relative to the chart wrapper's own
+`getBoundingClientRect()` — not derived from the SVG's internal
+`viewBox` coordinate space — so it's correct regardless of how the SVG
+happens to be scaled to its container (`preserveAspectRatio="none"`
+already means CSS pixels and viewBox units aren't 1:1). Clamped to stay
+inside the wrapper (`div[id^="mlpr-chart-"]`/`#mlpr-antenna-chart-bands`,
+given `position: relative` in `style.css` via that same attribute
+selector so the tooltip's `position: absolute` resolves against the chart
+card, not the page) so it can't spill past its own card at either edge —
+verified live (Playwright) by hovering the last bucket of a 31-day bar
+chart, which sits right at the card's edge.
+
 ### Stats v1.1: Now/Today/All-time sections, antenna stats, all-airlines
 
 The Stats view grew three new top sections (each a `.mlpr-stats-section` in
