@@ -24,8 +24,7 @@ feature-specific walkthroughs (starting with
 see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
 
 <p>
-  <img src="./docs/images/stats-panel.png" alt="Stats panel with history charts" width="49%">
-  <img src="./docs/images/list-panel.png" alt="List panel" width="49%">
+  <img src="./docs/images/map-view" alt="Map view screenshoot" width="49%">
 </p>
 
 ## Features
