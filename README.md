@@ -1,78 +1,15 @@
 # My Local Plane Radar (MLPR)
 
-**Version 2.0** — a self-hosted web interface for a local ADS-B receiver
-running on Raspberry Pi.
+**Version v2** — a self-hosted web interface for a local ADS-B receiver.
 
 MLPR reads the `aircraft.json` file produced by [readsb](https://github.com/wiedehopf/readsb)
 (wiedehopf fork) and serves a live map, receiver statistics, and a rule-based
 notification engine (ntfy, and now MQTT/smart-home) — without touching
 readsb itself.
 
-Live map with delta updates, signal-loss fading, altitude-colored trails, a
-basemap (online or fully offline), a bottom-bar UI (List/Stats/Settings),
-receiver stats with history charts, a notification engine (squawk
-7500/7600/7700, first-time-seen aircraft, new range record, and a
-configurable watch list matching aircraft type/registration/flight number),
-an opt-in password for the Settings panel, and a systemd service for
-production are all in place. See [CLAUDE.md](./CLAUDE.md) for the
-architecture and [TODO.md](./TODO.md) for what's explicitly deferred.
-
-**[Full user guide →](./docs/README.md)** — a tour of the map, the List and
-Stats panels, and every Settings tab, with screenshots. For deeper,
-feature-specific walkthroughs (starting with
-[Smart Home / MQTT integration](https://github.com/Moris97/My-Local-Plane-Radar/wiki/Smart-Home-Integration)),
-see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
-
 <p>
   <img src="./docs/images/map-view.png" alt="Map view screenshoot" width="49%">
 </p>
-
-## Features
-
-- **Live map** — MapLibre GL JS vector map, aircraft drawn as one of 17
-  hand-drawn shapes picked from the aircraft's actual type/category
-  (airliners by size, GA, bizjets, helicopters, gliders, drones, ground
-  vehicles, and more) rotating to heading, altitude-colored trails,
-  configurable map labels, a pulsing receiver-location marker, online
-  (detailed) or fully offline basemap, and an optional reception coverage
-  overlay showing how far your receiver has actually picked up aircraft in
-  each direction and altitude band.
-- **Aircraft details** — click any aircraft for identity, altitude, speed,
-  squawk, autopilot targets, signal quality, and (when a registration is
-  known) a photo fetched directly from
-  [Planespotters.net](https://www.planespotters.net/photo/api)'s free public
-  Photo API — disableable in Settings → Aircraft for a fully offline setup.
-- **List** — sortable, searchable table of everything currently in range.
-- **Stats** — live "right now" numbers (nearest/farthest aircraft, rolling
-  max range), today/all-time summaries, history charts with a doughnut ↔
-  line trend toggle, antenna range/signal breakdowns, and searchable tables
-  of every registration and airline ever seen, over 24h/7d/31d/1y/all-time
-  ranges.
-- **Notifications** — push alerts via [ntfy](https://ntfy.sh) for emergency
-  squawks (7500/7600/7700), first-time-seen aircraft, new range records,
-  and a configurable watch list (by type, registration, or flight number,
-  with an optional altitude condition).
-- **Smart home (MQTT)** — first-time-seen and watch-list events also
-  publish a structured MQTT message for Home Assistant (or any other
-  MQTT-speaking system) to react to — e.g. dim the lights and change their
-  color when a watched aircraft type appears nearby.
-- **Runs entirely on a Raspberry Pi 3** — 1 GB RAM, no Docker, no native
-  dependencies, SD-card-friendly (batched writes, no raw position history).
-
-See the [user guide](./docs/README.md) for a full walkthrough with
-screenshots, or [CLAUDE.md](./CLAUDE.md) for the architecture.
-
-## Before you start
-
-MLPR is a **display and notification layer** — it does not talk to an SDR
-dongle itself. It needs an existing, already-running
-[readsb](https://github.com/wiedehopf/readsb) installation on the same
-machine, producing `/run/readsb/aircraft.json`. If you don't have that yet,
-set up readsb (or another ADS-B decoder you can point `MLPR_SOURCE=http` at
-— see below) first; the
-[wiedehopf/adsb-scripts install guide](https://github.com/wiedehopf/adsb-scripts)
-is the usual starting point on a Raspberry Pi. Once `readsb` is running and
-you can see aircraft in its own web page, come back here.
 
 ## Installing on a Raspberry Pi (step by step)
 
@@ -165,6 +102,68 @@ git pull && sudo systemctl restart mlpr@$(whoami).service   # update to the late
 - **Still stuck** — open an
   [issue](https://github.com/Moris97/My-Local-Plane-Radar/issues) with what
   you tried and the relevant `journalctl` output.
+
+Live map with delta updates, signal-loss fading, altitude-colored trails, a
+basemap (online or fully offline), a bottom-bar UI (List/Stats/Settings),
+receiver stats with history charts, a notification engine (squawk
+7500/7600/7700, first-time-seen aircraft, new range record, and a
+configurable watch list matching aircraft type/registration/flight number),
+an opt-in password for the Settings panel, and a systemd service for
+production are all in place. See [CLAUDE.md](./CLAUDE.md) for the
+architecture and [TODO.md](./TODO.md) for what's explicitly deferred.
+
+**[Full user guide →](./docs/README.md)** — a tour of the map, the List and
+Stats panels, and every Settings tab, with screenshots. For deeper,
+feature-specific walkthroughs (starting with
+[Smart Home / MQTT integration](https://github.com/Moris97/My-Local-Plane-Radar/wiki/Smart-Home-Integration)),
+see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
+
+## Features
+
+- **Live map** — MapLibre GL JS vector map, aircraft drawn as one of 17
+  hand-drawn shapes picked from the aircraft's actual type/category
+  (airliners by size, GA, bizjets, helicopters, gliders, drones, ground
+  vehicles, and more) rotating to heading, altitude-colored trails,
+  configurable map labels, a pulsing receiver-location marker, online
+  (detailed) or fully offline basemap, and an optional reception coverage
+  overlay showing how far your receiver has actually picked up aircraft in
+  each direction and altitude band.
+- **Aircraft details** — click any aircraft for identity, altitude, speed,
+  squawk, autopilot targets, signal quality, and (when a registration is
+  known) a photo fetched directly from
+  [Planespotters.net](https://www.planespotters.net/photo/api)'s free public
+  Photo API — disableable in Settings → Aircraft for a fully offline setup.
+- **List** — sortable, searchable table of everything currently in range.
+- **Stats** — live "right now" numbers (nearest/farthest aircraft, rolling
+  max range), today/all-time summaries, history charts with a doughnut ↔
+  line trend toggle, antenna range/signal breakdowns, and searchable tables
+  of every registration and airline ever seen, over 24h/7d/31d/1y/all-time
+  ranges.
+- **Notifications** — push alerts via [ntfy](https://ntfy.sh) for emergency
+  squawks (7500/7600/7700), first-time-seen aircraft, new range records,
+  and a configurable watch list (by type, registration, or flight number,
+  with an optional altitude condition).
+- **Smart home (MQTT)** — first-time-seen and watch-list events also
+  publish a structured MQTT message for Home Assistant (or any other
+  MQTT-speaking system) to react to — e.g. dim the lights and change their
+  color when a watched aircraft type appears nearby.
+- **Runs entirely on a Raspberry Pi 3** — 1 GB RAM, no Docker, no native
+  dependencies, SD-card-friendly (batched writes, no raw position history).
+
+See the [user guide](./docs/README.md) for a full walkthrough with
+screenshots, or [CLAUDE.md](./CLAUDE.md) for the architecture.
+
+## Before you start
+
+MLPR is a **display and notification layer** — it does not talk to an SDR
+dongle itself. It needs an existing, already-running
+[readsb](https://github.com/wiedehopf/readsb) installation on the same
+machine, producing `/run/readsb/aircraft.json`. If you don't have that yet,
+set up readsb (or another ADS-B decoder you can point `MLPR_SOURCE=http` at
+— see below) first; the
+[wiedehopf/adsb-scripts install guide](https://github.com/wiedehopf/adsb-scripts)
+is the usual starting point on a Raspberry Pi. Once `readsb` is running and
+you can see aircraft in its own web page, come back here.
 
 ## Development (any machine, not just a Pi)
 
