@@ -24,9 +24,11 @@ const TREND_TOP_N = 5;
 // The directional coverage rose is rendered from the server's full 180-sector
 // resolution (server/src/antenna-stats.js's SECTOR_COUNT), which at 2° per
 // sector is dozens of slivers too thin to read as individual petals -- see
-// chart.js's mergeRoseSectors. 3 was picked directly on request as a coarse
-// "which broad direction sees farthest" view, not a finer compass rose.
-const ROSE_DISPLAY_SECTORS = 3;
+// chart.js's mergeRoseSectors. Went 3 -> 12 (30° per wedge, one per clock
+// position) on request once hover made the exact value discoverable either
+// way -- 12 gives a genuinely more legible compass shape than 3 without
+// going back to the original illegible slivers.
+const ROSE_DISPLAY_SECTORS = 12;
 
 const RANGES = ['24h', '7d', '31d', '1y', 'all'];
 const RANGE_LABEL_KEYS = {
@@ -256,6 +258,61 @@ function wireDoughnutTooltip(wrapEl, legendEl, slices) {
   wrapEl.addEventListener('pointerleave', onPointerLeave);
 }
 
+// Rose-chart equivalent of wireChartTooltip/wireDoughnutTooltip above --
+// keyed off chart.js's per-wedge .mlpr-rose-hit[data-i] hit regions, which
+// (unlike the visible .mlpr-rose-petal paths) always cover their full
+// wedge regardless of value, so a direction with nothing recorded yet is
+// still hoverable and honestly reports its value instead of being a silent
+// dead zone next to responsive ones.
+function wireRoseTooltip(wrapEl, items, { formatValue = defaultFormatValue } = {}) {
+  if (!wrapEl || items.length === 0) return;
+  const sectorAngle = 360 / items.length;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'mlpr-chart-tooltip';
+  wrapEl.appendChild(tooltip);
+
+  function setActiveIndex(index) {
+    for (const el of wrapEl.querySelectorAll('.active')) el.classList.remove('active');
+    if (index == null) return;
+    wrapEl.querySelector(`.mlpr-rose-petal[data-i="${index}"]`)?.classList.add('active');
+  }
+
+  function positionNear(clientX, clientY) {
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const left = Math.max(4, Math.min(clientX - wrapRect.left + 12, wrapRect.width - tooltip.offsetWidth - 4));
+    const top = Math.max(4, clientY - wrapRect.top - tooltip.offsetHeight - 12);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function showSector(index, clientX, clientY) {
+    const item = items[index];
+    if (!item) return;
+    const start = Math.round(index * sectorAngle);
+    const end = Math.round((index + 1) * sectorAngle);
+    tooltip.innerHTML = `<div class="mlpr-chart-tooltip-date">${start}°–${end}°</div><div class="mlpr-chart-tooltip-row">${escapeHtml(formatValue(item.value))}</div>`;
+    tooltip.classList.add('visible');
+    setActiveIndex(index);
+    positionNear(clientX, clientY);
+  }
+
+  function onPointerActive(event) {
+    const hit = event.target.closest('.mlpr-rose-hit');
+    if (!hit) return;
+    showSector(Number(hit.dataset.i), event.clientX, event.clientY);
+  }
+
+  function onPointerLeave() {
+    tooltip.classList.remove('visible');
+    setActiveIndex(null);
+  }
+
+  wrapEl.addEventListener('pointerdown', onPointerActive);
+  wrapEl.addEventListener('pointermove', onPointerActive);
+  wrapEl.addEventListener('pointerleave', onPointerLeave);
+}
+
 // hint (optional): a translated explanation shown in the same
 // .mlpr-info-icon hover/focus tooltip settings.js already uses throughout
 // Settings -- reused here rather than cramming the explanation into the
@@ -303,7 +360,7 @@ export function renderStatsPanel(container) {
       <div class="mlpr-tiles-grid mlpr-tiles-grid-wide" id="mlpr-now-aircraft-tiles"></div>
     </section>
 
-    <section class="mlpr-stats-section">
+    <section class="mlpr-stats-section mlpr-stats-section-divider">
       <div class="mlpr-stats-range" id="mlpr-stats-range"></div>
 
       <div class="mlpr-stats-subsection">
@@ -793,10 +850,10 @@ export function renderStatsPanel(container) {
     // (a smooth filled/outlined shape, not discrete wedges) keeps the full
     // 180-point resolution, since that's what makes it read as a shape
     // rather than a jagged VRS/tar1090-style starburst in the first place.
-    roseEl.innerHTML = renderRoseChartSvg(
-      mergeRoseSectors(data.sectors.map((s) => ({ value: s.topAvgRangeKm })), ROSE_DISPLAY_SECTORS),
-      { formatValue: (v) => formatDistance(v, units) },
-    );
+    const roseItems = mergeRoseSectors(data.sectors.map((s) => ({ value: s.topAvgRangeKm })), ROSE_DISPLAY_SECTORS);
+    const roseFormatValue = (v) => formatDistance(v, units);
+    roseEl.innerHTML = renderRoseChartSvg(roseItems, { formatValue: roseFormatValue });
+    wireRoseTooltip(roseEl, roseItems, { formatValue: roseFormatValue });
   }
 
   function watchEntryRowHtml(entry, airlines) {

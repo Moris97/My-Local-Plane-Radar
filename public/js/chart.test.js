@@ -173,7 +173,7 @@ test('renderRoseChartSvg returns an empty svg for no items', () => {
   assert.ok(!svg.includes('<path'));
 });
 
-test('renderRoseChartSvg draws one petal per item with a nonzero value, skipping zero-value sectors', () => {
+test('renderRoseChartSvg draws one visible petal per item with a nonzero value, skipping zero-value sectors', () => {
   const items = [
     { label: 'N', value: 100 },
     { label: 'E', value: 0 },
@@ -181,7 +181,21 @@ test('renderRoseChartSvg draws one petal per item with a nonzero value, skipping
     { label: 'W', value: 0 },
   ];
   const svg = renderRoseChartSvg(items);
-  assert.equal((svg.match(/<path/g) ?? []).length, 2);
+  assert.equal((svg.match(/mlpr-rose-petal/g) ?? []).length, 2);
+});
+
+test('renderRoseChartSvg emits one hit region per item regardless of value, tagged with its index', () => {
+  const items = [
+    { label: 'N', value: 100 },
+    { label: 'E', value: 0 },
+    { label: 'S', value: 50 },
+    { label: 'W', value: 0 },
+  ];
+  const svg = renderRoseChartSvg(items);
+  assert.equal((svg.match(/mlpr-rose-hit/g) ?? []).length, 4);
+  for (let i = 0; i < items.length; i++) {
+    assert.ok(svg.includes(`data-i="${i}"`), `expected a hit region for index ${i}`);
+  }
 });
 
 test('renderRoseChartSvg draws the four cardinal direction labels', () => {

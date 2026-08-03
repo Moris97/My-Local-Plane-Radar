@@ -1037,6 +1037,18 @@ html, body {
   margin-bottom: 28px;
 }
 
+/* Marks the boundary between "Now" (always live) and everything below it
+   that's scoped to the range selector -- previously just plain vertical
+   spacing, which read as one continuous list rather than two distinct
+   zones ("what's happening right now" vs "pick a period to look at").
+   border-top + its own padding-top, not a second margin, so the divider
+   line sits visually centered in the gap rather than flush against
+   whichever section happens to follow it. */
+.mlpr-stats-section-divider {
+  border-top: 1px solid #14212b;
+  padding-top: 24px;
+}
+
 .mlpr-stats-section-title {
   margin: 0 0 10px;
   color: #d8f3e6;
@@ -1150,6 +1162,18 @@ html, body {
   flex-shrink: 0;
 }
 
+.mlpr-rose-hit {
+  cursor: pointer;
+}
+
+.mlpr-rose-petal {
+  transition: filter 0.1s ease;
+}
+
+.mlpr-rose-petal.active {
+  filter: brightness(1.35);
+}
+
 .mlpr-chart-label {
   margin: 0 0 8px;
   color: #7fa3b3;
@@ -1168,8 +1192,17 @@ html, body {
 .mlpr-stats-range {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
   margin: 16px 0;
+}
+
+/* Centered to sit as a unit with the range selector directly above it --
+   every other .mlpr-stats-section-title (Now, Antenna statistics) stays
+   left-aligned, so this is scoped to the one id rather than the shared
+   class. */
+#mlpr-summary-title {
+  text-align: center;
 }
 
 .mlpr-range-btn {

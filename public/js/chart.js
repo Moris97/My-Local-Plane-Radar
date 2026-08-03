@@ -374,6 +374,8 @@ export function renderRoseChartSvg(items, { width = 260, height = 260, color = '
   // Bearing 0 = north = straight up in screen space, clockwise.
   const point = (bearingRad, radius) => [cx + radius * Math.sin(bearingRad), cy - radius * Math.cos(bearingRad)];
 
+  const largeArc = sectorAngle > Math.PI ? 1 : 0;
+
   const petals = items
     .map((item, i) => {
       const r = (Math.max(0, item.value) / maxValue) * maxRadius;
@@ -382,8 +384,27 @@ export function renderRoseChartSvg(items, { width = 260, height = 260, color = '
       const endAngle = (i + 1) * sectorAngle;
       const [x1, y1] = point(startAngle, r);
       const [x2, y2] = point(endAngle, r);
-      const largeArc = sectorAngle > Math.PI ? 1 : 0;
-      return `<path d="M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="1" />`;
+      return `<path class="mlpr-rose-petal" data-i="${i}" d="M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r.toFixed(1)} ${r.toFixed(1)} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="1" />`;
+    })
+    .join('');
+
+  // One full-radius, invisible hit region per wedge, drawn *after* (i.e. on
+  // top of, in SVG paint order) the visible petals -- unlike those, this
+  // always covers its wedge's full pie-slice regardless of the item's own
+  // value, so a zero-value direction (nothing recorded there yet, no
+  // visible petal at all -- see mergeRoseSectors) is still hoverable and
+  // reports "0" rather than being a silent dead zone next to responsive
+  // ones. Same "hit region separate from the visual mark" shape as every
+  // other chart in this file (pointHitRegionsSvg, the doughnut's own
+  // stroke-based slices), so stats.js's hover handling can stay one
+  // consistent pattern.
+  const hitRegions = items
+    .map((item, i) => {
+      const startAngle = i * sectorAngle;
+      const endAngle = (i + 1) * sectorAngle;
+      const [x1, y1] = point(startAngle, maxRadius);
+      const [x2, y2] = point(endAngle, maxRadius);
+      return `<path class="mlpr-rose-hit" data-i="${i}" d="M ${cx.toFixed(1)} ${cy.toFixed(1)} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${maxRadius.toFixed(1)} ${maxRadius.toFixed(1)} 0 ${largeArc} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z" fill="transparent" />`;
     })
     .join('');
 
@@ -411,6 +432,7 @@ export function renderRoseChartSvg(items, { width = 260, height = 260, color = '
   return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-rose-chart">
     ${rings}
     ${petals}
+    ${hitRegions}
     ${cardinals}
     ${maxLabel}
   </svg>`;
