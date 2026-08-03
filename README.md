@@ -53,7 +53,7 @@ ask for your `sudo` password near the end — that's expected, it's needed to
 install the systemd unit.
 
 **4. Open it in a browser.** From any device on the same network (phone,
-laptop):
+laptop). Default port 1090:
 
 ```
 http://<your-pi's-ip-address>:1090
