@@ -7,6 +7,7 @@ import {
   renderBarChartSvg,
   renderDoughnutSvg,
   renderRoseChartSvg,
+  mergeRoseSectors,
   doughnutSlices,
   formatBucketLabel,
   defaultFormatValue,
@@ -20,6 +21,12 @@ import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 const HISTORY_REFRESH_MS = 20000;
 const TABLE_PAGE_SIZE = 20;
 const TREND_TOP_N = 5;
+// The directional coverage rose is rendered from the server's full 180-sector
+// resolution (server/src/antenna-stats.js's SECTOR_COUNT), which at 2° per
+// sector is dozens of slivers too thin to read as individual petals -- see
+// chart.js's mergeRoseSectors. 3 was picked directly on request as a coarse
+// "which broad direction sees farthest" view, not a finer compass rose.
+const ROSE_DISPLAY_SECTORS = 3;
 
 const RANGES = ['24h', '7d', '31d', '1y', 'all'];
 const RANGE_LABEL_KEYS = {
@@ -108,6 +115,15 @@ function legendItemHtml(color, label, value) {
   return `<span class="mlpr-chart-legend-item"><span class="mlpr-chart-legend-swatch" style="background:${color}"></span>${escapeHtml(label)}${value != null ? `: ${escapeHtml(value)}` : ''}</span>`;
 }
 
+// Doughnut legends get their own row shape (label left, value + percent
+// right, laid out by the .mlpr-stat-chart-doughnut .mlpr-chart-legend grid
+// in style.css) rather than reusing legendItemHtml's plain chip -- a ranked
+// "which slice is which, and how big a share" list reads better than a
+// loose row of "label: value" chips once there's a percentage to show too.
+function doughnutLegendItemHtml(color, label, value, percent, i) {
+  return `<span class="mlpr-chart-legend-item" data-i="${i}"><span class="mlpr-chart-legend-swatch" style="background:${color}"></span><span class="mlpr-chart-legend-item-label">${escapeHtml(label)}</span><span class="mlpr-chart-legend-item-value">${escapeHtml(String(value))}</span><span class="mlpr-chart-legend-item-percent">${percent}%</span></span>`;
+}
+
 // Hover tooltip shared by every bucketed chart (line/area/bar): shows
 // exactly which bucket the pointer is over and each series' precise value
 // there, on request (2026-08-03) -- until now a chart's only readout was
@@ -182,8 +198,77 @@ function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormat
   wrapEl.addEventListener('pointerleave', onPointerLeave);
 }
 
-function tileHtml(label, value) {
-  return `<div class="mlpr-tile"><div class="mlpr-tile-label">${escapeHtml(label)}</div><div class="mlpr-tile-value">${escapeHtml(value)}</div></div>`;
+// Doughnut equivalent of wireChartTooltip above -- same shared-tooltip-
+// element/positioning shape, but keyed off chart.js's per-slice
+// .mlpr-doughnut-slice[data-i] circles instead of the bucketed charts'
+// invisible .mlpr-chart-hit rects (a doughnut needs no separate hit-region
+// geometry: each slice is stroke-only, so the browser's own hit-testing
+// already resolves a pointer event to just the painted arc). Also
+// highlights the matching legend row (data-i set by doughnutLegendItemHtml)
+// so hovering either the ring or the legend cross-highlights the other.
+function wireDoughnutTooltip(wrapEl, legendEl, slices) {
+  if (!wrapEl || slices.length === 0) return;
+  const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'mlpr-chart-tooltip';
+  wrapEl.appendChild(tooltip);
+
+  function setActiveIndex(index) {
+    for (const el of wrapEl.querySelectorAll('.active')) el.classList.remove('active');
+    if (legendEl) for (const el of legendEl.querySelectorAll('.active')) el.classList.remove('active');
+    if (index == null) return;
+    wrapEl.querySelector(`[data-i="${index}"]`)?.classList.add('active');
+    legendEl?.querySelector(`[data-i="${index}"]`)?.classList.add('active');
+  }
+
+  function positionNear(clientX, clientY) {
+    const wrapRect = wrapEl.getBoundingClientRect();
+    const left = Math.max(4, Math.min(clientX - wrapRect.left + 12, wrapRect.width - tooltip.offsetWidth - 4));
+    const top = Math.max(4, clientY - wrapRect.top - tooltip.offsetHeight - 12);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+  }
+
+  function showSlice(index, clientX, clientY) {
+    const slice = slices[index];
+    if (!slice) return;
+    const percent = Math.round((slice.value / total) * 100);
+    tooltip.innerHTML = `<div class="mlpr-chart-tooltip-date">${escapeHtml(slice.label)}</div><div class="mlpr-chart-tooltip-row">${escapeHtml(String(slice.value))} (${percent}%)</div>`;
+    tooltip.classList.add('visible');
+    setActiveIndex(index);
+    positionNear(clientX, clientY);
+  }
+
+  function onPointerActive(event) {
+    const hit = event.target.closest('.mlpr-doughnut-slice');
+    if (!hit) return;
+    showSlice(Number(hit.dataset.i), event.clientX, event.clientY);
+  }
+
+  function onPointerLeave() {
+    tooltip.classList.remove('visible');
+    setActiveIndex(null);
+  }
+
+  wrapEl.addEventListener('pointerdown', onPointerActive);
+  wrapEl.addEventListener('pointermove', onPointerActive);
+  wrapEl.addEventListener('pointerleave', onPointerLeave);
+}
+
+// hint (optional): a translated explanation shown in the same
+// .mlpr-info-icon hover/focus tooltip settings.js already uses throughout
+// Settings -- reused here rather than cramming the explanation into the
+// tile label itself, e.g. "Aircraft tracked" needing to say *why* it can
+// read lower than "Aircraft seen" (the ~3s/second-look confirmation gate).
+function tileHtml(label, value, hint) {
+  // Matches settings.js's existing .mlpr-info-icon call sites: hint is
+  // always a static, developer-authored t() string, never user data, so
+  // it's interpolated unescaped there too -- not a real HTML-injection
+  // path, just consistent with how every other info-icon tooltip in the
+  // app is already built.
+  const hintHtml = hint ? ` <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${hint}</span></button>` : '';
+  return `<div class="mlpr-tile"><div class="mlpr-tile-label">${escapeHtml(label)}${hintHtml}</div><div class="mlpr-tile-value">${escapeHtml(value)}</div></div>`;
 }
 
 // entry: an aircraft object (from geo.js's findNearestFarthest) with an
@@ -219,90 +304,75 @@ export function renderStatsPanel(container) {
     </section>
 
     <section class="mlpr-stats-section">
-      <h3 class="mlpr-stats-section-title">${t('statsToday')}</h3>
-      <div class="mlpr-tiles-grid" id="mlpr-today-tiles"></div>
-      <div class="mlpr-stats-grid">
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <p class="mlpr-chart-label">${t('chartTopType')}</p>
-          <div id="mlpr-today-chart-type"></div>
-          <div class="mlpr-chart-legend" id="mlpr-today-legend-type"></div>
-        </section>
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
-          <div id="mlpr-today-chart-airline"></div>
-          <div class="mlpr-chart-legend" id="mlpr-today-legend-airline"></div>
-        </section>
-      </div>
-    </section>
-
-    <section class="mlpr-stats-section">
-      <h3 class="mlpr-stats-section-title">${t('statsAllTime')}</h3>
-      <div class="mlpr-tiles-grid" id="mlpr-alltime-tiles"></div>
-      <div class="mlpr-stats-grid">
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <p class="mlpr-chart-label">${t('chartTopType')}</p>
-          <div id="mlpr-alltime-chart-type"></div>
-          <div class="mlpr-chart-legend" id="mlpr-alltime-legend-type"></div>
-        </section>
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
-          <div id="mlpr-alltime-chart-airline"></div>
-          <div class="mlpr-chart-legend" id="mlpr-alltime-legend-airline"></div>
-        </section>
-      </div>
-    </section>
-
-    <section class="mlpr-stats-section">
       <div class="mlpr-stats-range" id="mlpr-stats-range"></div>
 
-      <div class="mlpr-stats-grid">
-        <section class="mlpr-stat-chart">
-          <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
-          <div id="mlpr-chart-aircraft-count"></div>
-          <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
-        </section>
-
-        <section class="mlpr-stat-chart">
-          <p class="mlpr-chart-label">${t('chartPosition')}</p>
-          <div id="mlpr-chart-position"></div>
-          <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
-        </section>
-
-        <section class="mlpr-stat-chart">
-          <p class="mlpr-chart-label">${t('chartRange')}</p>
-          <div id="mlpr-chart-range"></div>
-          <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
-        </section>
-
-        <section class="mlpr-stat-chart">
-          <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
-          <div id="mlpr-chart-new-registrations"></div>
-        </section>
-
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <div class="mlpr-chart-header">
+      <div class="mlpr-stats-subsection">
+        <h3 class="mlpr-stats-section-title" id="mlpr-summary-title"></h3>
+        <div class="mlpr-tiles-grid" id="mlpr-summary-tiles"></div>
+        <div class="mlpr-stats-grid">
+          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
             <p class="mlpr-chart-label">${t('chartTopType')}</p>
-            <div class="mlpr-chart-view-toggle" data-chart="topType">
-              <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
-              <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
-            </div>
-          </div>
-          <div id="mlpr-chart-top-type"></div>
-          <div class="mlpr-chart-legend" id="mlpr-legend-top-type"></div>
-        </section>
-
-        <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-          <div class="mlpr-chart-header">
+            <div id="mlpr-summary-chart-type"></div>
+            <div class="mlpr-chart-legend" id="mlpr-summary-legend-type"></div>
+          </section>
+          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
             <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
-            <div class="mlpr-chart-view-toggle" data-chart="topAirline">
-              <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
-              <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
+            <div id="mlpr-summary-chart-airline"></div>
+            <div class="mlpr-chart-legend" id="mlpr-summary-legend-airline"></div>
+          </section>
+        </div>
+      </div>
+
+      <div class="mlpr-stats-subsection">
+        <div class="mlpr-stats-grid">
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
+            <div id="mlpr-chart-aircraft-count"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartPosition')}</p>
+            <div id="mlpr-chart-position"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartRange')}</p>
+            <div id="mlpr-chart-range"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
+            <div id="mlpr-chart-new-registrations"></div>
+          </section>
+
+          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
+            <div class="mlpr-chart-header">
+              <p class="mlpr-chart-label">${t('chartTopType')}</p>
+              <div class="mlpr-chart-view-toggle" data-chart="topType">
+                <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
+                <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
+              </div>
             </div>
-          </div>
-          <div id="mlpr-chart-top-airline"></div>
-          <div class="mlpr-chart-legend" id="mlpr-legend-top-airline"></div>
-          <p class="mlpr-chart-attribution">Airline data: <a href="https://openflights.org/data.php" target="_blank" rel="noopener">OpenFlights</a> (ODbL)</p>
-        </section>
+            <div id="mlpr-chart-top-type"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-top-type"></div>
+          </section>
+
+          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
+            <div class="mlpr-chart-header">
+              <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
+              <div class="mlpr-chart-view-toggle" data-chart="topAirline">
+                <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
+                <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
+              </div>
+            </div>
+            <div id="mlpr-chart-top-airline"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-top-airline"></div>
+            <p class="mlpr-chart-attribution">Airline data: <a href="https://openflights.org/data.php" target="_blank" rel="noopener">OpenFlights</a> (ODbL)</p>
+          </section>
+        </div>
       </div>
     </section>
 
@@ -434,6 +504,7 @@ export function renderStatsPanel(container) {
         currentRange = btn.dataset.range;
         persistRange(currentRange);
         drawRangeSelector();
+        drawSummarySection();
         drawCharts();
       });
     }
@@ -536,8 +607,16 @@ export function renderStatsPanel(container) {
     }
     const labeledItems = items.map((i) => ({ label: labelFor(i.key), value: i.count }));
     const slices = doughnutSlices(labeledItems, { otherLabel: t('otherSlice') });
-    el.innerHTML = renderDoughnutSvg(labeledItems, { otherLabel: t('otherSlice') });
-    legendEl.innerHTML = slices.map((s, i) => legendItemHtml(DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length], s.label, s.value)).join('');
+    const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
+    el.innerHTML = renderDoughnutSvg(labeledItems, {
+      otherLabel: t('otherSlice'),
+      centerLabel: String(total),
+      centerSublabel: t('doughnutTotal'),
+    });
+    legendEl.innerHTML = slices
+      .map((s, i) => doughnutLegendItemHtml(DOUGHNUT_COLORS[i % DOUGHNUT_COLORS.length], s.label, s.value, Math.round((s.value / total) * 100), i))
+      .join('');
+    wireDoughnutTooltip(el, legendEl, slices);
   }
 
   function drawLineTrend(elId, legendId, buckets, topKeys, labelFor) {
@@ -632,27 +711,36 @@ export function renderStatsPanel(container) {
     await drawAirlineChart();
   }
 
-  async function drawPeriodSection(period, tilesId, typeChartId, typeLegendId, airlineChartId, airlineLegendId) {
+  // One summary (tiles + top-type/top-airline doughnuts) for whichever
+  // range the selector directly above it is currently on -- replaces the
+  // old fixed "Today" + "All time" pair, which stayed on screen
+  // unconditionally regardless of the selector and never covered 7d/31d/1y
+  // at all. Server endpoint takes the exact same range values as every
+  // other stats fetch (see /api/stats/summary in server.js).
+  async function drawSummarySection() {
+    const titleEl = container.querySelector('#mlpr-summary-title');
+    if (titleEl) titleEl.textContent = t(RANGE_LABEL_KEYS[currentRange]);
+
     const { units } = getSettings();
-    const summary = await fetchJson(`/api/stats/summary?period=${period}`, null);
-    if (!summary) return;
+    const summary = await fetchJson(`/api/stats/summary?range=${currentRange}`, null);
+    const tilesEl = container.querySelector('#mlpr-summary-tiles');
+    if (!summary) {
+      tilesEl.innerHTML = '';
+      return;
+    }
+
+    tilesEl.innerHTML = [
+      tileHtml(t('tileAircraftSeen'), String(summary.aircraftSeenCount)),
+      tileHtml(t('tileAircraftTracked'), String(summary.aircraftTrackedCount), t('aircraftTrackedHint')),
+      tileHtml(t('tileUniqueFlights'), String(summary.uniqueFlightsCount)),
+      tileHtml(t('maxRange'), formatDistance(summary.maxRangeKm, units) ?? '–'),
+    ].join('');
 
     const airlines = await getAirlinesMap();
-
-    const tiles = [
-      tileHtml(t('chartAircraftCount'), String(summary.uniqueAircraftCount)),
-      tileHtml(t('tileUniqueFlights'), String(summary.uniqueFlightsCount)),
-      period === 'today'
-        ? tileHtml(t('chartNewRegistrations'), String(summary.newRegistrationsCount))
-        : tileHtml(t('tileUniqueRegistrations'), String(summary.registrationsCount)),
-      tileHtml(t('maxRange'), formatDistance(summary.maxRangeKm, units) ?? '–'),
-    ];
-    container.querySelector(`#${tilesId}`).innerHTML = tiles.join('');
-
-    drawDoughnut(`#${typeChartId}`, `#${typeLegendId}`, summary.topTypes.map((e) => ({ key: e.typeCode, count: e.count })), (c) => c);
+    drawDoughnut('#mlpr-summary-chart-type', '#mlpr-summary-legend-type', summary.topTypes.map((e) => ({ key: e.typeCode, count: e.count })), (c) => c);
     drawDoughnut(
-      `#${airlineChartId}`,
-      `#${airlineLegendId}`,
+      '#mlpr-summary-chart-airline',
+      '#mlpr-summary-legend-airline',
       summary.topAirlines.map((e) => ({ key: e.airlineIcao, count: e.count })),
       (icao) => airlines.get(icao)?.name ?? icao,
     );
@@ -697,9 +785,16 @@ export function renderStatsPanel(container) {
     // (not the single all-time max) -- the whole point of the redesign was
     // to avoid VRS's/tar1090's spiky single-sample plots; the map coverage
     // layer (Settings -> Map) is where the max is drawn too, as a separate
-    // thin outline around this same fill.
+    // thin outline around this same fill. Collapsed from the server's full
+    // 180-sector resolution down to ROSE_DISPLAY_SECTORS wide wedges
+    // (mergeRoseSectors) -- at full resolution this was dozens of
+    // near-invisible slivers blurring into visual noise, reported live.
+    // Only this Stats-page rose is coarsened; the on-map coverage polygon
+    // (a smooth filled/outlined shape, not discrete wedges) keeps the full
+    // 180-point resolution, since that's what makes it read as a shape
+    // rather than a jagged VRS/tar1090-style starburst in the first place.
     roseEl.innerHTML = renderRoseChartSvg(
-      data.sectors.map((s) => ({ value: s.topAvgRangeKm })),
+      mergeRoseSectors(data.sectors.map((s) => ({ value: s.topAvgRangeKm })), ROSE_DISPLAY_SECTORS),
       { formatValue: (v) => formatDistance(v, units) },
     );
   }
@@ -952,16 +1047,11 @@ export function renderStatsPanel(container) {
     { once: true },
   );
 
-  function drawPeriodSections() {
-    drawPeriodSection('today', 'mlpr-today-tiles', 'mlpr-today-chart-type', 'mlpr-today-legend-type', 'mlpr-today-chart-airline', 'mlpr-today-legend-airline');
-    drawPeriodSection('all', 'mlpr-alltime-tiles', 'mlpr-alltime-chart-type', 'mlpr-alltime-legend-type', 'mlpr-alltime-chart-airline', 'mlpr-alltime-legend-airline');
-  }
-
   wireChartViewToggles();
   loadHomeLocation();
   drawRangeSelector();
   drawCharts();
-  drawPeriodSections();
+  drawSummarySection();
   drawAntennaSection();
 
   const unsubscribeAircraft = onChange(drawNowSection);
@@ -974,7 +1064,7 @@ export function renderStatsPanel(container) {
   // on screen when it was backgrounded.
   function refreshAll() {
     drawCharts();
-    drawPeriodSections();
+    drawSummarySection();
     drawAntennaSection();
   }
 

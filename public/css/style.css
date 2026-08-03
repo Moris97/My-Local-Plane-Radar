@@ -1044,6 +1044,18 @@ html, body {
   font-weight: 600;
 }
 
+/* Today / All-time / the range-selected charts now live nested inside one
+   shared .mlpr-stats-section (below the range selector) instead of each
+   being its own top-level section -- this just keeps their vertical
+   spacing the same as before the merge. */
+.mlpr-stats-subsection {
+  margin-bottom: 24px;
+}
+
+.mlpr-stats-subsection:last-child {
+  margin-bottom: 0;
+}
+
 .mlpr-tiles-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
@@ -1237,9 +1249,17 @@ html, body {
   margin-bottom: 20px;
 }
 
-@media (min-width: 720px) {
+/* auto-fit (not auto-fill/a fixed repeat(2/3, 1fr)) is deliberate: it only
+   creates as many column tracks as the container can actually fit at
+   >=320px each, and collapses any tracks a section has no card for -- so a
+   2-card row (e.g. the Today/All-time doughnuts) still stretches to fill
+   a wide desktop panel evenly instead of leaving a fixed third column
+   permanently empty, while the 6-card range-charts grid below naturally
+   wraps into more columns on the same wide screen. Fixes the large dead
+   space a hardcoded 2-column layout left on wide/desktop screens. */
+@media (min-width: 640px) {
   .mlpr-stats-grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   }
 }
 
@@ -1275,9 +1295,30 @@ html, body {
 }
 
 .mlpr-doughnut {
-  width: 140px;
-  height: 140px;
+  width: 168px;
+  height: 168px;
   flex-shrink: 0;
+}
+
+.mlpr-doughnut-slice {
+  cursor: pointer;
+  transition: filter 0.1s ease;
+}
+
+.mlpr-doughnut-slice.active {
+  filter: brightness(1.35);
+}
+
+.mlpr-doughnut-center-value {
+  fill: #d8f3e6;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.mlpr-doughnut-center-label {
+  fill: #7fa3b3;
+  font-size: 9px;
 }
 
 .mlpr-chart-legend {
@@ -1289,10 +1330,47 @@ html, body {
   color: #9fb7c4;
 }
 
+/* A doughnut's legend is a ranked list, not a loose row of chips -- giving
+   it its own two-column grid (plus the percentage below) is what makes the
+   card's right-hand whitespace next to the bigger circle actually earn its
+   keep, instead of a handful of flex-wrapped chips leaving a ragged edge. */
+.mlpr-stat-chart-doughnut .mlpr-chart-legend {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px 16px;
+  flex: 1;
+  min-width: 160px;
+}
+
 .mlpr-chart-legend-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+}
+
+.mlpr-stat-chart-doughnut .mlpr-chart-legend-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.mlpr-chart-legend-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mlpr-chart-legend-item-value {
+  margin-left: auto;
+  color: #d8f3e6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mlpr-chart-legend-item-percent {
+  color: #5c7885;
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .mlpr-chart-legend-swatch {
@@ -1300,15 +1378,18 @@ html, body {
   height: 9px;
   border-radius: 2px;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 /* Positioning root for the hover tooltip below -- it's appended as an
    absolutely-positioned sibling of the chart <svg>, so this element (the
    div stats.js sets .innerHTML on) has to establish the containing block.
-   One shared selector rather than adding a class to each of the six chart
-   markup blocks in stats.js's template. */
-[id^="mlpr-chart-"],
-#mlpr-antenna-chart-bands {
+   One shared substring selector (every chart wrapper div's id contains
+   "-chart-": mlpr-chart-*, mlpr-today-chart-*, mlpr-alltime-chart-*,
+   mlpr-antenna-chart-*) rather than adding a class to each markup block in
+   stats.js's template, or an ever-growing explicit id list every time a
+   new chart (e.g. the Today/All-time doughnuts) is added. */
+[id*="-chart-"] {
   position: relative;
 }
 

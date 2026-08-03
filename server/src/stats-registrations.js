@@ -120,13 +120,6 @@ export function getNewRegistrationsBuckets(sinceMs, granularity) {
   });
 }
 
-// Plain count version of the above, for the "Ten dzień"/"Od początku" tiles
-// -- those want one number, not a time series.
-export function getNewRegistrationsCount(sinceMs) {
-  ensureLoaded();
-  return Array.from(cache.values()).filter((e) => e.firstSeenAt >= sinceMs).length;
-}
-
 // Same bucketing as getNewRegistrationsBuckets, but split into one series
 // per key (typeCode or airlineIcao) instead of one aggregate total -- feeds
 // the doughnut<->line toggle on the "most common type/airline" charts: the

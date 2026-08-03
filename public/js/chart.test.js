@@ -8,6 +8,7 @@ import {
   doughnutSlices,
   renderSparklineSvg,
   renderRoseChartSvg,
+  mergeRoseSectors,
   formatBucketLabel,
 } from './chart.js';
 
@@ -200,6 +201,43 @@ test('renderRoseChartSvg labels the outer ring with the max value, unit-formatte
 test('renderRoseChartSvg never produces NaN in its path data, even with a single item', () => {
   const svg = renderRoseChartSvg([{ label: 'N', value: 10 }]);
   assert.ok(!svg.includes('NaN'));
+});
+
+// ---- mergeRoseSectors: collapsing the raw 180-sector rose to a handful of wide wedges ----
+
+test('mergeRoseSectors groups sectors by index proportionally and averages only the populated ones', () => {
+  // 6 raw sectors -> 3 groups of 2. Group 0 (sectors 0,1): 10 and 0 (empty,
+  // excluded) -> average of just the populated one, 10. Group 1 (sectors
+  // 2,3): 20 and 40 -> 30. Group 2 (sectors 4,5): both empty -> 0.
+  const items = [{ value: 10 }, { value: 0 }, { value: 20 }, { value: 40 }, { value: 0 }, { value: 0 }];
+  const merged = mergeRoseSectors(items, 3);
+  assert.deepEqual(merged, [{ value: 10 }, { value: 30 }, { value: 0 }]);
+});
+
+test('mergeRoseSectors excludes zero (no-data) sub-sectors from the average rather than diluting it', () => {
+  // A single real 100km contact alongside 9 empty sub-sectors in the same
+  // wedge should still read as ~100km, not get dragged down to ~10km by
+  // averaging in the empty ones as literal zeros.
+  const items = [{ value: 100 }, ...Array.from({ length: 9 }, () => ({ value: 0 }))];
+  const merged = mergeRoseSectors(items, 1);
+  assert.deepEqual(merged, [{ value: 100 }]);
+});
+
+test('mergeRoseSectors reports 0 for a group with no populated sub-sectors at all, same as "no data yet"', () => {
+  const items = Array.from({ length: 6 }, () => ({ value: 0 }));
+  const merged = mergeRoseSectors(items, 3);
+  assert.deepEqual(merged, [{ value: 0 }, { value: 0 }, { value: 0 }]);
+});
+
+test('mergeRoseSectors handles a group count that does not evenly divide the sector count', () => {
+  const items = Array.from({ length: 5 }, (_, i) => ({ value: (i + 1) * 10 })); // 10,20,30,40,50
+  const merged = mergeRoseSectors(items, 3);
+  assert.equal(merged.length, 3);
+  assert.ok(merged.every((m) => Number.isFinite(m.value)));
+});
+
+test('mergeRoseSectors returns an empty array for no items', () => {
+  assert.deepEqual(mergeRoseSectors([], 3), []);
 });
 
 // ---- hover affordances: hit regions, cursor guide, per-bucket point markers ----

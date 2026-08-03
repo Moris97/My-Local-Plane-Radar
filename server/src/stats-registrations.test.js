@@ -123,14 +123,6 @@ test('getNewRegistrationsBuckets buckets by first-seen date, ignoring registrati
 
 const T2 = T1 + 200000 * MIN;
 
-test('getNewRegistrationsCount returns a plain count, ignoring registrations from before the cutoff', () => {
-  statsRegistrations.recordSighting('SP-A', {}, T2);
-  statsRegistrations.recordSighting('SP-B', {}, T2);
-  statsRegistrations.recordSighting('SP-C', {}, T2 - 1000 * MIN); // old, outside range
-
-  assert.equal(statsRegistrations.getNewRegistrationsCount(T2 - MIN), 2);
-});
-
 test('getNewRegistrationsBucketsByKey splits new-registration counts per key, restricted to topKeys', () => {
   const T3 = T2 + 200000 * MIN;
   statsRegistrations.recordSighting('SP-X1', { typeCode: 'B738' }, T3);

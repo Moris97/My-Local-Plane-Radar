@@ -11,7 +11,8 @@ const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
-const { hasSeenAircraft, setConfigJSON } = await import('../db.js');
+const { setConfigJSON } = await import('../db.js');
+const { hasSeenAircraft } = await import('../aircraft-tracked.js');
 const smartHome = await import('./smart-home.js');
 
 after(() => {

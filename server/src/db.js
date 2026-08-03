@@ -32,10 +32,33 @@ db.exec(`
   )
 `);
 
+// The *confirmed* aircraft tracker -- a hex only lands here once the
+// first-seen notification's own 3s "second look" delay has passed (see
+// notifications/rules.js's pendingFirstSeen), filtering out one-off Mode-S
+// blips. Exposed to Stats as "Aircraft tracked". last_seen_at lets that
+// tile answer "confirmed and still active in this range", the same way
+// seen_flights already does for callsigns.
 db.exec(`
   CREATE TABLE IF NOT EXISTS seen_aircraft (
     hex TEXT PRIMARY KEY,
-    first_seen_at INTEGER NOT NULL
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
+  )
+`);
+
+// The *raw* aircraft tracker -- unlike seen_aircraft above, every hex the
+// receiver ever gets a single message from lands here immediately, no
+// confirmation delay. Exposed to Stats as "Aircraft seen" -- deliberately a
+// separate table from seen_aircraft rather than the same one with a looser
+// query, so the two tiles' very different definitions ("every glimpse" vs
+// "confirmed contact") can never accidentally blur into each other. Always
+// a superset of seen_aircraft: every confirmed hex was necessarily raw-seen
+// at least once first.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS all_seen_aircraft (
+    hex TEXT PRIMARY KEY,
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
   )
 `);
 
@@ -52,13 +75,18 @@ db.exec(`
 
 // All-time distinct flight/callsign strings ever seen -- same shape and
 // purpose as seen_aircraft above, just keyed by callsign instead of hex, for
-// the Stats "unique flights seen" counters. Bounded the same way
-// registrations is: distinct callsigns a home receiver will ever observe,
-// not raw per-message history.
+// the Stats "unique flights" tile. Bounded the same way registrations is:
+// distinct callsigns a home receiver will ever observe, not raw per-message
+// history. last_seen_at (added alongside the range-scoped Stats summary,
+// mirroring registrations' own column) is what makes "unique flights in the
+// last 7 days" -- not just "ever" or "today" -- answerable at all; without
+// it there was no way to tell whether a callsign first seen months ago was
+// also active within some arbitrary recent window.
 db.exec(`
   CREATE TABLE IF NOT EXISTS seen_flights (
     flight TEXT PRIMARY KEY,
-    first_seen_at INTEGER NOT NULL
+    first_seen_at INTEGER NOT NULL,
+    last_seen_at INTEGER NOT NULL DEFAULT 0
   )
 `);
 
@@ -82,6 +110,19 @@ for (const [name, definition] of DAILY_STATS_NEW_COLUMNS) {
     db.exec(`ALTER TABLE daily_stats ADD COLUMN ${name} ${definition}`);
   }
 }
+
+// Same migration shape as DAILY_STATS_NEW_COLUMNS above, generalized: adds
+// a column to an existing table if it isn't already there. Installs from
+// before the range-scoped Stats summary have a seen_flights/seen_aircraft
+// table with no last_seen_at column.
+function ensureColumn(table, name, definition) {
+  const existing = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((col) => col.name));
+  if (!existing.has(name)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
+  }
+}
+ensureColumn('seen_flights', 'last_seen_at', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('seen_aircraft', 'last_seen_at', 'INTEGER NOT NULL DEFAULT 0');
 
 export function getConfig(key) {
   const row = db.prepare('SELECT value FROM config WHERE key = ?').get(key);
@@ -189,31 +230,70 @@ export function setConfigJSON(key, value) {
   setConfig(key, JSON.stringify(value));
 }
 
-export function hasSeenAircraft(hex) {
-  return db.prepare('SELECT 1 FROM seen_aircraft WHERE hex = ?').get(hex) !== undefined;
+// Runs fn() inside one transaction -- shared by the batched upsert
+// functions below (hard rule 5: no per-row writes scattered through the
+// poll loop, one commit per periodic flush instead).
+function runBatch(fn) {
+  db.exec('BEGIN');
+  try {
+    fn();
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }
 
-export function markAircraftSeen(hex) {
-  db.prepare('INSERT OR IGNORE INTO seen_aircraft (hex, first_seen_at) VALUES (?, ?)').run(hex, Date.now());
+// Raw read/write pairs for the three seen-tracker.js-backed caches
+// (seen-flights.js, aircraft-tracked.js, aircraft-seen.js) -- same shape
+// as getAllRegistrations/upsertRegistrations below, just without the
+// typeCode/airlineIcao/timesSeen fields those carry.
+export function getAllSeenFlights() {
+  return db.prepare('SELECT * FROM seen_flights').all();
 }
 
-// All-time distinct aircraft ever seen -- the "Ilość widzianych samolotów"
-// tile in Stats' "Od początku" section. seen_aircraft already exists for
-// first-seen notifications; this just counts it.
-export function getSeenAircraftCount() {
-  return db.prepare('SELECT COUNT(*) AS count FROM seen_aircraft').get().count;
+const upsertSeenFlightStmt = db.prepare(`
+  INSERT INTO seen_flights (flight, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+  ON CONFLICT(flight) DO UPDATE SET last_seen_at = excluded.last_seen_at
+`);
+
+export function upsertSeenFlights(entries) {
+  if (entries.length === 0) return;
+  runBatch(() => {
+    for (const entry of entries) upsertSeenFlightStmt.run(entry.flight, entry.firstSeenAt, entry.lastSeenAt);
+  });
 }
 
-export function hasSeenFlight(flight) {
-  return db.prepare('SELECT 1 FROM seen_flights WHERE flight = ?').get(flight) !== undefined;
+export function getAllSeenAircraft() {
+  return db.prepare('SELECT * FROM seen_aircraft').all();
 }
 
-export function markFlightSeen(flight) {
-  db.prepare('INSERT OR IGNORE INTO seen_flights (flight, first_seen_at) VALUES (?, ?)').run(flight, Date.now());
+const upsertSeenAircraftStmt = db.prepare(`
+  INSERT INTO seen_aircraft (hex, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+  ON CONFLICT(hex) DO UPDATE SET last_seen_at = excluded.last_seen_at
+`);
+
+export function upsertSeenAircraft(entries) {
+  if (entries.length === 0) return;
+  runBatch(() => {
+    for (const entry of entries) upsertSeenAircraftStmt.run(entry.hex, entry.firstSeenAt, entry.lastSeenAt);
+  });
 }
 
-export function getSeenFlightsCount() {
-  return db.prepare('SELECT COUNT(*) AS count FROM seen_flights').get().count;
+export function getAllAircraftSeenRaw() {
+  return db.prepare('SELECT * FROM all_seen_aircraft').all();
+}
+
+const upsertAircraftSeenRawStmt = db.prepare(`
+  INSERT INTO all_seen_aircraft (hex, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+  ON CONFLICT(hex) DO UPDATE SET last_seen_at = excluded.last_seen_at
+`);
+
+export function upsertAircraftSeenRaw(entries) {
+  if (entries.length === 0) return;
+  runBatch(() => {
+    for (const entry of entries) upsertAircraftSeenRawStmt.run(entry.hex, entry.firstSeenAt, entry.lastSeenAt);
+  });
 }
 
 const upsertRegistrationStmt = db.prepare(`
@@ -257,12 +337,6 @@ export function getAllRegistrations() {
 
 export function getRegistrationsSince(sinceMs) {
   return db.prepare('SELECT * FROM registrations WHERE last_seen_at >= ? ORDER BY last_seen_at DESC').all(sinceMs);
-}
-
-// All-time distinct registrations ever seen -- "unikalnych rejestracji" in
-// Stats' "Od początku" section.
-export function getRegistrationsCount() {
-  return db.prepare('SELECT COUNT(*) AS count FROM registrations').get().count;
 }
 
 // One row per airline ICAO code actually seen, aggregated straight from the

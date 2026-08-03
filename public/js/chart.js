@@ -294,7 +294,24 @@ export function renderBarChartSvg(
 // items: [{ label, value }]. Slices beyond maxSlices are folded into a
 // trailing "other" slice (labelled by the caller via otherLabel) so a long
 // tail of rare types/airlines doesn't turn the doughnut into confetti.
-export function renderDoughnutSvg(items, { width = 200, height = 200, colors = DOUGHNUT_COLORS, maxSlices = 6, otherLabel = 'Other' } = {}) {
+//
+// Each slice's <circle> carries class="mlpr-doughnut-slice" + data-i="N" --
+// since the slice is drawn stroke-only (fill="none"), the browser's default
+// SVG hit-testing (visiblePainted) already resolves pointer events to just
+// the painted arc, not the whole circle's bounding area, so no separate
+// hit-region geometry is needed the way the bucketed line/bar charts need
+// pointHitRegionsSvg. stats.js's wireDoughnutTooltip reads data-i back off
+// whatever slice a pointer event landed on, same shared-source-of-truth
+// reasoning as every other chart's hover handling in this file.
+//
+// centerLabel/centerSublabel (both pre-formatted strings, not raw
+// user-facing data -- callers only ever pass a formatted total count) render
+// centered in the ring's open middle, giving the card's biggest visual
+// element -- the circle itself -- something to say beyond decoration.
+export function renderDoughnutSvg(
+  items,
+  { width = 200, height = 200, colors = DOUGHNUT_COLORS, maxSlices = 6, otherLabel = 'Other', centerLabel = null, centerSublabel = null } = {},
+) {
   if (items.length === 0) return emptyChartSvg(width, height);
 
   const top = items.slice(0, maxSlices);
@@ -311,13 +328,18 @@ export function renderDoughnutSvg(items, { width = 200, height = 200, colors = D
   const arcs = slices
     .map((slice, i) => {
       const dash = (slice.value / total) * circumference;
-      const circle = `<circle cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="20" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})" />`;
+      const circle = `<circle class="mlpr-doughnut-slice" data-i="${i}" cx="${cx}" cy="${cy}" r="${radius}" fill="none" stroke="${colors[i % colors.length]}" stroke-width="20" stroke-dasharray="${dash.toFixed(2)} ${(circumference - dash).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})" />`;
       offset += dash;
       return circle;
     })
     .join('');
 
-  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-doughnut">${arcs}</svg>`;
+  const center = centerLabel
+    ? `<text x="${cx}" y="${cy - (centerSublabel ? 6 : 0)}" text-anchor="middle" dominant-baseline="central" class="mlpr-doughnut-center-value">${centerLabel}</text>` +
+      (centerSublabel ? `<text x="${cx}" y="${cy + 14}" text-anchor="middle" dominant-baseline="central" class="mlpr-doughnut-center-label">${centerSublabel}</text>` : '')
+    : '';
+
+  return `<svg viewBox="0 0 ${width} ${height}" class="mlpr-doughnut">${arcs}${center}</svg>`;
 }
 
 // Same slice-folding logic as renderDoughnutSvg, exposed separately so
@@ -329,15 +351,17 @@ export function doughnutSlices(items, { maxSlices = 6, otherLabel = 'Other' } = 
   return otherValue > 0 ? [...top, { label: otherLabel, value: otherValue }] : top;
 }
 
-// items: [{ label, value }], one per compass sector (typically 16, see
-// antenna-stats.js's SECTOR_LABELS), in clockwise order starting from due
-// north. Each sector is drawn as a filled pie-wedge ("petal") reaching out
+// items: [{ value }], one per wedge, in clockwise order starting from due
+// north. Each wedge is drawn as a filled pie-wedge ("petal") reaching out
 // to a radius proportional to its value -- the antenna "directional
 // coverage" chart, showing at a glance which direction the receiver sees
 // the farthest (and, just as usefully, which is shadowed by a building or
 // hill). Concentric rings mark 25/50/75/100% of the max value; N/E/S/W
-// labels orient the reader (a 16-point rose with every label would be
-// unreadably cluttered, so only the four cardinals are drawn).
+// labels orient the reader. This renderer doesn't care how many items it's
+// given -- server/src/antenna-stats.js's SECTOR_COUNT (180, for the on-map
+// coverage polygon's resolution) is far too many to render as legible
+// individual petals here, so stats.js pre-aggregates down to a handful via
+// mergeRoseSectors below before calling this.
 export function renderRoseChartSvg(items, { width = 260, height = 260, color = '#3ddc84', formatValue = defaultFormatValue } = {}) {
   if (items.length === 0) return emptyChartSvg(width, height);
 
@@ -390,6 +414,44 @@ export function renderRoseChartSvg(items, { width = 260, height = 260, color = '
     ${cardinals}
     ${maxLabel}
   </svg>`;
+}
+
+// Collapses a fine-grained sector array (server/src/antenna-stats.js's raw
+// 180) down to groupCount wide wedges for renderRoseChartSvg, in the same
+// clockwise-from-north order -- at full resolution the rose chart is
+// dozens of near-invisible slivers that blur into visual noise; a handful
+// of wide wedges reads as an actual shape.
+//
+// Sub-sectors with no recorded contact yet (value 0, antenna-stats.js's
+// convention for "nothing here") are excluded from the average rather than
+// counted as a real 0 -- most raw sub-sectors in any macro-wedge are still
+// empty on a typical home receiver (SECTOR_COUNT=180 is intentionally fine
+// enough that most individual slivers stay sparse for a long time, see
+// CLAUDE.md), so blending those zeros in would drag a wedge's figure down
+// to a fraction of what the receiver has actually demonstrated in that
+// direction. A wedge with no populated sub-sector at all still reports 0,
+// the same honest "no data here yet" signal a single empty sector already
+// gives -- this only changes how zeros get diluted once other, real
+// samples share the same wedge.
+//
+// Index-proportional grouping (`Math.floor(i * groupCount / items.length)`)
+// rather than a fixed chunk size: works whether or not items.length divides
+// evenly by groupCount, so this doesn't need revisiting if SECTOR_COUNT
+// ever changes again.
+export function mergeRoseSectors(items, groupCount) {
+  if (groupCount <= 0 || items.length === 0) return [];
+
+  const sums = new Array(groupCount).fill(0);
+  const counts = new Array(groupCount).fill(0);
+  items.forEach((item, i) => {
+    const group = Math.min(groupCount - 1, Math.floor((i * groupCount) / items.length));
+    if (item.value > 0) {
+      sums[group] += item.value;
+      counts[group] += 1;
+    }
+  });
+
+  return sums.map((sum, i) => ({ value: counts[i] > 0 ? sum / counts[i] : 0 }));
 }
 
 export function renderSparklineSvg(values, { width = 280, height = 48, color = '#3ddc84' } = {}) {

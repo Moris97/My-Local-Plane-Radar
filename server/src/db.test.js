@@ -177,34 +177,44 @@ test('upsertDailyStats stores unique aircraft/flights counts, defaulting to 0', 
   assert.equal(defaulted.unique_flights_count, 0);
 });
 
-test('seen_aircraft: hasSeenAircraft/markAircraftSeen/getSeenAircraftCount', () => {
-  const before = db.getSeenAircraftCount();
-  assert.equal(db.hasSeenAircraft('deadbe'), false);
-  db.markAircraftSeen('deadbe');
-  assert.equal(db.hasSeenAircraft('deadbe'), true);
-  assert.equal(db.getSeenAircraftCount(), before + 1);
-  // Marking the same hex again must not double-count.
-  db.markAircraftSeen('deadbe');
-  assert.equal(db.getSeenAircraftCount(), before + 1);
+test('seen_aircraft: getAllSeenAircraft/upsertSeenAircraft round-trip, including advancing last_seen_at on conflict', () => {
+  db.upsertSeenAircraft([{ hex: 'deadbf', firstSeenAt: 100, lastSeenAt: 100 }]);
+  let row = db.getAllSeenAircraft().find((r) => r.hex === 'deadbf');
+  assert.equal(row.first_seen_at, 100);
+  assert.equal(row.last_seen_at, 100);
+
+  db.upsertSeenAircraft([{ hex: 'deadbf', firstSeenAt: 100, lastSeenAt: 900 }]);
+  const rows = db.getAllSeenAircraft().filter((r) => r.hex === 'deadbf');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].last_seen_at, 900);
 });
 
-test('seen_flights: hasSeenFlight/markFlightSeen/getSeenFlightsCount', () => {
-  const before = db.getSeenFlightsCount();
-  assert.equal(db.hasSeenFlight('RYR4521'), false);
-  db.markFlightSeen('RYR4521');
-  assert.equal(db.hasSeenFlight('RYR4521'), true);
-  assert.equal(db.getSeenFlightsCount(), before + 1);
-  db.markFlightSeen('RYR4521');
-  assert.equal(db.getSeenFlightsCount(), before + 1);
+test('all_seen_aircraft: getAllAircraftSeenRaw/upsertAircraftSeenRaw round-trip, a separate table from seen_aircraft', () => {
+  db.upsertAircraftSeenRaw([{ hex: 'cafe01', firstSeenAt: 200, lastSeenAt: 200 }]);
+  const row = db.getAllAircraftSeenRaw().find((r) => r.hex === 'cafe01');
+  assert.equal(row.first_seen_at, 200);
+  // Writing to all_seen_aircraft must not create a row in seen_aircraft --
+  // the two tables track deliberately different, independent definitions.
+  assert.equal(db.getAllSeenAircraft().find((r) => r.hex === 'cafe01'), undefined);
 });
 
-test('getRegistrationsCount reflects the number of distinct registrations stored', () => {
-  const before = db.getRegistrationsCount();
-  db.upsertRegistration('SP-COUNTME', { typeCode: 'B738', airlineIcao: 'LOT', firstSeenAt: 1, lastSeenAt: 1, timesSeen: 1 });
-  assert.equal(db.getRegistrationsCount(), before + 1);
-  // Re-upserting the same registration must not double-count.
-  db.upsertRegistration('SP-COUNTME', { typeCode: 'B738', airlineIcao: 'LOT', firstSeenAt: 1, lastSeenAt: 2, timesSeen: 2 });
-  assert.equal(db.getRegistrationsCount(), before + 1);
+test('seen_flights: getAllSeenFlights/upsertSeenFlights round-trip, including advancing last_seen_at on conflict', () => {
+  db.upsertSeenFlights([{ flight: 'RYR4521', firstSeenAt: 100, lastSeenAt: 100 }]);
+  let row = db.getAllSeenFlights().find((r) => r.flight === 'RYR4521');
+  assert.equal(row.first_seen_at, 100);
+  assert.equal(row.last_seen_at, 100);
+
+  // Re-upserting the same flight must advance last_seen_at without
+  // duplicating the row or resetting first_seen_at.
+  db.upsertSeenFlights([{ flight: 'RYR4521', firstSeenAt: 100, lastSeenAt: 900 }]);
+  const rows = db.getAllSeenFlights().filter((r) => r.flight === 'RYR4521');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].first_seen_at, 100);
+  assert.equal(rows[0].last_seen_at, 900);
+});
+
+test('seen_flights: upsertSeenFlights with an empty array is a no-op', () => {
+  assert.doesNotThrow(() => db.upsertSeenFlights([]));
 });
 
 test('getAllAirlinesSummary groups registrations by airline, excluding unmatched ones', () => {

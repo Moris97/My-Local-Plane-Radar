@@ -24,14 +24,15 @@ import {
   getAirlineCounts,
   getNewRegistrationsBuckets,
   getNewRegistrationsBucketsByKey,
-  getNewRegistrationsCount,
   getRegistrationsList,
 } from './stats-registrations.js';
+import { getSeenFlightsCount } from './seen-flights.js';
+import { getAircraftSeenCount } from './aircraft-seen.js';
+import { getAircraftTrackedCount } from './aircraft-tracked.js';
 import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
-import { getTodayStartMs, getDailyUniqueCounts, getRangeSummary } from './stats-history.js';
-import { getSeenAircraftCount, getSeenFlightsCount, getRegistrationsCount, getAllAirlinesSummary } from './db.js';
+import { getAllAirlinesSummary } from './db.js';
 import { getAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
 import { destinationPoint } from './range.js';
@@ -311,24 +312,40 @@ export async function buildServer({ logger = true } = {}) {
   // per-airline view -- see db.js's getAllAirlinesSummary.
   app.get('/api/stats/all-airlines', async () => getAllAirlinesSummary());
 
-  const VALID_SUMMARY_PERIODS = new Set(['today', 'all']);
-  app.get('/api/stats/summary', async (request, reply) => {
-    const period = request.query?.period;
-    if (!VALID_SUMMARY_PERIODS.has(period)) {
-      return reply.code(400).send({ error: 'period must be "today" or "all"' });
-    }
-
-    const sinceMs = period === 'today' ? getTodayStartMs() : 0;
-    const uniqueCounts = period === 'today'
-      ? getDailyUniqueCounts()
-      : { uniqueAircraftCount: getSeenAircraftCount(), uniqueFlightsCount: getSeenFlightsCount() };
+  // One summary for whichever range the Stats panel's own selector is
+  // currently on (same 24h/7d/31d/1y/all as every other stats endpoint,
+  // via the shared parseStatsRange/VALID_STATS_RANGES) -- replaces the old
+  // period=today|all split, which only ever answered two fixed windows and
+  // left every range in between (7d/31d/1y) with nothing to show here at
+  // all.
+  //
+  // 'all' keeps reading the notification engine's own getAllTimeMaxRangeKm
+  // rather than deriving a max from daily_stats buckets like every other
+  // range does below -- that value already comes from the exact same
+  // self-computed, MLAT-excluded per-tick sampling as daily_stats itself
+  // (see recordRangeAndRegistrationSightings), so re-deriving it a second,
+  // slightly different way here would risk exactly the kind of "two
+  // independently-computed range figures disagree" bug that reusing a
+  // single source of truth already fixed once before.
+  app.get('/api/stats/summary', async (request) => {
+    const range = parseStatsRange(request);
+    const sinceMs = rangeStartMs(range);
+    const maxRangeKm = range === 'all'
+      ? getAllTimeMaxRangeKm()
+      : Math.max(0, ...getStatsHistoryForRange(range).map((bucket) => bucket.maxRangeKm ?? 0));
 
     return {
-      uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
-      uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
-      newRegistrationsCount: getNewRegistrationsCount(sinceMs),
-      registrationsCount: period === 'today' ? null : getRegistrationsCount(),
-      maxRangeKm: period === 'today' ? getRangeSummary().maxRangeKm : getAllTimeMaxRangeKm(),
+      // Two deliberately different aircraft counts, not one: aircraftSeen
+      // is every hex the receiver ever glimpsed at all (aircraft-seen.js,
+      // no gate); aircraftTracked is the subset confirmed by the
+      // first-seen notification's own ~3s/second-look delay
+      // (aircraft-tracked.js) -- named and shown separately so the two
+      // numbers read as "everything glimpsed" vs "solid contacts" instead
+      // of one ambiguous "how many aircraft" tile.
+      aircraftSeenCount: getAircraftSeenCount(sinceMs),
+      aircraftTrackedCount: getAircraftTrackedCount(sinceMs),
+      uniqueFlightsCount: getSeenFlightsCount(sinceMs),
+      maxRangeKm,
       topTypes: getTypeCounts(sinceMs),
       topAirlines: getAirlineCounts(sinceMs),
     };

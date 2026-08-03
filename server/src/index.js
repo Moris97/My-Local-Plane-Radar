@@ -15,7 +15,10 @@ import {
   snapshotForPersistence,
   restoreFromSnapshot,
 } from './stats-history.js';
-import { upsertDailyStats, getConfigJSON, setConfigJSON, markFlightSeen, hasSeenFlight } from './db.js';
+import { upsertDailyStats, getConfigJSON, setConfigJSON } from './db.js';
+import { noteFlightSeen, flushDirtySeenFlights } from './seen-flights.js';
+import { noteAircraftSeen, flushDirtyAircraftSeen } from './aircraft-seen.js';
+import { touchAircraftTracked, flushDirtyAircraftTracked } from './aircraft-tracked.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
@@ -134,11 +137,21 @@ function recordRangeAndRegistrationSightings() {
       });
     }
 
-    // Guarded the same way rules.js guards markAircraftSeen: a cheap SELECT
-    // every tick, but the INSERT (an actual SD write) only ever fires once
-    // per callsign, the first time it's seen -- not a per-tick write for
-    // every already-known aircraft (hard rule 5).
-    if (aircraft.flight && !hasSeenFlight(aircraft.flight)) markFlightSeen(aircraft.flight);
+    // seen-flights.js caches this in memory and batches the actual SD
+    // write on the same periodic flush as registrations (hard rule 5) --
+    // unlike the old hasSeenFlight/markFlightSeen guard this replaced, it
+    // also advances last_seen_at on every sighting, not just the first.
+    if (aircraft.flight) noteFlightSeen(aircraft.flight);
+
+    // Two independent hex trackers, feeding Stats' "Aircraft seen" vs
+    // "Aircraft tracked" tiles: noteAircraftSeen is unconditional (every
+    // hex, however briefly glimpsed); touchAircraftTracked only advances an
+    // entry that notifications/rules.js's own first-seen delay has already
+    // confirmed (a no-op otherwise) -- creating that entry stays gated
+    // there, this just keeps its last_seen_at current once it exists.
+    noteAircraftSeen(aircraft.hex);
+    touchAircraftTracked(aircraft.hex);
+
     recordDailyUnique(aircraft.hex, aircraft.flight);
   }
 
@@ -209,6 +222,9 @@ function flushDailyStats() {
   });
 
   flushDirtyRegistrations();
+  flushDirtySeenFlights();
+  flushDirtyAircraftSeen();
+  flushDirtyAircraftTracked();
 }
 
 function flushStatsHistorySnapshot() {

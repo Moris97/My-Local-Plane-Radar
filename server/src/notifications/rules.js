@@ -1,4 +1,5 @@
-import { hasSeenAircraft, markAircraftSeen, getConfig, setConfig } from '../db.js';
+import { getConfig, setConfig } from '../db.js';
+import { hasSeenAircraft, markAircraftSeen } from '../aircraft-tracked.js';
 import { getNotificationSettings, getNtfyTopic } from './settings.js';
 import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
