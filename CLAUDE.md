@@ -1271,3 +1271,13 @@ end users.
 - Whenever the user says something is deferred ("we'll do that later",
   "improve it later"), add it to `TODO.md` immediately rather than letting
   it evaporate.
+- **Every version bump gets a git tag and a GitHub release, not just a
+  `package.json` commit.** `git tag -a vX.Y.Z -m vX.Y.Z && git push origin
+  vX.Y.Z`, then `gh release create vX.Y.Z --title "..." --notes "..."` —
+  same push-immediately, don't-ask-each-time default as commits. Release
+  notes are real prose grouped by feature/theme (see past releases on
+  GitHub for the pattern: a short "Patch release on top of vX.Y.(Z-1)"
+  line, then a `##` heading per notable change with a plain-English
+  explanation), not a bare commit list. Missed once (v2.1.6 shipped a
+  commit and a push but no tag/release until asked) — check this is
+  actually done, not just intended, whenever a version bump happens.
