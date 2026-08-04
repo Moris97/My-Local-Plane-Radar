@@ -369,6 +369,16 @@ deferred by the user in the same conversation.
   messages" chart would show a step at the upgrade and should either start
   from that date or say so.
 
+## Experimental, may be removed
+
+- **Stacked coverage bands** (Settings → Map → Coverage altitude band →
+  "All, stacked", added v2.1.11) — every altitude band's shape layered on
+  the map at once, highest altitude furthest back. Added to answer one
+  question: is a layered view legible at all, or does it just read as mud?
+  If it turns out to be the latter, `coverageBand: 'stacked'`, the
+  `?band=stacked` endpoint branch, and `stackedCoverageFeatures` can all be
+  removed cleanly — nothing else depends on them.
+
 ### Measured and deliberately NOT done
 
 - **Row-diffing the List table instead of rebuilding it.** Proposed as a

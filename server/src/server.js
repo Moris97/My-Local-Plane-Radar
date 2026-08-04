@@ -464,14 +464,34 @@ export async function buildServer({ logger = true } = {}) {
 
   app.get('/api/stats/antenna/coverage', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const home = getEffectiveHome();
+    const bandParam = request.query?.band;
+
+    // Experimental "every band at once" view (see CLAUDE.md): the client
+    // wants all nine bands' fill shapes in one response so it can layer
+    // them client-side (highest altitude furthest back, lowest on top) and
+    // judge whether that's even legible. Its own response shape -- an
+    // array, no maxPolygon, since the stacked view deliberately skips the
+    // dashed outlines entirely -- rather than the client looping the
+    // single-band request nine times, consistent with this app's general
+    // "one round trip, not a fan-out" discipline even though the saving
+    // here is small.
+    if (bandParam === 'stacked') {
+      if (!home) return { bands: [] };
+      return {
+        bands: ALTITUDE_BANDS.map((_, bandIndex) => ({
+          band: bandIndex,
+          fillPolygon: coverageRing(getSectorStats(bandIndex), home, (s) => s.topAvgRangeKm),
+        })),
+      };
+    }
+
     if (!home) return { fillPolygon: null, maxPolygon: null };
 
-    const bandParam = request.query?.band;
     let bandIndex = null;
     if (bandParam !== undefined && bandParam !== 'all') {
       const parsed = Number(bandParam);
       if (!Number.isInteger(parsed) || parsed < 0 || parsed >= ALTITUDE_BANDS.length) {
-        return reply.code(400).send({ error: `band must be "all" or an integer 0..${ALTITUDE_BANDS.length - 1}` });
+        return reply.code(400).send({ error: `band must be "all", "stacked", or an integer 0..${ALTITUDE_BANDS.length - 1}` });
       }
       bandIndex = parsed;
     }

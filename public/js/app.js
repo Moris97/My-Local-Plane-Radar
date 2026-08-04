@@ -244,6 +244,30 @@ function coverageColor(band) {
   return band === 'all' ? COVERAGE_ALL_COLOR : colorForAltitude(COVERAGE_BAND_MIDPOINT_FT[band]);
 }
 
+// Experimental "every band at once" view (Settings -> Map -> Coverage
+// altitude band -> "All, stacked"), added to see whether a layered view is
+// even legible before investing in anything more polished -- may well be
+// removed if it isn't. Ordered highest altitude first (band 8, the
+// farthest-reaching, largest shape) so it paints as the back layer, with
+// each progressively lower/shorter-reaching band layered on top -- the
+// opposite order would let the biggest shape's fill paint over every
+// smaller one last. GeoJSON feature order is render order for a fill
+// layer in MapLibre, so this array's order is the actual z-order, not
+// just a sort for its own sake. Deliberately fill-only, no `kind: 'max'`
+// dashed-outline features: nine overlapping dashed outlines on top of nine
+// overlapping fills would fight the one thing this experiment exists to
+// judge -- whether the fills alone read as anything.
+function stackedCoverageFeatures(bands) {
+  return [...(bands ?? [])]
+    .sort((a, b) => b.band - a.band)
+    .filter((entry) => entry.fillPolygon)
+    .map((entry) => ({
+      type: 'Feature',
+      properties: { kind: 'fill', color: colorForAltitude(COVERAGE_BAND_MIDPOINT_FT[entry.band]) },
+      geometry: { type: 'Polygon', coordinates: [entry.fillPolygon] },
+    }));
+}
+
 let coverageGeoJSON = { type: 'FeatureCollection', features: [] };
 let lastRequestedShowCoverage = null;
 let lastRequestedCoverageBand = null;
@@ -263,17 +287,22 @@ async function refreshCoverage() {
     const response = await fetch(`/api/stats/antenna/coverage?band=${coverageBand}`);
     if (!response.ok) return; // 401 (Settings password set, not logged in) or offline -- leave whatever was last shown
     const data = await response.json();
-    const color = coverageColor(coverageBand);
-    coverageGeoJSON =
-      data.fillPolygon && data.maxPolygon
-        ? {
-            type: 'FeatureCollection',
-            features: [
-              { type: 'Feature', properties: { kind: 'fill', color }, geometry: { type: 'Polygon', coordinates: [data.fillPolygon] } },
-              { type: 'Feature', properties: { kind: 'max', color }, geometry: { type: 'Polygon', coordinates: [data.maxPolygon] } },
-            ],
-          }
-        : { type: 'FeatureCollection', features: [] }; // no home location configured
+
+    if (coverageBand === 'stacked') {
+      coverageGeoJSON = { type: 'FeatureCollection', features: stackedCoverageFeatures(data.bands) };
+    } else {
+      const color = coverageColor(coverageBand);
+      coverageGeoJSON =
+        data.fillPolygon && data.maxPolygon
+          ? {
+              type: 'FeatureCollection',
+              features: [
+                { type: 'Feature', properties: { kind: 'fill', color }, geometry: { type: 'Polygon', coordinates: [data.fillPolygon] } },
+                { type: 'Feature', properties: { kind: 'max', color }, geometry: { type: 'Polygon', coordinates: [data.maxPolygon] } },
+              ],
+            }
+          : { type: 'FeatureCollection', features: [] }; // no home location configured
+    }
     map.getSource(COVERAGE_SOURCE_ID)?.setData(coverageGeoJSON);
   } catch {
     // Offline/unreachable -- leave whatever was last shown rather than flapping.

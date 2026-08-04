@@ -148,6 +148,7 @@ function renderSettingsForm(container) {
         <label>${t('coverageBand')}
           <select id="mlpr-coverage-band">
             <option value="all" ${settings.coverageBand === 'all' ? 'selected' : ''}>${t('coverageBandAll')}</option>
+            <option value="stacked" ${settings.coverageBand === 'stacked' ? 'selected' : ''}>${t('coverageBandStacked')}</option>
             ${COVERAGE_BAND_LABEL_KEYS.map(
               (key, i) => `<option value="${i}" ${settings.coverageBand === i ? 'selected' : ''}>${t(key)}</option>`,
             ).join('')}
@@ -690,7 +691,8 @@ function wireDisplaySettings(container) {
   });
 
   container.querySelector('#mlpr-coverage-band').addEventListener('change', (event) => {
-    updateSettings({ coverageBand: event.target.value === 'all' ? 'all' : Number(event.target.value) });
+    const raw = event.target.value;
+    updateSettings({ coverageBand: raw === 'all' || raw === 'stacked' ? raw : Number(raw) });
   });
 
   container.querySelector('#mlpr-fetch-photos').addEventListener('change', (event) => {

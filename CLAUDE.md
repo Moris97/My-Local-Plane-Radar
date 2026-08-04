@@ -1352,15 +1352,42 @@ Below `MIN_COVERAGE_SECTORS` (8) sampled sectors nothing is drawn at all —
 joining three or four scattered bearings would claim coverage across every
 direction between them.
 
-**Client**: `showCoverage` (default off) and `coverageBand` (`'all'` or an
-`ALTITUDE_BANDS` index) in `settings-state.js`. Color from
-`trail.js`'s `colorForAltitude`, fed a representative midpoint altitude
-per band (`COVERAGE_BAND_MIDPOINT_FT`); "all altitudes" gets a fixed
-neutral green. Re-fetched when the settings change **and** on a
+**Client**: `showCoverage` (default off) and `coverageBand` (`'all'`,
+`'stacked'`, or an `ALTITUDE_BANDS` index) in `settings-state.js`. Color
+from `trail.js`'s `colorForAltitude`, fed a representative midpoint
+altitude per band (`COVERAGE_BAND_MIDPOINT_FT`); "all altitudes" gets a
+fixed neutral green. Re-fetched when the settings change **and** on a
 `COVERAGE_REFRESH_INTERVAL_MS` (15s) timer while on — a tab left open needs
 to catch up with new farther contacts recorded server-side, nothing else
 would drive a refresh. Cached GeoJSON is reapplied by `ensureCoverageLayer`
 whenever the style resets (`setStyle` wipes sources on basemap switch).
+
+**`'stacked'` is an explicitly experimental option** (labelled as such in
+the dropdown), added 2026-08-05 to answer one question: is every altitude
+band's shape layered on the map at once even legible, or does it just
+become mud? Reasoning it's testing rather than shipping as a finished
+feature: the polygon is a *historical* envelope (best-ever/best-recent
+recorded contacts), not a live reception prediction, so a live aircraft
+sitting outside every layer is expected, not a bug — reported live right
+after the "skip empty sectors" fix below, and worth remembering if this
+gets revisited. `GET /api/stats/antenna/coverage?band=stacked` answers
+`{ bands: [{ band, fillPolygon }, ...] }` for all nine `ALTITUDE_BANDS` in
+one request (`band` in ascending index order, `fillPolygon` null for a
+band under `MIN_COVERAGE_SECTORS`) — its own response shape, no
+`maxPolygon`, rather than the client looping the single-band request nine
+times, same "one round trip, not a fan-out" discipline as everywhere else
+in this app. `app.js`'s `stackedCoverageFeatures` sorts the response
+**descending by band index** before building GeoJSON features — highest
+altitude (band 8, the farthest-reaching, largest shape) first, so it
+paints as the back layer, with each progressively lower/shorter-reaching
+band layered on top of it. This is load-bearing, not cosmetic: GeoJSON
+feature order is render order for one MapLibre fill layer, alpha-blended
+"draw over" compositing is not order-independent, and the reverse order
+would let the biggest shape paint over every smaller one last. Skips a
+`null` band's entry (not yet `MIN_COVERAGE_SECTORS` sampled) rather than
+drawing nothing-shaped-as-something. Deliberately **fill-only, no `max`
+outline features** — nine dashed outlines over nine overlapping fills
+would fight the one thing this experiment exists to judge.
 
 **A note on verifying anything in this section**: this sandbox has no
 WebGL, and `new maplibregl.Map(...)` throws *synchronously* inside its
