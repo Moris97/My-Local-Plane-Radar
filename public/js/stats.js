@@ -367,44 +367,6 @@ export function renderStatsPanel(container) {
         <div class="mlpr-tiles-grid" id="mlpr-summary-tiles"></div>
         <div class="mlpr-stats-grid">
           <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-            <p class="mlpr-chart-label">${t('chartTopType')}</p>
-            <div id="mlpr-summary-chart-type"></div>
-            <div class="mlpr-chart-legend" id="mlpr-summary-legend-type"></div>
-          </section>
-          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
-            <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
-            <div id="mlpr-summary-chart-airline"></div>
-            <div class="mlpr-chart-legend" id="mlpr-summary-legend-airline"></div>
-          </section>
-        </div>
-      </div>
-
-      <div class="mlpr-stats-subsection">
-        <div class="mlpr-stats-grid">
-          <section class="mlpr-stat-chart">
-            <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
-            <div id="mlpr-chart-aircraft-count"></div>
-            <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
-          </section>
-
-          <section class="mlpr-stat-chart">
-            <p class="mlpr-chart-label">${t('chartPosition')}</p>
-            <div id="mlpr-chart-position"></div>
-            <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
-          </section>
-
-          <section class="mlpr-stat-chart">
-            <p class="mlpr-chart-label">${t('chartRange')}</p>
-            <div id="mlpr-chart-range"></div>
-            <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
-          </section>
-
-          <section class="mlpr-stat-chart">
-            <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
-            <div id="mlpr-chart-new-registrations"></div>
-          </section>
-
-          <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
             <div class="mlpr-chart-header">
               <p class="mlpr-chart-label">${t('chartTopType')}</p>
               <div class="mlpr-chart-view-toggle" data-chart="topType">
@@ -430,10 +392,39 @@ export function renderStatsPanel(container) {
           </section>
         </div>
       </div>
+
+      <div class="mlpr-stats-subsection">
+        <h3 class="mlpr-stats-section-title">${t('statsOverTime')}</h3>
+        <div class="mlpr-stats-grid">
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartAircraftCount')}</p>
+            <div id="mlpr-chart-aircraft-count"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-aircraft-count"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartPosition')}</p>
+            <div id="mlpr-chart-position"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-position"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartRange')}</p>
+            <div id="mlpr-chart-range"></div>
+            <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
+          </section>
+
+          <section class="mlpr-stat-chart">
+            <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
+            <div id="mlpr-chart-new-registrations"></div>
+          </section>
+        </div>
+      </div>
     </section>
 
     <section class="mlpr-stats-section">
       <h3 class="mlpr-stats-section-title">${t('antennaStats')}</h3>
+      <p class="mlpr-scope-note">${t('antennaStatsScope')}</p>
       <div class="mlpr-tiles-grid" id="mlpr-antenna-signal-tiles"></div>
       <div class="mlpr-stats-grid">
         <section class="mlpr-stat-chart">
@@ -788,21 +779,17 @@ export function renderStatsPanel(container) {
       return;
     }
 
+    // Tiles only. The type/airline breakdown used to be drawn here *as well
+    // as* by drawTypeChart/drawAirlineChart below -- same range, same
+    // server-side function (getTypeCounts), same label, twice on one
+    // screen. The surviving pair is the one with the doughnut/line toggle,
+    // moved up into this section where a breakdown-of-the-range belongs.
     tilesEl.innerHTML = [
       tileHtml(t('tileAircraftSeen'), String(summary.aircraftSeenCount)),
       tileHtml(t('tileAircraftTracked'), String(summary.aircraftTrackedCount), t('aircraftTrackedHint')),
       tileHtml(t('tileUniqueFlights'), String(summary.uniqueFlightsCount)),
       tileHtml(t('maxRange'), formatDistance(summary.maxRangeKm, units) ?? '–'),
     ].join('');
-
-    const airlines = await getAirlinesMap();
-    drawDoughnut('#mlpr-summary-chart-type', '#mlpr-summary-legend-type', summary.topTypes.map((e) => ({ key: e.typeCode, count: e.count })), (c) => c);
-    drawDoughnut(
-      '#mlpr-summary-chart-airline',
-      '#mlpr-summary-legend-airline',
-      summary.topAirlines.map((e) => ({ key: e.airlineIcao, count: e.count })),
-      (icao) => airlines.get(icao)?.name ?? icao,
-    );
   }
 
   async function drawAntennaSection() {

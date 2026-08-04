@@ -387,8 +387,13 @@ export async function buildServer({ logger = true } = {}) {
       aircraftTrackedCount: getAircraftTrackedCount(sinceMs),
       uniqueFlightsCount: getSeenFlightsCount(sinceMs),
       maxRangeKm,
-      topTypes: getTypeCounts(sinceMs),
-      topAirlines: getAirlineCounts(sinceMs),
+      // Deliberately no topTypes/topAirlines: those are what
+      // /api/stats/types and /api/stats/airlines already answer, for the
+      // same range via the same functions. Returning them here too meant
+      // the Stats screen drew the identical breakdown twice under the same
+      // label -- and the full untruncated type list is several KB of JSON
+      // per refresh, every 20s, for a chart that was fetching its own copy
+      // anyway.
     };
   });
 

@@ -1166,8 +1166,20 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   `TREND_TOP_N` (5) — a long tail of one-off types would be pure noise.
   Endpoint: `GET /api/stats/registrations-trend?range&field=type|
   airline&keys=A,B,C`, never independently decides what's "top."
+  **These two charts live in the range-summary subsection, next to its
+  tiles — there is exactly one pair of them.** They were briefly drawn
+  twice on the same screen: once here and once, without the toggle, from
+  `/api/stats/summary`'s own `topTypes`/`topAirlines`. Same range, same
+  server-side function (`getTypeCounts`), same label — identical numbers
+  under an identical heading. The summary endpoint no longer returns those
+  fields at all (they were also several KB of untruncated JSON per refresh,
+  every 20s, for a chart already fetching its own copy). If a "breakdown of
+  this range" is ever wanted somewhere else on the page, move this pair —
+  don't add a second one.
 - **Antenna statistics** (`server/src/antenna-stats.js`, all-time-only,
-  never range-selected or daily-reset): a range-by-altitude bar chart (9
+  never range-selected or daily-reset — it carries a `.mlpr-scope-note`
+  saying so, since it sits below the range selector and would otherwise
+  read as if the selector applied to it): a range-by-altitude bar chart (9
   fixed bands, 0–5k ft up to 40k+, ground = 0 ft) and a directional
   coverage rose chart (`renderRoseChartSvg`, 180-sector compass rose).
   Persisted as one JSON blob (`antennaStats` config key), **only when
