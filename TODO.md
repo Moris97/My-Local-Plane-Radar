@@ -355,15 +355,14 @@ deferred by the user in the same conversation.
   against whatever home location was configured at the time, and changing
   it in Settings silently leaves the old samples in place. There is no
   "clear statistics" control anywhere. Same applies to `allTimeMaxRangeKm`.
-- **Two different aircraft counts on one screen** (effort: tiny, impact:
-  low) — the "Widziane samoloty" chart comes from readsb's own
-  `aircraft_with_pos`/`aircraft_without_pos`, while the live "Aktualnie"
-  tile counts MLPR's own tracked list; they use different eviction rules
-  and can visibly disagree. Related: `history[].maxRangeKm` (readsb's
-  unfiltered `total.max_distance`) is still broadcast to the browser in the
-  `stats` WebSocket message and kept in `radar-state`, though nothing
-  displays it — vestigial, and exactly the trap that produced the "today >
-  all time" inversion once already.
+- ~~**Two different aircraft counts on one screen**~~ **Done in v2.1.9.**
+  It turned out to be three, not two: readsb's own counters in the history
+  charts, the server's `getTrackedAircraft().length` sent over the
+  WebSocket for the live tile, and the browser's own set for the List
+  total. Charts now use MLPR's tracked set (`recordTrackedCounts`), the
+  live tile and the List both count the browser's set, and the server
+  stopped sending a count at all. readsb's `total.max_distance` was removed
+  end to end at the same time.
 - **Historical `total_messages` rows are ~4x inflated** (effort: n/a,
   impact: none today) — `last1min.messages` is a rolling 60-second count
   that was being summed on every 15s poll, fixed in v2.1.8. Nothing

@@ -8,6 +8,7 @@ import {
   getDailyAccumulator,
   getLatestStatsValues,
   recordRangeSample,
+  recordTrackedCounts,
   getRangeSummary,
   getMaxRangeLastHourKm,
   recordDailyUnique,
@@ -114,9 +115,13 @@ function recordRangeAndRegistrationSightings() {
   const home = getEffectiveHome();
   const airlines = getAirlines();
   let bestRangeKm = null;
+  let withPos = 0;
+  let withoutPos = 0;
 
   for (const aircraft of getTrackedAircraft()) {
     const hasPosition = typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
+    if (hasPosition) withPos += 1;
+    else withoutPos += 1;
 
     // isRangeEligible excludes MLAT (and everything else that isn't
     // straight ADS-B) from range/antenna sampling -- see range.js. An MLAT
@@ -163,6 +168,12 @@ function recordRangeAndRegistrationSightings() {
     recordDailyUnique(aircraft.hex, aircraft.flight);
   }
 
+  // The counts the Stats history charts are built from -- see
+  // stats-history.js's recordTrackedCounts for why they come from here (our
+  // own tracked set, the same one the map and the List panel show) rather
+  // than from stats.json's own aircraft counters.
+  recordTrackedCounts(withPos + withoutPos, withPos, withoutPos);
+
   if (bestRangeKm !== null) {
     // Rounded once, here, so the daily figure and the all-time record are
     // fed the exact same number -- they already share this one source of
@@ -197,13 +208,17 @@ async function pollStats() {
   }
 }
 
+// Only what the browser can't work out for itself. The aircraft count used
+// to be sent from here too, and the Stats panel's live tile showed it while
+// the List panel right next to it counted the browser's own set -- two
+// numbers for the same question, from two different snapshots in time. The
+// count is now taken client-side, from the same live set the map and the
+// list are drawn from.
 function broadcastStats(broadcast) {
-  const { messagesPerSec, maxRangeKm } = getLatestStatsValues();
+  const { messagesPerSec } = getLatestStatsValues();
   broadcast({
     type: 'stats',
-    aircraftCount: getTrackedAircraft().length,
     messagesPerSec,
-    maxRangeKm,
     maxRangeLastHourKm: getMaxRangeLastHourKm(),
   });
 }

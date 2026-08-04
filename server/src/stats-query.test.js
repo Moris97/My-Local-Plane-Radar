@@ -27,19 +27,13 @@ beforeEach(() => {
 test('24h range buckets the in-memory history and range samples hourly', () => {
   const now = new Date('2026-03-10T12:00:00Z').getTime();
 
-  statsHistory.ingestStats(
-    { aircraft_with_pos: 3, aircraft_without_pos: 1, last1min: { end: now / 1000, messages: 60 }, total: { max_distance: 100000 } },
-    now,
-  );
-  statsHistory.ingestStats(
-    {
-      aircraft_with_pos: 5,
-      aircraft_without_pos: 0,
-      last1min: { end: now / 1000 + 60, messages: 90 },
-      total: { max_distance: 150000 },
-    },
-    now + 60000,
-  );
+  // Aircraft counts reach stats-history through recordTrackedCounts (fed by
+  // index.js's aircraft poll from MLPR's own tracked set), not through the
+  // stats.json payload -- see stats-history.js.
+  statsHistory.recordTrackedCounts(4, 3, 1);
+  statsHistory.ingestStats({ last1min: { end: now / 1000, messages: 60 } }, now);
+  statsHistory.recordTrackedCounts(5, 5, 0);
+  statsHistory.ingestStats({ last1min: { end: now / 1000 + 60, messages: 90 } }, now + 60000);
   statsHistory.recordRangeSample(120, now);
   statsHistory.recordRangeSample(200, now + 60000);
 

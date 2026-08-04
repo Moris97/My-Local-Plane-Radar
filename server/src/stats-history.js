@@ -20,6 +20,21 @@ const TOP_FRACTION = 0.1;
 const history = [];
 let lastSampleEnd = null;
 
+// Aircraft counts come from MLPR's own tracked set (index.js feeds them in
+// on every aircraft poll tick), NOT from stats.json's
+// aircraft_with_pos/aircraft_without_pos. readsb keeps its own accounting
+// with its own timeouts, so those numbers are a *different receiver's*
+// answer to "how many aircraft right now" than the one the map, the List
+// panel and the live tiles all show -- putting both on one Stats screen
+// meant the chart and the tile above it could visibly disagree with no way
+// to tell which was right. Messages/sec still comes from readsb: that is a
+// genuine receiver-level metric we cannot compute ourselves.
+let latestTrackedCounts = null;
+
+export function recordTrackedCounts(aircraftCount, withPos, withoutPos) {
+  latestTrackedCounts = { aircraftCount, withPos, withoutPos };
+}
+
 // Per-minute range sampling, fed by index.js's per-tick Haversine
 // computation (server/src/range.js) -- independent of the stats.json poll
 // this file otherwise ingests. Only the running best-per-minute value is
@@ -83,7 +98,6 @@ const dailyAccumulator = {
   date: todayDateString(),
   maxAircraft: 0,
   totalMessages: 0,
-  maxRangeKm: 0,
   sumAircraft: 0,
   sumWithPos: 0,
   maxWithPos: 0,
@@ -103,7 +117,6 @@ function resetDailyAccumulator(date) {
   dailyAccumulator.date = date;
   dailyAccumulator.maxAircraft = 0;
   dailyAccumulator.totalMessages = 0;
-  dailyAccumulator.maxRangeKm = 0;
   dailyAccumulator.sumAircraft = 0;
   dailyAccumulator.sumWithPos = 0;
   dailyAccumulator.maxWithPos = 0;
@@ -210,13 +223,16 @@ export function ingestStats(stats, now = Date.now()) {
   if (lastSampleEnd !== null && last1min.end <= lastSampleEnd) return null;
   lastSampleEnd = last1min.end;
 
-  const withPos = typeof stats.aircraft_with_pos === 'number' ? stats.aircraft_with_pos : 0;
-  const withoutPos = typeof stats.aircraft_without_pos === 'number' ? stats.aircraft_without_pos : 0;
-  const aircraftCount = withPos + withoutPos;
+  // Nothing to record until the aircraft poll has reported at least once:
+  // a sample built from readsb's counts instead would be the very mismatch
+  // recordTrackedCounts exists to remove. The aircraft poll runs every
+  // second and the stats poll every ~15, so this only skips the first tick
+  // after a start.
+  if (latestTrackedCounts === null) return null;
+  const { aircraftCount, withPos, withoutPos } = latestTrackedCounts;
   const messagesPerMinute = typeof last1min.messages === 'number' ? last1min.messages : 0;
-  const maxRangeKm = typeof stats.total?.max_distance === 'number' ? roundKm(stats.total.max_distance / 1000) : 0;
 
-  const sample = { t: last1min.end, aircraftCount, withPos, withoutPos, messagesPerMinute, maxRangeKm };
+  const sample = { t: last1min.end, aircraftCount, withPos, withoutPos, messagesPerMinute };
   // readsb's `last1min` is a *sliding* 60-second window whose `end` is
   // simply "now" at write time -- so a 15s stats poll gets a fresh `end`
   // (and a fresh sample) on every single poll, four per minute, not one.
@@ -237,7 +253,6 @@ export function ingestStats(stats, now = Date.now()) {
   pruneWindow(history, historyTimeMs);
 
   dailyAccumulator.maxAircraft = Math.max(dailyAccumulator.maxAircraft, aircraftCount);
-  dailyAccumulator.maxRangeKm = Math.max(dailyAccumulator.maxRangeKm, maxRangeKm);
   dailyAccumulator.sumAircraft += aircraftCount;
   dailyAccumulator.sumWithPos += withPos;
   dailyAccumulator.maxWithPos = Math.max(dailyAccumulator.maxWithPos, withPos);
@@ -266,11 +281,18 @@ export function recordRangeSample(km, now = Date.now()) {
   currentMinuteBestKm = Math.max(currentMinuteBestKm, km);
 }
 
+// Deliberately only messages/sec. It used to also hand out readsb's own
+// `total.max_distance` as `maxRangeKm`, which travelled all the way into
+// the browser's live state without anything ever displaying it -- an
+// unfiltered, MLAT-inclusive, receiver-restart-resettable number sitting
+// one line away from our own MLAT-excluded figures. That exact pairing
+// already produced a live "today > all time" inversion once; the fix then
+// was to stop *reading* it, which left the trap in place for the next
+// person. Now it isn't computed, stored or sent at all.
 export function getLatestStatsValues() {
   const latest = history[history.length - 1];
   return {
     messagesPerSec: latest ? latest.messagesPerMinute / 60 : null,
-    maxRangeKm: latest ? latest.maxRangeKm : null,
   };
 }
 
@@ -280,6 +302,7 @@ export function resetStatsHistory() {
   rangeSamples = [];
   currentMinuteKey = null;
   currentMinuteBestKm = 0;
+  latestTrackedCounts = null;
   resetDailyAccumulator(todayDateString());
 }
 
@@ -343,7 +366,13 @@ export function restoreFromSnapshot(snapshot, now = Date.now()) {
 
   if (snapshot.date !== todayDateString(now) || !snapshot.dailyAccumulator) return;
 
-  Object.assign(dailyAccumulator, snapshot.dailyAccumulator);
+  // Copies only keys the accumulator still defines: a stored snapshot from
+  // an older version carries fields that have since been removed, and a
+  // blanket Object.assign would graft them back on permanently (nothing
+  // resets an unknown key, so it would be re-snapshotted forever).
+  for (const key of Object.keys(dailyAccumulator)) {
+    if (Object.hasOwn(snapshot.dailyAccumulator, key)) dailyAccumulator[key] = snapshot.dailyAccumulator[key];
+  }
   // Object.assign just copied the plain arrays snapshotForPersistence wrote
   // (Sets aren't JSON-serializable) -- convert them back. An older snapshot
   // taken before this field existed simply won't have them, leaving the

@@ -146,9 +146,14 @@ sibling paths/URLs next to the configured `aircraft.json` location.
   `lat`, `lon` (receiver position), `version`, `refresh`.
 - `stats.json` is rewritten continuously — poll every ~15s, only act when
   `last1min.end` advances (`stats-history.js`). Fields used:
-  `aircraft_with_pos` + `aircraft_without_pos`, `last1min.messages`,
-  `total.max_distance` (meters → convert to km). Don't reimplement distance
-  math readsb already computes, except where noted below (range sampling).
+  `last1min.messages` and `last1min.local.signal`/`peak_signal`. **Its
+  aircraft counters (`aircraft_with_pos`/`aircraft_without_pos`) and
+  `total.max_distance` are deliberately NOT read** — readsb keeps its own
+  accounting with its own timeouts and its own unfiltered distance record,
+  so those answer the same questions as MLPR's own state but differently,
+  and putting both on one screen produced visible disagreements (see
+  "Aircraft counts" below and the range-sampling section). What is left is
+  the genuinely receiver-level metric we cannot compute ourselves.
   **`last1min` is a *sliding* 60-second window whose `end` is simply "now"
   at write time, not a fixed one-minute bucket that ticks over once a
   minute** — every 15s poll sees a fresh `end`, so the "only act when it
@@ -982,6 +987,21 @@ wrong as a percentile before being caught and renamed). `getRangeSummary()`
 always includes the current in-progress minute (never more than ~60s
 stale).
 
+**Aircraft counts have exactly one source per surface, and it is never
+readsb.** The Stats *history* charts (`avgAircraft`, `maxAircraft`,
+with/without position) are built from MLPR's own tracked set: `index.js`
+counts it on every aircraft poll tick and pushes it into
+`stats-history.js`'s `recordTrackedCounts`, which `ingestStats` then pairs
+with readsb's message count. The live "Aktualnie" tiles and the List
+panel's own total both count the *browser's* live set (`radar-state.js`'s
+`liveAircraft`) — the same one the map draws. Before this there were three
+answers on screen at once: readsb's counters in the charts, the server's
+`getTrackedAircraft().length` sent over the WebSocket for the Stats tile,
+and the browser's own set for the List. The server no longer sends an
+aircraft count at all. `ingestStats` returns `null` until the first
+`recordTrackedCounts` arrives rather than falling back to readsb's numbers
+— a fallback would silently reintroduce the mismatch.
+
 **`stats-history.js`'s two in-memory series (`history`, `rangeSamples`) are
 rolling 24h+1h windows, pruned by age; nothing there is day-scoped except
 `dailyAccumulator`.** Both used to be effectively day-scoped by accident —
@@ -1010,9 +1030,17 @@ right alongside `recordRangeSample(bestRangeKm)` in
 `recordRangeAndRegistrationSightings`, so the daily figure and the all-time
 record share one source of truth (previously two independently-filtered
 mechanisms could disagree — a live inversion where "today" briefly showed a
-higher max range than "all time"). readsb's own `total.max_distance` is
-still ingested into `stats-history.js` as a side effect of `ingestStats()`
-but nothing reads it back for display/notifications — harmless, vestigial.
+higher max range than "all time"). readsb's own `total.max_distance` is **no longer read at all**. It used to
+be ingested by `ingestStats()`, stored on every history sample and in the
+daily accumulator, and broadcast to every browser in the `stats` WebSocket
+message as `maxRangeKm` — with nothing displaying it. Calling that
+"harmless, vestigial" was the wrong conclusion: it left an unfiltered,
+MLAT-inclusive, receiver-restart-resettable number sitting one property
+away from our own MLAT-excluded figures, which is exactly the pairing that
+produced the live "today > all time" inversion. Removed end to end
+(sample, accumulator, `getLatestStatsValues`, the WS payload,
+`radar-state.js`'s `liveStats`), with a regression test asserting the key
+is absent rather than merely unread.
 
 ### Registration visit-tracking (`server/src/stats-registrations.js`)
 

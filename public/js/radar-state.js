@@ -1,5 +1,9 @@
 const liveAircraft = new Map(); // hex -> latest normalized aircraft
-let liveStats = { aircraftCount: 0, messagesPerSec: null, maxRangeKm: null, maxRangeLastHourKm: null };
+// Receiver-level figures only: the aircraft count is deliberately absent,
+// because it is answerable from liveAircraft above -- the same set the map
+// and the List panel draw. It used to be sent by the server as well, which
+// meant two counts of the same thing on one screen.
+let liveStats = { messagesPerSec: null, maxRangeLastHourKm: null };
 let selectRequestHandler = null;
 const listeners = new Set();
 

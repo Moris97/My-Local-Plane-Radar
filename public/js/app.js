@@ -958,9 +958,7 @@ function handleSnapshot(snapshot) {
     notifyAircraftChanged();
   } else if (snapshot.type === 'stats') {
     noteLiveStats({
-      aircraftCount: snapshot.aircraftCount,
       messagesPerSec: snapshot.messagesPerSec,
-      maxRangeKm: snapshot.maxRangeKm,
       maxRangeLastHourKm: snapshot.maxRangeLastHourKm,
     });
   }

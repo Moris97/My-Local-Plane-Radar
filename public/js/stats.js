@@ -499,7 +499,10 @@ export function renderStatsPanel(container) {
   // selection inside them and forces a layout pass for numbers that often
   // hadn't changed at all.
   const NOW_TILES = [
-    { labelKey: 'aircraftCount', value: ({ stats }) => String(stats.aircraftCount ?? 0) },
+    // Counted from the browser's own live set, the one the map and the
+    // List panel are drawn from -- not from a separate server-sent number,
+    // which is how this tile and the List's own total used to disagree.
+    { labelKey: 'aircraftCount', value: ({ aircraft }) => String(aircraft.length) },
     { labelKey: 'chartWithPos', value: ({ withPosition }) => String(withPosition) },
     {
       labelKey: 'messagesPerSecond',
@@ -526,7 +529,7 @@ export function renderStatsPanel(container) {
     const withPosition = aircraft.filter((a) => typeof a.lat === 'number' && typeof a.lon === 'number').length;
 
     ensureNowTiles();
-    const context = { stats, units, withPosition };
+    const context = { stats, units, withPosition, aircraft };
     NOW_TILES.forEach((tile, i) => {
       const next = tile.value(context);
       // Skip the assignment when nothing moved: aircraft count and max range

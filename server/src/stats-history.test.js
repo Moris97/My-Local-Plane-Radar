@@ -11,6 +11,7 @@ import {
   getLatestStatsValues,
   resetStatsHistory,
   recordRangeSample,
+  recordTrackedCounts,
   getRangeSummary,
   getMaxRangeLastHourKm,
   getTodaysRangeSamples,
@@ -26,14 +27,25 @@ beforeEach(() => {
   resetStatsHistory();
 });
 
+// Only the receiver-level fields matter now: aircraft counts come from
+// MLPR's own tracked set via recordTrackedCounts, never from stats.json.
 function statsFixture(overrides = {}) {
   return {
-    aircraft_with_pos: 3,
-    aircraft_without_pos: 1,
+    // Still present so the "we don't read these" test below has something
+    // to prove -- readsb really does publish them.
+    aircraft_with_pos: 99,
+    aircraft_without_pos: 99,
     last1min: { end: 1700000000, messages: 300 },
     total: { max_distance: 200000 },
     ...overrides,
   };
+}
+
+// Records a tracked-count reading and then a stats sample, the way index.js
+// does (aircraft poll every second, stats poll every ~15).
+function ingestWithCounts(withPos, withoutPos, overrides = {}, now = undefined) {
+  recordTrackedCounts(withPos + withoutPos, withPos, withoutPos);
+  return now === undefined ? ingestStats(statsFixture(overrides)) : ingestStats(statsFixture(overrides), now);
 }
 
 test('ingesting without a last1min period is ignored', () => {
@@ -42,40 +54,66 @@ test('ingesting without a last1min period is ignored', () => {
 });
 
 test('a valid stats snapshot produces one history sample', () => {
-  const sample = ingestStats(statsFixture());
+  const sample = ingestWithCounts(3, 1);
   assert.equal(sample.aircraftCount, 4);
   assert.equal(sample.withPos, 3);
   assert.equal(sample.withoutPos, 1);
   assert.equal(sample.messagesPerMinute, 300);
-  assert.equal(sample.maxRangeKm, 200);
   assert.equal(getHistory().length, 1);
 });
 
+// readsb keeps its own aircraft accounting with its own timeouts, so its
+// counters answer "how many aircraft right now" differently from the set
+// the map, the List panel and the live tiles are all drawn from. Reading
+// them here put two different answers on one Stats screen.
+test('aircraft counts come from the tracked set, not from stats.json\'s own counters', () => {
+  const sample = ingestWithCounts(2, 1); // fixture says 99/99
+  assert.equal(sample.withPos, 2);
+  assert.equal(sample.withoutPos, 1);
+  assert.equal(sample.aircraftCount, 3);
+});
+
+test('nothing is recorded until the aircraft poll has reported a count at least once', () => {
+  assert.equal(ingestStats(statsFixture()), null);
+  assert.equal(getHistory().length, 0);
+});
+
 test('re-ingesting the same minute is a no-op', () => {
-  ingestStats(statsFixture());
-  const second = ingestStats(statsFixture());
+  ingestWithCounts(3, 1);
+  const second = ingestWithCounts(3, 1);
   assert.equal(second, null);
   assert.equal(getHistory().length, 1);
 });
 
 test('a newer minute appends a new sample', () => {
-  ingestStats(statsFixture());
-  ingestStats(statsFixture({ last1min: { end: 1700000060, messages: 250 } }));
+  ingestWithCounts(3, 1);
+  ingestWithCounts(3, 1, { last1min: { end: 1700000060, messages: 250 } });
   assert.equal(getHistory().length, 2);
 });
 
 test('getLatestStatsValues reflects the most recent sample', () => {
-  ingestStats(statsFixture({ last1min: { end: 1700000000, messages: 300 }, total: { max_distance: 200000 } }));
-  ingestStats(statsFixture({ last1min: { end: 1700000060, messages: 600 }, total: { max_distance: 250000 } }));
+  ingestWithCounts(3, 1, { last1min: { end: 1700000000, messages: 300 } });
+  ingestWithCounts(3, 1, { last1min: { end: 1700000060, messages: 600 } });
   const values = getLatestStatsValues();
   assert.equal(values.messagesPerSec, 10);
-  assert.equal(values.maxRangeKm, 250);
+});
+
+// readsb's own total.max_distance used to ride along here and all the way
+// into the browser's live state, unfiltered and MLAT-inclusive, sitting one
+// property away from our own MLAT-excluded figures -- with nothing ever
+// displaying it. That pairing produced a live "today > all time" inversion
+// once already.
+test('readsb\'s own max distance is not carried anywhere', () => {
+  const sample = ingestWithCounts(3, 1, { total: { max_distance: 200000 } });
+  assert.equal('maxRangeKm' in sample, false);
+  assert.equal('maxRangeKm' in getLatestStatsValues(), false);
+  assert.equal('maxRangeKm' in getDailyAccumulator(), false);
 });
 
 test('daily accumulator takes the max aircraft count and sums messages', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 0, last1min: { end: 60, messages: 100 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 5, aircraft_without_pos: 0, last1min: { end: 120, messages: 150 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 1, aircraft_without_pos: 0, last1min: { end: 180, messages: 50 } }));
+  ingestWithCounts(2, 0, { last1min: { end: 60, messages: 100 } });
+  ingestWithCounts(5, 0, { last1min: { end: 120, messages: 150 } });
+  ingestWithCounts(1, 0, { last1min: { end: 180, messages: 50 } });
 
   const acc = getDailyAccumulator();
   assert.equal(acc.maxAircraft, 5);
@@ -87,17 +125,17 @@ test('daily accumulator takes the max aircraft count and sums messages', () => {
 // four times a minute. Counting each of those into the day's total counted
 // most messages roughly four times over.
 test('messages are counted once per minute, not once per poll, when several polls land in the same minute', () => {
-  ingestStats(statsFixture({ last1min: { end: 600, messages: 100 } }));
-  ingestStats(statsFixture({ last1min: { end: 615, messages: 110 } }));
-  ingestStats(statsFixture({ last1min: { end: 630, messages: 120 } }));
-  ingestStats(statsFixture({ last1min: { end: 660, messages: 200 } })); // next minute
+  ingestWithCounts(3, 1, { last1min: { end: 600, messages: 100 } });
+  ingestWithCounts(3, 1, { last1min: { end: 615, messages: 110 } });
+  ingestWithCounts(3, 1, { last1min: { end: 630, messages: 120 } });
+  ingestWithCounts(3, 1, { last1min: { end: 660, messages: 200 } }); // next minute
 
   assert.equal(getDailyAccumulator().totalMessages, 300); // 100 + 200
 });
 
 test('daily accumulator tracks sum/max separately for with-pos and without-pos, and a sample count for averaging', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 1, last1min: { end: 1, messages: 100 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 6, aircraft_without_pos: 3, last1min: { end: 2, messages: 100 } }));
+  ingestWithCounts(2, 1, { last1min: { end: 1, messages: 100 } });
+  ingestWithCounts(6, 3, { last1min: { end: 2, messages: 100 } });
 
   const acc = getDailyAccumulator();
   assert.equal(acc.sampleCount, 2);
@@ -113,9 +151,9 @@ test('daily accumulator tracks sum/max separately for with-pos and without-pos, 
 // per minute -- with readsb's sliding window feeding four samples a minute
 // that cap held about six hours, and the charts silently started mid-day.
 test('several samples inside one minute collapse into a single history entry, newest winning', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 1, aircraft_without_pos: 0, last1min: { end: 600, messages: 100 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 0, last1min: { end: 615, messages: 110 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 3, aircraft_without_pos: 0, last1min: { end: 630, messages: 120 } }));
+  ingestWithCounts(1, 0, { last1min: { end: 600, messages: 100 } });
+  ingestWithCounts(2, 0, { last1min: { end: 615, messages: 110 } });
+  ingestWithCounts(3, 0, { last1min: { end: 630, messages: 120 } });
 
   assert.equal(getHistory().length, 1);
   assert.equal(getHistory()[0].aircraftCount, 3);
@@ -127,7 +165,7 @@ test('history keeps a full day of minutes and evicts by age, not by a raw sample
   // window falls off, everything inside it stays -- 1440 minutes' worth,
   // far more than the old flat cap left after four-a-minute sampling.
   for (let i = 0; i < 2 * 24 * 60; i += 1) {
-    ingestStats(statsFixture({ last1min: { end: start + i * 60, messages: 1 } }));
+    ingestWithCounts(3, 1, { last1min: { end: start + i * 60, messages: 1 } });
   }
 
   const kept = getHistory();
@@ -209,7 +247,7 @@ test('getTodaysRangeSamples exposes each per-minute best reading with its minute
 });
 
 test('a snapshot restored the same day brings back history, the accumulator, and range samples', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 3, aircraft_without_pos: 1, last1min: { end: T0 / 1000, messages: 300 } }), T0);
+  ingestWithCounts(3, 1, { last1min: { end: T0 / 1000, messages: 300 } }, T0);
   recordRangeSample(150, T0);
   recordRangeSample(300, T0 + MINUTE);
 
@@ -233,7 +271,7 @@ test('a snapshot restored the same day brings back history, the accumulator, and
 // rolling 24h series should survive a restart that crosses midnight --
 // otherwise every such restart empties the 24h charts.
 test('a snapshot from a previous day restores the rolling series but not the day accumulator', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 9, last1min: { end: T0 / 1000, messages: 999 } }), T0);
+  ingestWithCounts(9, 0, { last1min: { end: T0 / 1000, messages: 999 } }, T0);
   recordRangeSample(500, T0);
   const staleSnapshot = snapshotForPersistence();
   resetStatsHistory();
@@ -248,7 +286,7 @@ test('a snapshot from a previous day restores the rolling series but not the day
 });
 
 test('a snapshot older than the rolling window is dropped entirely', () => {
-  ingestStats(statsFixture({ last1min: { end: T0 / 1000, messages: 10 } }), T0);
+  ingestWithCounts(3, 1, { last1min: { end: T0 / 1000, messages: 10 } }, T0);
   recordRangeSample(500, T0);
   const ancient = snapshotForPersistence();
   resetStatsHistory();
