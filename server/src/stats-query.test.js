@@ -76,19 +76,37 @@ test('7d range reads from daily_stats, bucketed daily, only rows within the wind
   assert.equal(dates.includes('2026-03-01'), false);
 });
 
-test('1y range buckets daily_stats rows by ISO week', () => {
+// Granularity follows how much data the range actually covers, not the
+// range's name: a young install asking for 1y/all used to get one lone
+// monthly bar (or a single dot on a line chart) for its two days of data.
+test('a young install gets daily buckets even on the 1y/all ranges', () => {
+  db.upsertDailyStats('2026-05-04', { maxAircraft: 3, totalMessages: 10, maxRangeKm: 10, rangeTopAvgKm: 10 });
+  db.upsertDailyStats('2026-05-05', { maxAircraft: 7, totalMessages: 10, maxRangeKm: 20, rangeTopAvgKm: 20 });
+
+  const now = new Date('2026-05-06T00:00:00Z').getTime();
+  for (const range of ['1y', 'all']) {
+    const keys = getStatsHistoryForRange(range, now).map((b) => b.bucket);
+    assert.ok(
+      keys.includes('2026-05-04') && keys.includes('2026-05-05'),
+      `${range} should bucket a young install's data by day, got ${keys.join(', ')}`,
+    );
+  }
+});
+
+test('1y range buckets daily_stats rows by ISO week once there is more than a couple of months of data', () => {
+  db.upsertDailyStats('2025-06-01', { maxAircraft: 1, totalMessages: 1, maxRangeKm: 1, rangeTopAvgKm: 1 });
   db.upsertDailyStats('2026-05-04', { maxAircraft: 3, totalMessages: 10, maxRangeKm: 10, rangeTopAvgKm: 10 });
   db.upsertDailyStats('2026-05-05', { maxAircraft: 7, totalMessages: 10, maxRangeKm: 20, rangeTopAvgKm: 20 });
 
   const now = new Date('2026-05-10T00:00:00Z').getTime();
   const buckets = getStatsHistoryForRange('1y', now);
-  // Both dates are in the same ISO week (2026-W19) -- should merge into one bucket.
+  // Both May dates are in the same ISO week (2026-W19) -- should merge into one bucket.
   const week = buckets.find((b) => b.bucket === '2026-W19');
   assert.notEqual(week, undefined);
   assert.equal(week.maxAircraft, 7);
 });
 
-test('"all" range has no lower time bound', () => {
+test('"all" range has no lower time bound, and goes monthly once the install is years old', () => {
   db.upsertDailyStats('2020-01-01', { maxAircraft: 1, totalMessages: 1, maxRangeKm: 1 });
   const buckets = getStatsHistoryForRange('all', Date.now());
   assert.ok(buckets.some((b) => b.bucket === '2020-01'));

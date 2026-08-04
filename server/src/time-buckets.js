@@ -1,13 +1,30 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-// Confirmed granularity scheme: the longer the range, the coarser the
-// buckets, so every chart stays at roughly 12-60 points regardless of how
-// long the install has been running.
-export function bucketGranularityForRange(range) {
+// Granularity is chosen from how much data the selected range *actually*
+// covers, not from the range's name: a two-day-old install asking for
+// "1y"/"all" used to get one single monthly bar (or a lone dot on a line
+// chart), because the name alone said "month". The span is whichever is
+// shorter -- the range window, or the time since the earliest recorded
+// data -- so every range keeps roughly 2-60 points and a young install's
+// "all" view reads like the 7d one until there's genuinely more to show.
+//
+// Never finer than 'day' outside 24h: everything but the 24h view is
+// served from daily_stats, which has exactly one row per day, and mixing
+// granularities across the Stats screen's charts would be worse than a
+// coarse one.
+const DAY_BUCKET_MAX_DAYS = 70;
+const WEEK_BUCKET_MAX_DAYS = 400;
+
+export function granularityForRange(range, { earliestDataMs = null, now = Date.now() } = {}) {
   if (range === '24h') return 'hour';
-  if (range === '7d' || range === '31d') return 'day';
-  if (range === '1y') return 'week';
-  return 'month'; // 'all'
+
+  const windowStart = rangeStartMs(range, now);
+  const start = earliestDataMs === null ? windowStart : Math.max(windowStart, earliestDataMs);
+  const spanDays = Math.max(0, now - start) / DAY_MS;
+
+  if (spanDays <= DAY_BUCKET_MAX_DAYS) return 'day';
+  if (spanDays <= WEEK_BUCKET_MAX_DAYS) return 'week';
+  return 'month';
 }
 
 export function rangeStartMs(range, now = Date.now()) {

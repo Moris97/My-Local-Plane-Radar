@@ -10,6 +10,7 @@ import {
   getRangeSummary,
   getMaxRangeLastHourKm,
   getTodaysRangeSamples,
+  getRangeSamples,
   recordDailyUnique,
   getDailyUniqueCounts,
   getTodayStartMs,
@@ -68,13 +69,26 @@ test('getLatestStatsValues reflects the most recent sample', () => {
 });
 
 test('daily accumulator takes the max aircraft count and sums messages', () => {
-  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 0, last1min: { end: 1, messages: 100 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 5, aircraft_without_pos: 0, last1min: { end: 2, messages: 150 } }));
-  ingestStats(statsFixture({ aircraft_with_pos: 1, aircraft_without_pos: 0, last1min: { end: 3, messages: 50 } }));
+  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 0, last1min: { end: 60, messages: 100 } }));
+  ingestStats(statsFixture({ aircraft_with_pos: 5, aircraft_without_pos: 0, last1min: { end: 120, messages: 150 } }));
+  ingestStats(statsFixture({ aircraft_with_pos: 1, aircraft_without_pos: 0, last1min: { end: 180, messages: 50 } }));
 
   const acc = getDailyAccumulator();
   assert.equal(acc.maxAircraft, 5);
   assert.equal(acc.totalMessages, 300);
+});
+
+// readsb's last1min is a *sliding* 60-second window rewritten continuously,
+// so a 15s poll sees a fresh `end` (and a fresh, overlapping message count)
+// four times a minute. Counting each of those into the day's total counted
+// most messages roughly four times over.
+test('messages are counted once per minute, not once per poll, when several polls land in the same minute', () => {
+  ingestStats(statsFixture({ last1min: { end: 600, messages: 100 } }));
+  ingestStats(statsFixture({ last1min: { end: 615, messages: 110 } }));
+  ingestStats(statsFixture({ last1min: { end: 630, messages: 120 } }));
+  ingestStats(statsFixture({ last1min: { end: 660, messages: 200 } })); // next minute
+
+  assert.equal(getDailyAccumulator().totalMessages, 300); // 100 + 200
 });
 
 test('daily accumulator tracks sum/max separately for with-pos and without-pos, and a sample count for averaging', () => {
@@ -90,12 +104,32 @@ test('daily accumulator tracks sum/max separately for with-pos and without-pos, 
   assert.equal(acc.maxWithoutPos, 3);
 });
 
-test('history is capped so it cannot grow unbounded', () => {
-  for (let i = 0; i < 1500; i += 1) {
-    ingestStats(statsFixture({ last1min: { end: i, messages: 1 } }));
+// The 24h charts read this array, so it has to hold a real 24 hours. It
+// used to be capped at a flat 1440 entries on the assumption of one sample
+// per minute -- with readsb's sliding window feeding four samples a minute
+// that cap held about six hours, and the charts silently started mid-day.
+test('several samples inside one minute collapse into a single history entry, newest winning', () => {
+  ingestStats(statsFixture({ aircraft_with_pos: 1, aircraft_without_pos: 0, last1min: { end: 600, messages: 100 } }));
+  ingestStats(statsFixture({ aircraft_with_pos: 2, aircraft_without_pos: 0, last1min: { end: 615, messages: 110 } }));
+  ingestStats(statsFixture({ aircraft_with_pos: 3, aircraft_without_pos: 0, last1min: { end: 630, messages: 120 } }));
+
+  assert.equal(getHistory().length, 1);
+  assert.equal(getHistory()[0].aircraftCount, 3);
+});
+
+test('history keeps a full day of minutes and evicts by age, not by a raw sample count', () => {
+  const start = 1700000000;
+  // Two full days, one sample a minute: everything older than the rolling
+  // window falls off, everything inside it stays -- 1440 minutes' worth,
+  // far more than the old flat cap left after four-a-minute sampling.
+  for (let i = 0; i < 2 * 24 * 60; i += 1) {
+    ingestStats(statsFixture({ last1min: { end: start + i * 60, messages: 1 } }));
   }
-  assert.equal(getHistory().length, 1440);
-  assert.equal(getHistory()[0].t, 1500 - 1440);
+
+  const kept = getHistory();
+  assert.ok(kept.length >= 24 * 60, `expected at least 24h of samples, got ${kept.length}`);
+  const spanHours = (kept[kept.length - 1].t - kept[0].t) / 3600;
+  assert.ok(spanHours >= 24 && spanHours <= 25, `expected a ~24-25h window, got ${spanHours}h`);
 });
 
 const T0 = new Date('2026-03-01T00:00:00Z').getTime();
@@ -182,7 +216,11 @@ test('a snapshot restored the same day brings back history, the accumulator, and
   assert.equal(getRangeSummary().maxRangeKm, 300);
 });
 
-test('a snapshot from a previous day is not restored -- today starts fresh instead of inheriting stale numbers', () => {
+// The two halves of a snapshot have deliberately different guards: the
+// day-scoped accumulator must not inherit yesterday's numbers, but the
+// rolling 24h series should survive a restart that crosses midnight --
+// otherwise every such restart empties the 24h charts.
+test('a snapshot from a previous day restores the rolling series but not the day accumulator', () => {
   ingestStats(statsFixture({ aircraft_with_pos: 9, last1min: { end: T0 / 1000, messages: 999 } }), T0);
   recordRangeSample(500, T0);
   const staleSnapshot = snapshotForPersistence();
@@ -191,9 +229,21 @@ test('a snapshot from a previous day is not restored -- today starts fresh inste
   const nextDay = T0 + 24 * 60 * MINUTE;
   restoreFromSnapshot(staleSnapshot, nextDay);
 
-  assert.equal(getHistory().length, 0);
   assert.equal(getDailyAccumulator().sampleCount, 0);
-  assert.equal(getRangeSummary().maxRangeKm, 0);
+  assert.equal(getRangeSummary().maxRangeKm, 0, 'yesterday\'s samples are not part of today\'s summary');
+  assert.equal(getHistory().length, 1);
+  assert.equal(getRangeSamples().length, 1, 'still available to the rolling 24h charts');
+});
+
+test('a snapshot older than the rolling window is dropped entirely', () => {
+  ingestStats(statsFixture({ last1min: { end: T0 / 1000, messages: 10 } }), T0);
+  recordRangeSample(500, T0);
+  const ancient = snapshotForPersistence();
+  resetStatsHistory();
+
+  restoreFromSnapshot(ancient, T0 + 5 * 24 * 60 * MINUTE);
+
+  assert.equal(getRangeSamples().length, 0);
 });
 
 test('restoreFromSnapshot is a safe no-op when there is nothing stored yet (fresh install)', () => {

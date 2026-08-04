@@ -1,13 +1,43 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bucketGranularityForRange, rangeStartMs, bucketKey, bucketize } from './time-buckets.js';
+import { granularityForRange, rangeStartMs, bucketKey, bucketize } from './time-buckets.js';
 
-test('bucketGranularityForRange maps each range to the confirmed granularity', () => {
-  assert.equal(bucketGranularityForRange('24h'), 'hour');
-  assert.equal(bucketGranularityForRange('7d'), 'day');
-  assert.equal(bucketGranularityForRange('31d'), 'day');
-  assert.equal(bucketGranularityForRange('1y'), 'week');
-  assert.equal(bucketGranularityForRange('all'), 'month');
+const NOW = new Date('2026-03-15T00:00:00Z').getTime();
+const DAYS = 24 * 60 * 60 * 1000;
+
+test('granularityForRange maps each range to the expected granularity for a long-running install', () => {
+  const old = { earliestDataMs: NOW - 5 * 365 * DAYS, now: NOW };
+  assert.equal(granularityForRange('24h', old), 'hour');
+  assert.equal(granularityForRange('7d', old), 'day');
+  assert.equal(granularityForRange('31d', old), 'day');
+  assert.equal(granularityForRange('1y', old), 'week');
+  assert.equal(granularityForRange('all', old), 'month');
+});
+
+// The point of the whole adaptive scheme: an install with two days of data
+// showed one lone monthly bar on 1y/all before this.
+test('granularityForRange falls back to daily buckets on a young install, whatever the range asks for', () => {
+  const young = { earliestDataMs: NOW - 2 * DAYS, now: NOW };
+  assert.equal(granularityForRange('1y', young), 'day');
+  assert.equal(granularityForRange('all', young), 'day');
+});
+
+test('granularityForRange steps up to weeks, then months, as an install accumulates data', () => {
+  assert.equal(granularityForRange('all', { earliestDataMs: NOW - 100 * DAYS, now: NOW }), 'week');
+  assert.equal(granularityForRange('all', { earliestDataMs: NOW - 3 * 365 * DAYS, now: NOW }), 'month');
+});
+
+test('granularityForRange never goes finer than the range window itself, even with older data', () => {
+  // 31d asks for a month regardless of the install having years of history.
+  assert.equal(granularityForRange('31d', { earliestDataMs: 0, now: NOW }), 'day');
+});
+
+// No daily_stats rows at all (a first-run install) means there is nothing
+// to draw either way, so the safe fallback is the range's own window --
+// the coarse answer, never a chart with thousands of empty buckets.
+test('granularityForRange falls back to the range window when the install start date is unknown', () => {
+  assert.equal(granularityForRange('all', { earliestDataMs: null, now: NOW }), 'month');
+  assert.equal(granularityForRange('1y', { earliestDataMs: null, now: NOW }), 'week');
 });
 
 test('rangeStartMs computes the expected cutoff for each range', () => {

@@ -1,8 +1,19 @@
-import { getHistory, getTodaysRangeSamples, averageOfTopFraction } from './stats-history.js';
-import { getDailyStatsSince, getAllDailyStats } from './db.js';
-import { bucketGranularityForRange, rangeStartMs, bucketize } from './time-buckets.js';
+import { getHistory, getRangeSamples, averageOfTopFraction } from './stats-history.js';
+import { getDailyStatsSince, getAllDailyStats, getEarliestDailyStatsDate } from './db.js';
+import { granularityForRange, rangeStartMs, bucketize } from './time-buckets.js';
 
 const TOP_FRACTION = 0.1;
+
+// One granularity per range for the whole Stats screen -- every chart that
+// buckets over time (this module's history series, but also the new-
+// registrations and per-type/airline trend charts in server.js) resolves
+// it through here, so they can't disagree with each other about what a
+// bucket means.
+export function granularityFor(range, now = Date.now()) {
+  const earliestDate = getEarliestDailyStatsDate();
+  const earliestDataMs = earliestDate ? new Date(`${earliestDate}T00:00:00.000Z`).getTime() : null;
+  return granularityForRange(range, { earliestDataMs, now });
+}
 
 function avg(values) {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
@@ -29,12 +40,12 @@ function mergeBucketsByKey(bucketArrays) {
 // every other range reads from the daily_stats rows written at each day's
 // rollover, bucketed coarser the longer the range (see time-buckets.js).
 export function getStatsHistoryForRange(range, now = Date.now()) {
-  const granularity = bucketGranularityForRange(range);
+  const granularity = granularityFor(range, now);
   const since = rangeStartMs(range, now);
 
   if (range === '24h') {
     const samples = getHistory().filter((s) => s.t * 1000 >= since);
-    const rangeSamples = getTodaysRangeSamples().filter((s) => s.t >= since);
+    const rangeSamples = getRangeSamples().filter((s) => s.t >= since);
 
     const mainBuckets = bucketize(samples, {
       getTime: (s) => s.t * 1000,

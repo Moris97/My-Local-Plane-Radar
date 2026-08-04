@@ -144,11 +144,19 @@ sibling paths/URLs next to the configured `aircraft.json` location.
 
 - `receiver.json` rarely changes — read **once at startup**. Fields used:
   `lat`, `lon` (receiver position), `version`, `refresh`.
-- `stats.json` is rewritten roughly once a minute — poll every ~15s, only
-  act when `last1min.end` advances (`stats-history.js`). Fields used:
+- `stats.json` is rewritten continuously — poll every ~15s, only act when
+  `last1min.end` advances (`stats-history.js`). Fields used:
   `aircraft_with_pos` + `aircraft_without_pos`, `last1min.messages`,
   `total.max_distance` (meters → convert to km). Don't reimplement distance
   math readsb already computes, except where noted below (range sampling).
+  **`last1min` is a *sliding* 60-second window whose `end` is simply "now"
+  at write time, not a fixed one-minute bucket that ticks over once a
+  minute** — every 15s poll sees a fresh `end`, so the "only act when it
+  advances" guard filters nothing and a naive reader gets four overlapping
+  samples per minute. Both consequences were live bugs (see "Advanced
+  statistics"): a sample-count-capped 24h buffer held ~6h, and summing
+  `last1min.messages` per poll counted most messages ~4x. Anything reading
+  `last1min` must dedupe by minute itself.
 
 ### Home-location resolution (`server/src/home.js`)
 
@@ -873,11 +881,31 @@ remembered UI state, not a Settings option. Every chart shows a
 `loadingStats` placeholder the instant a refetch kicks off, before any
 `await` — otherwise a slow `all`-range request reads as indistinguishable
 from "no data yet". `server/src/stats-query.js`'s
-`getStatsHistoryForRange` picks source and bucket granularity per range:
-24h reads in-memory `history` (minute-level), everything else reads
-`daily_stats`. Bucket granularity (`server/src/time-buckets.js`): 24h →
-hourly, 7d/31d → daily, 1y → weekly (ISO 8601), all → monthly — keeps every
-chart at ~12–60 points regardless of install age.
+`getStatsHistoryForRange` picks source per range: 24h reads in-memory
+`history` (minute-level), everything else reads `daily_stats`.
+
+**Bucket granularity is chosen from how much data the range actually
+covers, never from the range's name** (`time-buckets.js`'s
+`granularityForRange`, resolved once per request by `stats-query.js`'s
+`granularityFor`, which feeds it the earliest `daily_stats` date):
+24h → hourly; otherwise span ≤70 days → daily, ≤400 days → weekly (ISO
+8601), beyond that → monthly. Span is the shorter of the range window and
+the install's own age, so a two-day-old install's `1y`/`all` view reads
+like the 7d one instead of collapsing into one monthly bar (a live
+complaint — a single bar/dot is what "all time" showed for the first
+month). Outside 24h it never goes finer than daily: `daily_stats` has one
+row per day, and mixed granularities across the Stats screen's charts
+would be worse than a coarse one. **Every time-bucketed endpoint resolves
+granularity through `granularityFor`** (history, new-registrations,
+registrations-trend) so no two charts on one screen can disagree about
+what a bucket means.
+
+Bucket keys are UTC (`bucketKey` builds them off `toISOString`), but
+`chart.js`'s `formatBucketLabel` renders **hour** labels in the viewer's
+local time — an hour label is read as wall-clock time, and a UTC+2
+receiver's chart otherwise ended at "11:00" while the user was looking at
+it at 13:00. Day/week/month labels stay as-is: those keys name a whole UTC
+period, and shifting them would relabel the period itself.
 
 ### Registrations table (`public/js/stats.js`'s `loadRegistrationsTable`)
 
@@ -916,6 +944,20 @@ samples (a mean-of-top-N, not a percentile cutoff — briefly implemented
 wrong as a percentile before being caught and renamed). `getRangeSummary()`
 always includes the current in-progress minute (never more than ~60s
 stale).
+
+**`stats-history.js`'s two in-memory series (`history`, `rangeSamples`) are
+rolling 24h+1h windows, pruned by age; nothing there is day-scoped except
+`dailyAccumulator`.** Both used to be effectively day-scoped by accident —
+range samples were cleared by `resetDailyAccumulator` at UTC midnight, and
+`history` was capped at a flat 1440 entries — so the "last 24h" charts
+really showed "since 00:00 UTC" (and only ~6h of that, see the `last1min`
+sliding-window note above). Consequences to preserve: `getRangeSummary()`
+now filters the rolling window down to `dailyAccumulator.date`'s day (keyed
+off the accumulator's own date, not `now`, so a flush landing between
+midnight and the next rollover call still summarizes the day it is writing);
+`getMaxRangeLastHourKm` reads the rolling window and so is a true hour
+across midnight too; pruning measures the window from the newest sample's
+own timestamp, not `Date.now()`, because `history` is on readsb's clock.
 
 **MLAT is excluded from this sampling entirely** (`isRangeEligible
 (sourceType)`, true only for `sourceType` starting with `adsb_`) — an MLAT
@@ -1232,11 +1274,23 @@ reset to zero, and the next flush upserted today's row with only the
 since-restart numbers, discarding what had already accumulated.
 
 Fix: `snapshotForPersistence()` captures `history`, the full
-`dailyAccumulator`, `todaysRangeSamples`, and in-progress-minute range
-state; `restoreFromSnapshot()` restores **only if the snapshot's date is
-today** (a snapshot from yesterday — e.g. the Pi was off overnight — must
-never be restored; `rolloverIfNewDay` already handles a day boundary
-crossed while running, this is the startup-restore equivalent). Persisted
+`dailyAccumulator`, `rangeSamples`, and in-progress-minute range state.
+**`restoreFromSnapshot()` restores the two halves under deliberately
+different guards**: the rolling 24h series (`history`, `rangeSamples`,
+in-progress minute) come back from *any* snapshot and are then age-pruned
+exactly as at runtime — they aren't day-scoped, so a snapshot written at
+23:50 is precisely what a 00:10 restart should resume from; the day-scoped
+`dailyAccumulator` is restored **only if the snapshot's date is today** (a
+snapshot from yesterday — e.g. the Pi was off overnight — must never
+overwrite today's fresh numbers; `rolloverIfNewDay` already handles a day
+boundary crossed while running, this is the startup-restore equivalent).
+The guard used to be all-or-nothing, which emptied the 24h charts on every
+restart that happened to cross midnight. The restore path additionally
+measures the window against the wall clock (`referenceMs`), so a snapshot
+from last week is dropped however self-consistent its own timestamps are.
+Reads a `todaysRangeSamples` key as a fallback — the pre-rolling-window
+name, so an already-stored snapshot still restores after an upgrade.
+Persisted
 via `setConfigJSON`/`getConfigJSON` on its own **hourly**
 (`STATS_HISTORY_SNAPSHOT_INTERVAL_MS`) interval — deliberately less
 frequent than the 45s `daily_stats` flush, since this blob is far bigger

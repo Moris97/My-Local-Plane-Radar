@@ -111,8 +111,25 @@ test('renderSparklineSvg (pre-existing) still works unchanged', () => {
   assert.ok(svg.includes('<polyline'));
 });
 
-test('formatBucketLabel formats an hour bucket key as day.month hour:00', () => {
-  assert.equal(formatBucketLabel('2026-07-27T14'), '27.07 14:00');
+// Hour keys are UTC but read as wall-clock time, so the label is rendered
+// in the local zone -- expressed here as "whatever this machine calls that
+// UTC instant" rather than a hardcoded string, so the test says the same
+// thing in every timezone (it was silently a UTC-only assertion before).
+test('formatBucketLabel formats an hour bucket key as day.month hour:mm in local time', () => {
+  const instant = new Date(Date.UTC(2026, 6, 27, 14));
+  const pad = (n) => String(n).padStart(2, '0');
+  const expected = `${pad(instant.getDate())}.${pad(instant.getMonth() + 1)} ${pad(instant.getHours())}:${pad(instant.getMinutes())}`;
+  assert.equal(formatBucketLabel('2026-07-27T14'), expected);
+});
+
+test('formatBucketLabel shifts an hour bucket key into the viewer\'s own timezone', () => {
+  const originalTz = process.env.TZ;
+  process.env.TZ = 'Europe/Warsaw'; // UTC+2 in July
+  try {
+    assert.equal(formatBucketLabel('2026-07-27T14'), '27.07 16:00');
+  } finally {
+    process.env.TZ = originalTz;
+  }
 });
 
 test('formatBucketLabel formats a day bucket key as day.month.year', () => {

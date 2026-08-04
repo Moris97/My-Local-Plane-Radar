@@ -17,8 +17,8 @@ import {
 } from './settings-auth.js';
 import { exportConfig, importConfig } from './config-backup.js';
 import { getTrail, getAllTrails } from './trail-history.js';
-import { getStatsHistoryForRange } from './stats-query.js';
-import { rangeStartMs, bucketGranularityForRange } from './time-buckets.js';
+import { getStatsHistoryForRange, granularityFor } from './stats-query.js';
+import { rangeStartMs } from './time-buckets.js';
 import {
   getTypeCounts,
   getAirlineCounts,
@@ -277,7 +277,7 @@ export async function buildServer({ logger = true } = {}) {
 
   app.get('/api/stats/new-registrations', async (request) => {
     const range = parseStatsRange(request);
-    return getNewRegistrationsBuckets(rangeStartMs(range), bucketGranularityForRange(range));
+    return getNewRegistrationsBuckets(rangeStartMs(range), granularityFor(range));
   });
 
   // Powers the doughnut<->line toggle on the "most common type/airline"
@@ -300,7 +300,7 @@ export async function buildServer({ logger = true } = {}) {
       .map((k) => k.trim())
       .filter(Boolean);
     if (keys.length === 0) return [];
-    return getNewRegistrationsBucketsByKey(rangeStartMs(range), bucketGranularityForRange(range), extractor, keys);
+    return getNewRegistrationsBucketsByKey(rangeStartMs(range), granularityFor(range), extractor, keys);
   });
 
   // Full list, unfiltered by range -- the point-7 table is "loaded on

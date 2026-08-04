@@ -212,6 +212,15 @@ export function getAllDailyStats() {
   return db.prepare('SELECT * FROM daily_stats ORDER BY date ASC').all();
 }
 
+// The install's own "day one", used to pick chart bucket granularity from
+// how much history actually exists rather than from the range's name
+// (see time-buckets.js's granularityForRange). null on a brand-new install
+// whose first daily_stats row hasn't been flushed yet.
+export function getEarliestDailyStatsDate() {
+  const row = db.prepare('SELECT MIN(date) AS date FROM daily_stats').get();
+  return row?.date ?? null;
+}
+
 export function getDailyStatsSince(date) {
   return db.prepare('SELECT * FROM daily_stats WHERE date >= ? ORDER BY date ASC').all(date);
 }
