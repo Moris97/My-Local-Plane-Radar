@@ -140,6 +140,8 @@ function recordRangeAndRegistrationSightings() {
         lon: aircraft.lon,
         altBaro: aircraft.altBaro,
         onGround: aircraft.onGround,
+        hex: aircraft.hex,
+        messages: aircraft.messages,
       });
     }
 

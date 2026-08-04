@@ -60,6 +60,29 @@ const BAND_SLOTS = ALTITUDE_BANDS.length + 1;
 // hundred KB of JSON at most -- trivial for a config blob.
 const TOP_K = 5;
 
+// A position is only trusted for antenna coverage once its aircraft has
+// actually been decoded a few times. Samples used to be recorded once per
+// second per tracked aircraft with no floor on this at all -- combined with
+// TOP_K not being deduped by aircraft (see below), the retained "best 5" in
+// a cell were usually 5 consecutive seconds of one plane, measured live as
+// topAvgRangeKm == maxRangeKm in 169 of 180 sectors: the outlier resistance
+// this whole mechanism exists for didn't actually exist. `messages` is
+// readsb's own cumulative per-aircraft counter (the "Messages received"
+// tile in the details panel) -- reading it directly off decode volume,
+// rather than off elapsed polling time, means a single lucky decode from a
+// distant aircraft (a bit-error near-miss that happened to validate, or a
+// contact glimpsed for only a couple of frames before fading) can no longer
+// set a "best-ever" figure on its own. 4 is deliberately low: a global CPR
+// position decode needs at least two position frames, so this asks for
+// barely more than "seen more than once", not for a sustained contact --
+// the whole point of a range figure is to capture genuinely marginal
+// reception, just not a single fluke.
+const MIN_MESSAGES_FOR_SAMPLE = 4;
+
+export function isAntennaSampleEligible(messages) {
+  return typeof messages === 'number' && messages >= MIN_MESSAGES_FOR_SAMPLE;
+}
+
 function createEmptyCells() {
   return Array.from({ length: BAND_SLOTS }, () => Array.from({ length: SECTOR_COUNT }, () => []));
 }
@@ -70,16 +93,43 @@ let latestPeakSignalDbfs = null;
 let loaded = false;
 let dirty = false;
 
+// Persisted as compact [km, hex] tuples rather than {km, hex} objects --
+// repeated JSON field names were most of the weight of a similar blob
+// elsewhere in this app (stats-history.js's snapshot), and at up to
+// BAND_SLOTS * SECTOR_COUNT * TOP_K = 9,000 entries here, the same waste
+// would apply. In-memory shape stays {km, hex} objects, which read better
+// than index-juggling a tuple through insertIntoTopK/mergeTopK.
+function serializeCells() {
+  return cells.map((band) => band.map((cell) => cell.map((e) => [e.km, e.hex])));
+}
+
 function ensureLoaded() {
   if (loaded) return;
   loaded = true;
   const stored = getConfigJSON(CONFIG_KEY, null);
+  // Checked all the way down to each entry, not just the outer band/sector
+  // shape: a blob from before hex-deduping (this file's own earlier
+  // format) has the same BAND_SLOTS x SECTOR_COUNT shape but plain-number
+  // leaves, which would otherwise pass the outer check and then be
+  // misread as tuples (`v[0]`/`v[1]` on a number). There is no way to
+  // recover which aircraft contributed each historical number, so -- same
+  // as the redesign before this one -- a shape that doesn't match is
+  // ignored and started fresh rather than migrated.
   const validShape =
     Array.isArray(stored?.cells) &&
     stored.cells.length === BAND_SLOTS &&
-    stored.cells.every((band) => Array.isArray(band) && band.length === SECTOR_COUNT);
+    stored.cells.every(
+      (band) =>
+        Array.isArray(band) &&
+        band.length === SECTOR_COUNT &&
+        band.every(
+          (cell) =>
+            Array.isArray(cell) &&
+            cell.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === 'number' && typeof e[1] === 'string'),
+        ),
+    );
   if (validShape) {
-    cells = stored.cells.map((band) => band.map((cell) => cell.slice()));
+    cells = stored.cells.map((band) => band.map((cell) => cell.map(([km, hex]) => ({ km, hex }))));
   }
 }
 
@@ -93,24 +143,42 @@ export function sectorIndex(bearing) {
   return Math.floor(((bearing % 360) / 360) * SECTOR_COUNT) % SECTOR_COUNT;
 }
 
-// Keeps `list` sorted descending, capped at TOP_K. Returns true if the
-// value was actually retained (i.e. something changed, for the dirty flag).
-function insertIntoTopK(list, value) {
-  if (list.length < TOP_K) {
-    list.push(value);
-    list.sort((a, b) => b - a);
+// Keeps `list` (entries of {km, hex}) sorted descending by km, capped at
+// TOP_K, with **at most one entry per hex** -- the actual fix for the
+// degeneracy above. Per-second polling means the same aircraft is offered
+// to the same cell dozens of times while it sits in one sector at one
+// altitude; without this, its own consecutive samples simply filled up the
+// "best 5" by themselves. A hex already present is updated in place only
+// if it improved (this is "best ever per aircraft", not "most recent"), so
+// a later, closer position from the same plane can't push its own earlier
+// achievement back out. Returns true if anything actually changed, for the
+// dirty flag.
+function insertIntoTopK(list, hex, km) {
+  const existingIdx = list.findIndex((e) => e.hex === hex);
+  if (existingIdx !== -1) {
+    if (km <= list[existingIdx].km) return false;
+    list[existingIdx] = { km, hex };
+    list.sort((a, b) => b.km - a.km);
     return true;
   }
-  if (value <= list[list.length - 1]) return false;
-  list[list.length - 1] = value;
-  list.sort((a, b) => b - a);
+  if (list.length < TOP_K) {
+    list.push({ km, hex });
+    list.sort((a, b) => b.km - a.km);
+    return true;
+  }
+  if (km <= list[list.length - 1].km) return false;
+  list[list.length - 1] = { km, hex };
+  list.sort((a, b) => b.km - a.km);
   return true;
 }
 
 // Called once per poll tick per tracked aircraft with a known position
 // (same "every tracked aircraft, not just the delta" reasoning as
 // index.js's other per-tick sightings -- see recordRangeAndRegistrationSightings).
-export function recordAntennaSample({ homeLat, homeLon, lat, lon, altBaro, onGround }) {
+// A no-op below the message-count floor (isAntennaSampleEligible) -- the
+// caller doesn't have to remember to gate this itself.
+export function recordAntennaSample({ homeLat, homeLon, lat, lon, altBaro, onGround, hex, messages }) {
+  if (!isAntennaSampleEligible(messages)) return;
   ensureLoaded();
 
   // Rounded to 10 m before it is ever stored. The whole cells structure is
@@ -124,7 +192,7 @@ export function recordAntennaSample({ homeLat, homeLon, lat, lon, altBaro, onGro
   const slot = bandIdx === -1 ? UNKNOWN_BAND_SLOT : bandIdx;
   const secIdx = sectorIndex(bearingDegrees(homeLat, homeLon, lat, lon));
 
-  if (insertIntoTopK(cells[slot][secIdx], km)) {
+  if (insertIntoTopK(cells[slot][secIdx], hex, km)) {
     dirty = true;
   }
 }
@@ -140,8 +208,20 @@ export function recordSignalReading(signalDbfs, peakSignalDbfs) {
   if (typeof peakSignalDbfs === 'number') latestPeakSignalDbfs = peakSignalDbfs;
 }
 
+// Combines several cells' top-K lists into one (e.g. every sector for one
+// altitude band, or every band for one sector) -- still deduped by hex
+// across the *whole* merge, not just within each source cell: an aircraft
+// climbing through a sector can be its own best-ever contact in more than
+// one altitude band's cell for that same sector, and without this it would
+// occupy more than one of the merged result's TOP_K slots. Returns plain
+// km numbers (statsFromTopK below doesn't need to know about hex at all).
 function mergeTopK(lists) {
-  return lists.flat().sort((a, b) => b - a).slice(0, TOP_K);
+  const bestPerHex = new Map();
+  for (const entry of lists.flat()) {
+    const current = bestPerHex.get(entry.hex);
+    if (current === undefined || entry.km > current) bestPerHex.set(entry.hex, entry.km);
+  }
+  return [...bestPerHex.values()].sort((a, b) => b - a).slice(0, TOP_K);
 }
 
 function statsFromTopK(list) {
@@ -186,7 +266,7 @@ export function getLatestSignal() {
 // at all), not just a small one.
 export function flushAntennaStatsIfDirty() {
   if (!dirty) return false;
-  setConfigJSON(CONFIG_KEY, { cells });
+  setConfigJSON(CONFIG_KEY, { cells: serializeCells() });
   dirty = false;
   return true;
 }

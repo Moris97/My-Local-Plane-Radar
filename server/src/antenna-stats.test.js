@@ -12,6 +12,7 @@ const {
   SECTOR_COUNT,
   altitudeBandIndex,
   sectorIndex,
+  isAntennaSampleEligible,
   recordAntennaSample,
   recordSignalReading,
   getAltitudeBandStats,
@@ -32,13 +33,29 @@ beforeEach(() => {
 
 const HOME = { homeLat: 50.0, homeLon: 20.0 };
 
+// A distinct hex per call, for tests that mean to simulate several
+// different aircraft -- top-K is deduped by hex now, so reusing one hex
+// (or leaving it undefined) across calls would collapse them into a single
+// updated-in-place entry instead of populating several distinct slots.
+let nextHexId = 0;
+function hex() {
+  nextHexId += 1;
+  return `HEX${String(nextHexId).padStart(4, '0')}`;
+}
+
+// messages defaults comfortably above the eligibility floor -- tests
+// specifically about that floor override it explicitly.
+function sample(overrides) {
+  return { ...HOME, hex: hex(), messages: 10, altBaro: 3000, onGround: false, ...overrides };
+}
+
 // Every stored sample is a distance and a bearing relative to the home
 // location it was recorded against, so moving the receiver invalidates all
 // of it at once. resetAntennaStats() alone isn't enough: it only drops the
 // in-memory copy, which the next read would reload straight back out of
 // SQLite.
 test('clearAntennaStats wipes the recorded cells, and they stay gone after a reload', () => {
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 30000 });
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, altBaro: 30000 }));
   flushAntennaStatsIfDirty();
   assert.ok(getSectorStats().some((s) => s.maxRangeKm > 0), 'sanity check: something was recorded');
 
@@ -54,7 +71,7 @@ test('clearAntennaStats wipes the recorded cells, and they stay gone after a rel
 // a real, repeated SD write cost. 10 m is already far finer than anything
 // this figure is ever drawn or compared at.
 test('recorded distances are rounded to 10 m before they are ever stored', () => {
-  recordAntennaSample({ ...HOME, lat: 50.4321987654321, lon: 20.7654321987654, altBaro: 30000 });
+  recordAntennaSample(sample({ lat: 50.4321987654321, lon: 20.7654321987654, altBaro: 30000 }));
 
   const [sector] = getSectorStats().filter((s) => s.maxRangeKm > 0);
   assert.notEqual(sector, undefined, 'sanity check: the sample was recorded at all');
@@ -90,7 +107,7 @@ test('sectorIndex maps 0-360 degrees onto SECTOR_COUNT sectors, wrapping at 360'
 
 test('recordAntennaSample updates the altitude band and sector that a sample falls into', () => {
   // Due north (bearing 0 -> sector 0), ~111 km away, 3000 ft (band 0).
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 3000, onGround: false });
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0 }));
   const bands = getAltitudeBandStats();
   const sectors = getSectorStats();
   assert.ok(bands[0].maxRangeKm > 0);
@@ -107,15 +124,21 @@ test('getSectorStats reports a bearing at the midpoint of each sector', () => {
 });
 
 test('recordAntennaSample keeps the maximum range seen per band/sector, never shrinks it', () => {
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 3000, onGround: false }); // far
+  // Same hex both times -- one aircraft, first caught far out, later flying
+  // closer. Its own earlier achievement must stick either way: a same-hex
+  // update only replaces the retained value when the new one is better
+  // (see insertIntoTopK), and a worse different-hex sample could only ever
+  // evict a *worse* existing entry, never this one.
+  const plane = hex();
+  recordAntennaSample(sample({ hex: plane, lat: 51.0, lon: 20.0 })); // far
   const farKm = getAltitudeBandStats()[0].maxRangeKm;
 
-  recordAntennaSample({ ...HOME, lat: 50.1, lon: 20.0, altBaro: 3000, onGround: false }); // closer
+  recordAntennaSample(sample({ hex: plane, lat: 50.1, lon: 20.0 })); // closer
   assert.equal(getAltitudeBandStats()[0].maxRangeKm, farKm);
 });
 
 test('a sample with no altitude data updates the sector but not any named altitude band', () => {
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: undefined, onGround: false });
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, altBaro: undefined }));
   const bands = getAltitudeBandStats();
   assert.ok(bands.every((b) => b.maxRangeKm === 0));
   // Still counted in the "all bands" sector merge (bandIndex = null).
@@ -123,8 +146,8 @@ test('a sample with no altitude data updates the sector but not any named altitu
 });
 
 test('getSectorStats(bandIndex) restricts to just that band, excluding samples from other bands', () => {
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 3000, onGround: false }); // band 0
-  recordAntennaSample({ ...HOME, lat: 51.5, lon: 20.0, altBaro: 12000, onGround: false }); // band 2, farther
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, altBaro: 3000 })); // band 0
+  recordAntennaSample(sample({ lat: 51.5, lon: 20.0, altBaro: 12000 })); // band 2, farther
 
   const band0Sectors = getSectorStats(0);
   const band2Sectors = getSectorStats(2);
@@ -137,13 +160,16 @@ test('getSectorStats(bandIndex) restricts to just that band, excluding samples f
 });
 
 test('topAvgRangeKm smooths a single outlier sample instead of being dragged all the way to it', () => {
-  // Five realistic ~100km samples, then one wild 500km outlier (e.g. a
-  // stray MLAT glitch). A single running max would jump straight to 500;
-  // the top-5 average should land well below it.
+  // Five realistic ~100km samples from five distinct aircraft, then one
+  // wild 500km outlier from a sixth (e.g. a stray MLAT glitch). A single
+  // running max would jump straight to 500; the top-5 average should land
+  // well below it. Distinct hexes throughout -- top-K is deduped by
+  // aircraft, so this is exactly the scenario that degenerated before that
+  // fix (five same-plane samples couldn't out-vote one real outlier).
   for (let i = 0; i < 5; i++) {
-    recordAntennaSample({ ...HOME, lat: 50.9 + i * 0.01, lon: 20.0, altBaro: 3000, onGround: false });
+    recordAntennaSample(sample({ lat: 50.9 + i * 0.01, lon: 20.0 }));
   }
-  recordAntennaSample({ ...HOME, lat: 54.5, lon: 20.0, altBaro: 3000, onGround: false }); // far outlier
+  recordAntennaSample(sample({ lat: 54.5, lon: 20.0 })); // far outlier, distinct aircraft
 
   const band = getAltitudeBandStats()[0];
   assert.ok(band.maxRangeKm > 400, `expected the max to reflect the outlier, got ${band.maxRangeKm}`);
@@ -153,16 +179,101 @@ test('topAvgRangeKm smooths a single outlier sample instead of being dragged all
   );
 });
 
+// The bug this whole redesign fixed: per-second polling used to offer the
+// SAME aircraft to a cell over and over while it sat in one sector at one
+// altitude, so a cell's "best 5" were usually 5 consecutive seconds of one
+// plane -- measured live, topAvgRangeKm equalled maxRangeKm in 169 of 180
+// sectors, i.e. no outlier resistance at all. Deduping by hex is the fix:
+// repeated samples from one aircraft can only ever occupy one slot.
+test('repeated samples from the same aircraft only ever occupy one top-K slot', () => {
+  const plane = hex();
+  for (let i = 0; i < 20; i++) {
+    // Slowly improving, as if cruising steadily closer to the edge of range.
+    recordAntennaSample(sample({ hex: plane, lat: 50.9 + i * 0.001, lon: 20.0 }));
+  }
+  const band = getAltitudeBandStats()[0];
+  // With only one distinct aircraft ever recorded, max and top-avg are
+  // necessarily the same number -- correctly so, this time, because there
+  // is genuinely only one sample to average, not because five consecutive
+  // seconds of it masqueraded as five.
+  assert.equal(band.maxRangeKm, band.topAvgRangeKm);
+});
+
+test('five distinct aircraft at similar range are not collapsed into one, unlike five seconds of the same one', () => {
+  for (let i = 0; i < 5; i++) {
+    recordAntennaSample(sample({ lat: 50.9 + i * 0.001, lon: 20.0 })); // five aircraft, five distinct hexes
+  }
+  const band = getAltitudeBandStats()[0];
+  // Genuinely different aircraft at genuinely different distances -- top
+  // and average should differ, the opposite of the degenerate case above.
+  assert.notEqual(band.maxRangeKm, band.topAvgRangeKm);
+});
+
+// getAltitudeBandStats merges every sector's top-K for one band; an
+// aircraft that was the best-ever contact recorded in two different
+// sectors of that band (e.g. it happened to be the top-5 in both, at
+// different points along its route) must still only be counted once in
+// the merged result -- mergeTopK dedupes across the whole merge, not just
+// within each source cell.
+test('the same aircraft best-in two different sectors of one band is only counted once in the band merge', () => {
+  const plane = hex();
+  recordAntennaSample(sample({ hex: plane, lat: 51.0, lon: 20.0 })); // sector near bearing 0
+  recordAntennaSample(sample({ hex: plane, lat: 50.5, lon: 20.9 })); // a different sector, better distance
+
+  const others = getAltitudeBandStats()[0];
+  assert.equal(others.maxRangeKm, others.topAvgRangeKm, 'only one distinct aircraft was ever recorded in this band');
+});
+
+test('getSectorStats(null) merges across altitude bands with the same per-hex dedup', () => {
+  const plane = hex();
+  recordAntennaSample(sample({ hex: plane, lat: 51.0, lon: 20.0, altBaro: 3000 })); // band 0
+  recordAntennaSample(sample({ hex: plane, lat: 51.0, lon: 20.0, altBaro: 12000 })); // band 2, same bearing, farther
+
+  const allBands = getSectorStats()[0];
+  assert.equal(allBands.maxRangeKm, allBands.topAvgRangeKm, 'still only one distinct aircraft across every band');
+});
+
+test('isAntennaSampleEligible requires a minimum number of decoded messages', () => {
+  assert.equal(isAntennaSampleEligible(0), false);
+  assert.equal(isAntennaSampleEligible(1), false);
+  assert.equal(isAntennaSampleEligible(3), false);
+  assert.equal(isAntennaSampleEligible(4), true);
+  assert.equal(isAntennaSampleEligible(500), true);
+  assert.equal(isAntennaSampleEligible(undefined), false);
+  assert.equal(isAntennaSampleEligible(null), false);
+});
+
+// This is the actual defence against a single lucky decode setting a
+// "best-ever" figure: a contact glimpsed for only a couple of frames
+// before fading (a bit-error near-miss that happened to validate a
+// position, or a genuine but fleeting catch) never gets to enter the top-K
+// at all, regardless of how impressive its one-off distance looks.
+test('recordAntennaSample below the message-count floor is a complete no-op', () => {
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, messages: 1 }));
+  assert.equal(getSectorStats().every((s) => s.maxRangeKm === 0), true);
+  assert.equal(flushAntennaStatsIfDirty(), false);
+});
+
+test('recordAntennaSample with a missing messages count is a no-op, same as too few', () => {
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, messages: undefined }));
+  assert.equal(getSectorStats().every((s) => s.maxRangeKm === 0), true);
+});
+
+test('recordAntennaSample at exactly the message-count floor is recorded', () => {
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0, messages: 4 }));
+  assert.equal(getSectorStats().some((s) => s.maxRangeKm > 0), true);
+});
+
 test('the retained top-K set only grows to accept genuinely better samples, capped at a fixed size', () => {
-  // Record more samples than TOP_K (5) -- only the best 5 should survive,
-  // proven by checking the average moves up as better samples arrive but
-  // eventually stabilizes rather than being dragged down by older, worse
-  // ones that should have been evicted.
-  const sameSpotKm = (offset) => ({ ...HOME, lat: 50.0 + offset, lon: 20.0, altBaro: 3000, onGround: false });
-  for (let i = 1; i <= 5; i++) recordAntennaSample(sameSpotKm(i * 0.01)); // five small, increasing samples
+  // Record more samples than TOP_K (5), each a distinct aircraft -- only
+  // the best 5 should survive, proven by checking the average moves up as
+  // better samples arrive but eventually stabilizes rather than being
+  // dragged down by later, worse ones that should have been evicted.
+  const atOffset = (offset) => sample({ lat: 50.0 + offset, lon: 20.0 });
+  for (let i = 1; i <= 5; i++) recordAntennaSample(atOffset(i * 0.01)); // five small, increasing samples
   const afterFive = getAltitudeBandStats()[0].topAvgRangeKm;
 
-  for (let i = 0; i < 20; i++) recordAntennaSample(sameSpotKm(0.001)); // twenty tiny, much smaller samples
+  for (let i = 0; i < 20; i++) recordAntennaSample(atOffset(0.001)); // twenty tiny, much smaller, from 20 more distinct aircraft
   const afterTwentyTiny = getAltitudeBandStats()[0].topAvgRangeKm;
 
   // The tiny samples never beat the retained top 5, so the average is unchanged.
@@ -185,23 +296,36 @@ test('recordSignalReading ignores non-number values instead of overwriting with 
 
 test('flushAntennaStatsIfDirty only writes (and returns true) when something changed', () => {
   assert.equal(flushAntennaStatsIfDirty(), false);
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 3000, onGround: false });
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0 }));
   assert.equal(flushAntennaStatsIfDirty(), true);
   // Nothing changed since the last flush -- no-op.
   assert.equal(flushAntennaStatsIfDirty(), false);
 });
 
 test('a sample too small to enter an already-full top-K does not mark the state dirty', () => {
-  const sameSpotKm = (offset) => ({ ...HOME, lat: 50.0 + offset, lon: 20.0, altBaro: 3000, onGround: false });
-  for (let i = 1; i <= 5; i++) recordAntennaSample(sameSpotKm(i * 0.1));
+  const atOffset = (offset) => sample({ lat: 50.0 + offset, lon: 20.0 });
+  for (let i = 1; i <= 5; i++) recordAntennaSample(atOffset(i * 0.1));
   flushAntennaStatsIfDirty();
 
-  recordAntennaSample(sameSpotKm(0.0001)); // much smaller than all 5 retained samples
+  recordAntennaSample(atOffset(0.0001)); // a sixth, distinct aircraft, much closer than all 5 retained
+  assert.equal(flushAntennaStatsIfDirty(), false);
+});
+
+// The same aircraft reporting a worse position than its own already-
+// retained best is exactly as much a no-op as a different, worse aircraft
+// -- covered separately because insertIntoTopK takes a different branch
+// for an existing hex (update-in-place) than for a new one (evict-worst).
+test('a same-hex sample that does not improve on its own retained value does not mark the state dirty', () => {
+  const plane = hex();
+  recordAntennaSample(sample({ hex: plane, lat: 51.0, lon: 20.0 })); // far
+  flushAntennaStatsIfDirty();
+
+  recordAntennaSample(sample({ hex: plane, lat: 50.1, lon: 20.0 })); // same plane, closer
   assert.equal(flushAntennaStatsIfDirty(), false);
 });
 
 test('stats survive a reload from persisted config (simulating a restart)', () => {
-  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 3000, onGround: false });
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0 }));
   flushAntennaStatsIfDirty();
   const before = getAltitudeBandStats()[0];
 
@@ -215,6 +339,26 @@ test('a mismatched stored shape (e.g. from before this data model) is ignored, s
   resetAntennaStats();
   const dbModule = await import('./db.js');
   dbModule.setConfigJSON('antennaStats', { altitudeBandMaxKm: [1, 2, 3], sectorMaxKm: [1, 2, 3] });
+  resetAntennaStats();
+
+  assert.doesNotThrow(() => getAltitudeBandStats());
+  assert.ok(getAltitudeBandStats().every((b) => b.maxRangeKm === 0));
+});
+
+// A different mismatch: the outer band/sector shape is right (this WAS a
+// valid antennaStats blob), but each cell's entries are plain numbers --
+// exactly what this file wrote before hex-dedup existed. There is no way
+// to recover which aircraft contributed each historical number, so this
+// is ignored and started fresh too, not migrated -- same as the redesign
+// before this one.
+test('a pre-hex-dedup stored shape (plain-number cells) is ignored, starting fresh', async () => {
+  resetAntennaStats();
+  const dbModule = await import('./db.js');
+  const bandSlots = ALTITUDE_BANDS.length + 1; // +1 for the internal unknown-altitude slot
+  const oldShapeCells = Array.from({ length: bandSlots }, () =>
+    Array.from({ length: SECTOR_COUNT }, () => [100, 90, 80]),
+  );
+  dbModule.setConfigJSON('antennaStats', { cells: oldShapeCells });
   resetAntennaStats();
 
   assert.doesNotThrow(() => getAltitudeBandStats());

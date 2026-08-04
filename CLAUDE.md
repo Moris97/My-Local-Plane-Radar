@@ -1189,6 +1189,46 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   keep sharing one exact number. Bearing math (`bearingDegrees`) added to
   `range.js` alongside `distanceKm`.
 
+  **Every cell's top-K is deduped by aircraft (`hex`), and gated by decode
+  volume.** Per-second polling used to offer the same aircraft to a cell
+  over and over while it sat in one sector at one altitude, so the retained
+  "best 5" were usually 5 consecutive seconds of one plane — measured live,
+  `topAvgRangeKm` equalled `maxRangeKm` in 169 of 180 sectors, i.e. no
+  outlier resistance at all. `insertIntoTopK` now keeps at most one entry
+  per `hex` per cell (a same-hex sample only updates in place, and only if
+  it improves on that aircraft's own best), so a cell's top-5 are the best
+  five *distinct* aircraft ever recorded there. `mergeTopK` (used when
+  combining several cells — every sector for one band, or every band for
+  one sector) dedupes across the whole merge too, not just within each
+  source cell, since one climbing/descending aircraft can be its own
+  best-ever contact in more than one of the cells being combined.
+  `recordAntennaSample` additionally requires `isAntennaSampleEligible`
+  (`messages >= MIN_MESSAGES_FOR_SAMPLE`, 4) before a sample is even
+  offered to a cell — `messages` is readsb's own cumulative per-aircraft
+  decode counter (the details panel's "Messages received" tile), read
+  directly off decode volume rather than elapsed polling time, so a single
+  lucky decode from a distant aircraft (a bit-error near-miss, or a contact
+  glimpsed for a couple of frames before fading) can no longer set a
+  "best-ever" figure on its own — the user's own suggestion, and the actual
+  remaining piece of outlier resistance the hex-dedup above doesn't cover
+  by itself (deduping only stops one aircraft's *repeated* samples from
+  dominating; it does nothing about one aircraft's *single* fluke sample).
+  4 is deliberately low — a global CPR position decode needs at least two
+  position frames, so this asks for barely more than "seen more than
+  once," not a sustained contact.
+
+  **Persisted as compact `[km, hex]` tuples**, not `{km, hex}` objects —
+  repeated JSON field names were most of the weight of a similar blob
+  elsewhere in this app (`stats-history.js`'s snapshot; see that section),
+  and at up to `BAND_SLOTS * SECTOR_COUNT * TOP_K` = 9,000 entries here the
+  same waste would apply. `ensureLoaded`'s shape check now verifies every
+  entry, not just the outer band/sector shape — a blob from before this fix
+  has the same outer shape but plain-number leaves, which would otherwise
+  pass the check and then be misread as tuples. As with the redesign before
+  this one, a shape that doesn't match is ignored and started fresh rather
+  than migrated — there's no way to recover which aircraft contributed each
+  historical number.
+
   **Everything here is relative to the home location it was recorded
   against**, so moving the receiver invalidates all of it at once and
   nothing else would ever correct it. `POST /api/stats/antenna/reset`
@@ -1212,13 +1252,6 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   surprise, and a sector is 2° wide — ~10 km of arc at long range — so
   nudging the pin by a few hundred metres changes nothing meaningful and
   must not nag.
-
-  **Known open issue** (`TODO.md`, 2026-08-04 audit): samples are recorded
-  once per second per aircraft, so a cell's "best 5" are usually 5
-  consecutive seconds of one aircraft — measured live, `topAvgRangeKm`
-  equals `maxRangeKm` in 169 of 180 sectors. The outlier resistance this
-  was built for does not currently exist; the fix is to key the top-K by
-  `hex`. Don't read the two figures as independent until that lands.
 
   Per (altitude band, sector) cell, retains the **best `TOP_K` (5) samples
   ever** (`insertIntoTopK`, sorted-and-capped, still bounded regardless of

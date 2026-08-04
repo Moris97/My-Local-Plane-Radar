@@ -325,21 +325,20 @@ numbers. What's left:
 Found while fixing the 24h-window bugs; both were raised and deliberately
 deferred by the user in the same conversation.
 
-- **Antenna coverage: the top-5 mechanism doesn't actually resist outliers**
-  (effort: small, impact: high) — `antenna-stats.js` keeps the best 5
-  samples per (band, sector) cell so that one freak contact can't create a
-  permanent spike, the way VRS's and tar1090's coverage plots do. But
-  samples are recorded **once per second per aircraft**, so those 5 are
-  normally 5 consecutive seconds of the *same* aircraft a few hundred
-  metres apart. Measured live: the median difference between a sector's
-  `maxRangeKm` and its `topAvgRangeKm` was 0.0 km, with 169 of 180 sectors
-  within 0.5 km. So the rose chart's two series are the same number, and
-  the map's coverage fill (top-avg) and outline (max) are the same shape —
-  the whole two-layer design draws one thing twice. Fix: key the top-K by
-  `hex` so it holds the best 5 *distinct aircraft*. Must accept the
-  existing stored blob and convert it rather than failing the shape check
-  in `ensureLoaded`, which would throw away every install's accumulated
-  coverage history.
+- ~~**Antenna coverage: the top-5 mechanism doesn't actually resist
+  outliers**~~ **Done in v2.1.10.** Fixed with two changes, the second
+  suggested by the user after seeing the aircraft details panel's
+  "Messages received" field: (1) `insertIntoTopK`/`mergeTopK` dedupe by
+  `hex`, so a cell's top-5 are five distinct aircraft rather than five
+  consecutive seconds of one; (2) `recordAntennaSample` now requires
+  `messages >= 4` (readsb's own cumulative decode counter) before a sample
+  is even offered, so a single lucky decode from a distant aircraft can't
+  set a "best-ever" figure by itself either. The existing stored blob
+  could not be migrated (no way to recover which aircraft contributed each
+  historical number), so a mismatched shape is detected and started fresh,
+  same as the redesign before this one — an established install loses its
+  accumulated coverage history once, not silently corrupted going
+  forward.
 - **Storage/write hygiene** (effort: small, impact: medium) — several small
   things noticed in the same pass: no `PRAGMA journal_mode = WAL` /
   `synchronous = NORMAL` (`.gitignore` already lists `*.db-wal`/`*.db-shm`,
