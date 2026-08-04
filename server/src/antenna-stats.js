@@ -1,5 +1,5 @@
 import { distanceKm, bearingDegrees, roundKm } from './range.js';
-import { getConfigJSON, setConfigJSON } from './db.js';
+import { getConfigJSON, setConfigJSON, deleteConfig } from './db.js';
 
 const CONFIG_KEY = 'antennaStats';
 
@@ -189,6 +189,20 @@ export function flushAntennaStatsIfDirty() {
   setConfigJSON(CONFIG_KEY, { cells });
   dirty = false;
   return true;
+}
+
+// Throws away every recorded band/sector sample, on disk as well as in
+// memory. Distinct from resetAntennaStats() below, which only drops the
+// in-memory state (tests) and would happily reload the same blob from
+// SQLite on the next read. The reason this exists at all: every stored
+// sample is a distance and a bearing *relative to the home location it was
+// recorded against*, so moving the receiver silently invalidates all of
+// it -- there was no way to say so and start over.
+export function clearAntennaStats() {
+  cells = createEmptyCells();
+  loaded = true;
+  dirty = false;
+  deleteConfig(CONFIG_KEY);
 }
 
 export function resetAntennaStats() {

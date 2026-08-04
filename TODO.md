@@ -350,11 +350,11 @@ deferred by the user in the same conversation.
   new record instead of going through a batched flush (a burst on a fresh
   install, rare afterwards); the five flush calls in `flushDailyStats` could
   share one transaction instead of five.
-- **Nothing resets antenna statistics when the receiver moves** (effort:
-  small, impact: medium) — every stored bearing and distance was measured
-  against whatever home location was configured at the time, and changing
-  it in Settings silently leaves the old samples in place. There is no
-  "clear statistics" control anywhere. Same applies to `allTimeMaxRangeKm`.
+- ~~**Nothing resets antenna statistics when the receiver moves**~~ **Done
+  in v2.1.9.** `POST /api/stats/antenna/reset` plus a button on the Server
+  tab, clearing the coverage cells, the all-time range record and the
+  rolling range samples. `PUT /api/settings` reports `homeMovedKm` so the
+  UI can point out what went stale, but nothing is wiped automatically.
 - ~~**Two different aircraft counts on one screen**~~ **Done in v2.1.9.**
   It turned out to be three, not two: readsb's own counters in the history
   charts, the server's `getTrackedAircraft().length` sent over the

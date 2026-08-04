@@ -34,9 +34,10 @@ import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getAllAirlinesSummary } from './db.js';
-import { getAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
-import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal } from './antenna-stats.js';
-import { destinationPoint } from './range.js';
+import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
+import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats } from './antenna-stats.js';
+import { destinationPoint, distanceKm, roundKm } from './range.js';
+import { clearRangeSamples } from './stats-history.js';
 
 const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
 
@@ -209,12 +210,27 @@ export async function buildServer({ logger = true } = {}) {
 
   app.get('/api/settings', { preHandler: requireSettingsAuth }, async () => settingsPayload());
 
+  // Answers with how far the *effective* home actually moved, so the UI can
+  // point out that everything measured from the old position (antenna
+  // coverage, the all-time range record) no longer describes where the
+  // receiver is. Deliberately reports rather than acts: a small correction
+  // of the pin is routine and must not silently destroy months of coverage
+  // data, so clearing stays an explicit choice -- POST /api/stats/antenna/
+  // reset below. Clearing a manual override counts as a move too, since the
+  // effective home falls back to receiver.json's own position.
+  function homeMovedKm(previous) {
+    const current = getEffectiveHome();
+    if (!previous || !current) return null;
+    return roundKm(distanceKm(previous.lat, previous.lon, current.lat, current.lon));
+  }
+
   app.put('/api/settings', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
+    const previousHome = getEffectiveHome();
 
     if (body.homeLat === null && body.homeLon === null) {
       clearManualHome();
-      return settingsPayload();
+      return { ...settingsPayload(), homeMovedKm: homeMovedKm(previousHome) };
     }
 
     if (typeof body.homeLat !== 'number' || typeof body.homeLon !== 'number') {
@@ -225,7 +241,7 @@ export async function buildServer({ logger = true } = {}) {
     }
 
     setManualHome(body.homeLat, body.homeLon);
-    return settingsPayload();
+    return { ...settingsPayload(), homeMovedKm: homeMovedKm(previousHome) };
   });
 
   // Deliberately NOT behind requireSettingsAuth: this is what the automatic
@@ -396,6 +412,25 @@ export async function buildServer({ logger = true } = {}) {
   // from the receiver's exact home coordinates (each vertex is home +
   // bearing + distance), so it's just as revealing as the home marker --
   // same access control, not a special case that bypasses it.
+  // Everything measured against a home location: the per-band/sector
+  // coverage cells, the all-time range record, and the rolling per-minute
+  // range samples feeding today's figures. All three are distances and
+  // bearings *from* a specific point, so they describe the old position
+  // after the receiver moves and nothing else would ever correct them --
+  // the all-time record in particular can otherwise never be beaten again
+  // from a worse location, silencing its notification for good.
+  //
+  // Deliberately does NOT touch daily_stats: those rows are a historical
+  // log of what was true on each day, not a current claim about where the
+  // antenna reaches. Same auth gate as the coverage endpoint, since this
+  // is a server-level, irreversible action.
+  app.post('/api/stats/antenna/reset', { preHandler: requireSettingsAuth }, async () => {
+    clearAntennaStats();
+    resetAllTimeMaxRangeKm();
+    clearRangeSamples();
+    return { ok: true };
+  });
+
   app.get('/api/stats/antenna/coverage', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const home = getEffectiveHome();
     if (!home) return { fillPolygon: null, maxPolygon: null };

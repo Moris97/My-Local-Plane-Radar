@@ -389,6 +389,12 @@ async function renderServerTab(root) {
         <button type="button" id="mlpr-home-save">${t('save')}</button>
         <button type="button" id="mlpr-home-reset" style="display:none">${t('resetToAuto')}</button>
       </div>
+      <p class="mlpr-home-status">${t('antennaStatsResetHint')}</p>
+      <p id="mlpr-antenna-reset-notice" class="mlpr-gate-error" style="display:none"></p>
+      <div class="mlpr-home-actions">
+        <button type="button" id="mlpr-antenna-reset">${t('antennaStatsReset')}</button>
+      </div>
+      <p id="mlpr-antenna-reset-status" class="mlpr-home-status"></p>
     </fieldset>
 
     <fieldset class="mlpr-settings-group">
@@ -745,12 +751,43 @@ function wireServerPort(container, onUnauthorized) {
   loadPort();
 }
 
+// Far enough that the recorded coverage no longer describes where the
+// antenna is. A sector is 2 degrees wide, which at a few hundred km is
+// ~10 km of arc, so nudging the pin by a few hundred metres to fine-tune it
+// changes nothing meaningful -- and nagging about that would train the user
+// to dismiss the notice that matters.
+const HOME_MOVED_NOTICE_KM = 1;
+
 function wireHomeLocation(container, onUnauthorized) {
   const homeLatInput = container.querySelector('#mlpr-home-lat');
   const homeLonInput = container.querySelector('#mlpr-home-lon');
   const homeStatusEl = container.querySelector('#mlpr-home-status');
   const homeResetBtn = container.querySelector('#mlpr-home-reset');
   const homeSaveBtn = container.querySelector('#mlpr-home-save');
+  const antennaResetBtn = container.querySelector('#mlpr-antenna-reset');
+  const antennaResetNoticeEl = container.querySelector('#mlpr-antenna-reset-notice');
+  const antennaResetStatusEl = container.querySelector('#mlpr-antenna-reset-status');
+
+  // Shown after a save that actually moved the receiver: says what is now
+  // stale, and leaves clearing it to the button right below. Reporting
+  // rather than acting -- wiping months of coverage as a side effect of
+  // correcting a coordinate would be a nasty surprise.
+  function showMoveNotice(movedKm) {
+    if (typeof movedKm !== 'number' || movedKm < HOME_MOVED_NOTICE_KM) return;
+    const { units } = getSettings();
+    antennaResetNoticeEl.textContent = t('homeMovedNotice').replace('{km}', formatDistance(movedKm, units) ?? `${movedKm} km`);
+    antennaResetNoticeEl.style.display = '';
+  }
+
+  antennaResetBtn.addEventListener('click', async () => {
+    antennaResetStatusEl.textContent = '';
+    if (!window.confirm(t('antennaStatsResetConfirm'))) return;
+
+    const response = await authedFetch('/api/stats/antenna/reset', { method: 'POST' }, onUnauthorized);
+    if (!response || !response.ok) return;
+    antennaResetNoticeEl.style.display = 'none';
+    antennaResetStatusEl.textContent = t('antennaStatsResetDone');
+  });
 
   async function loadHome() {
     const response = await authedFetch('/api/settings', undefined, onUnauthorized);
@@ -782,6 +819,8 @@ function wireHomeLocation(container, onUnauthorized) {
       onUnauthorized,
     );
     if (!response) return;
+    const saved = await response.json().catch(() => ({}));
+    showMoveNotice(saved.homeMovedKm);
     await loadHome();
   });
 
@@ -796,6 +835,10 @@ function wireHomeLocation(container, onUnauthorized) {
       onUnauthorized,
     );
     if (!response) return;
+    // Dropping a manual override moves the effective home too -- back to
+    // whatever receiver.json reports -- so it gets the same notice.
+    const saved = await response.json().catch(() => ({}));
+    showMoveNotice(saved.homeMovedKm);
     await loadHome();
   });
 

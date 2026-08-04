@@ -296,6 +296,16 @@ export function getLatestStatsValues() {
   };
 }
 
+// Drops the rolling range window and the in-progress minute, without
+// touching the aircraft-count history (which is home-independent). Part of
+// the "receiver moved" reset: every one of these samples is a distance
+// from the old home.
+export function clearRangeSamples() {
+  rangeSamples = [];
+  currentMinuteKey = null;
+  currentMinuteBestKm = 0;
+}
+
 export function resetStatsHistory() {
   history.length = 0;
   lastSampleEnd = null;

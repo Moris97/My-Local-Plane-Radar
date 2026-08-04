@@ -18,6 +18,7 @@ const {
   getSectorStats,
   getLatestSignal,
   flushAntennaStatsIfDirty,
+  clearAntennaStats,
   resetAntennaStats,
 } = await import('./antenna-stats.js');
 
@@ -30,6 +31,23 @@ beforeEach(() => {
 });
 
 const HOME = { homeLat: 50.0, homeLon: 20.0 };
+
+// Every stored sample is a distance and a bearing relative to the home
+// location it was recorded against, so moving the receiver invalidates all
+// of it at once. resetAntennaStats() alone isn't enough: it only drops the
+// in-memory copy, which the next read would reload straight back out of
+// SQLite.
+test('clearAntennaStats wipes the recorded cells, and they stay gone after a reload', () => {
+  recordAntennaSample({ ...HOME, lat: 51.0, lon: 20.0, altBaro: 30000 });
+  flushAntennaStatsIfDirty();
+  assert.ok(getSectorStats().some((s) => s.maxRangeKm > 0), 'sanity check: something was recorded');
+
+  clearAntennaStats();
+  assert.equal(getSectorStats().every((s) => s.maxRangeKm === 0), true);
+
+  resetAntennaStats(); // forces the next read to go back to SQLite
+  assert.equal(getSectorStats().every((s) => s.maxRangeKm === 0), true);
+});
 
 // The cells structure is persisted verbatim as one JSON config blob, and at
 // full double precision the digits are the overwhelming majority of it --

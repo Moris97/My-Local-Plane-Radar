@@ -74,6 +74,14 @@ const DICTIONARIES = {
     homeNotSet: 'Not set',
     save: 'Save',
     resetToAuto: 'Reset to auto-detected',
+    antennaStatsReset: 'Clear antenna statistics',
+    antennaStatsResetHint:
+      'Reception coverage and the all-time range record are measured from the receiver location. Clear them after moving the antenna, so they describe where it is now.',
+    antennaStatsResetConfirm:
+      'Clear all recorded antenna coverage and the all-time range record? This cannot be undone. Daily statistics are kept.',
+    antennaStatsResetDone: 'Antenna statistics cleared.',
+    homeMovedNotice:
+      'Receiver location moved by {km}. Coverage and the range record were measured from the old position.',
     statsRange24h: '24h',
     statsRange7d: '7d',
     statsRange31d: '31d',
@@ -378,6 +386,14 @@ const DICTIONARIES = {
     homeNotSet: 'Nie ustawiono',
     save: 'Zapisz',
     resetToAuto: 'Przywróć automatyczne wykrywanie',
+    antennaStatsReset: 'Wyczyść statystyki anteny',
+    antennaStatsResetHint:
+      'Pokrycie odbioru i rekord zasięgu liczone są względem lokalizacji odbiornika. Wyczyść je po przeniesieniu anteny, żeby opisywały miejsce, w którym stoi teraz.',
+    antennaStatsResetConfirm:
+      'Wyczyścić całe zapisane pokrycie anteny i rekord zasięgu wszech czasów? Tej operacji nie da się cofnąć. Statystyki dzienne zostaną zachowane.',
+    antennaStatsResetDone: 'Statystyki anteny wyczyszczone.',
+    homeMovedNotice:
+      'Lokalizacja odbiornika przesunięta o {km}. Pokrycie i rekord zasięgu liczone były względem starej pozycji.',
     statsRange24h: '24h',
     statsRange7d: '7 dni',
     statsRange31d: '31 dni',

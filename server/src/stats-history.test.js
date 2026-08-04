@@ -12,6 +12,7 @@ import {
   resetStatsHistory,
   recordRangeSample,
   recordTrackedCounts,
+  clearRangeSamples,
   getRangeSummary,
   getMaxRangeLastHourKm,
   getTodaysRangeSamples,
@@ -228,6 +229,21 @@ test('range samples are stored rounded to 10 m', () => {
   recordRangeSample(300.20524528563544, T0);
   recordRangeSample(150.98765432109876, T0 + MINUTE);
   assert.deepEqual(getRangeSamples().map((s) => s.km), [300.21, 150.99]);
+});
+
+// Part of the "receiver moved" reset: every range sample is a distance
+// from the old home. The aircraft-count history is home-independent and
+// deliberately survives.
+test('clearRangeSamples drops the range window but leaves the count history alone', () => {
+  ingestWithCounts(3, 1, { last1min: { end: T0 / 1000, messages: 100 } }, T0);
+  recordRangeSample(400, T0);
+  assert.equal(getRangeSummary().maxRangeKm, 400);
+
+  clearRangeSamples();
+
+  assert.equal(getRangeSummary().maxRangeKm, 0);
+  assert.deepEqual(getRangeSamples(), []);
+  assert.equal(getHistory().length, 1, 'aircraft counts are not measured from home');
 });
 
 test('getRangeSummary is {0, 0} when nothing has been recorded yet', () => {

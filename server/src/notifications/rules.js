@@ -1,4 +1,4 @@
-import { getConfig, setConfig } from '../db.js';
+import { getConfig, setConfig, deleteConfig } from '../db.js';
 import { hasSeenAircraft, markAircraftSeen } from '../aircraft-tracked.js';
 import { getNotificationSettings, getNtfyTopic } from './settings.js';
 import { isOnCooldown, markNotified } from './cooldown.js';
@@ -252,6 +252,15 @@ export function prunePendingFirstSeen(maxAgeMs = 10 * 60 * 1000) {
 // range number without reimplementing this tracking a second time.
 export function getAllTimeMaxRangeKm() {
   return Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
+}
+
+// The all-time record is a distance from the home location it was measured
+// against, so it is cleared alongside the antenna coverage cells when the
+// receiver moves -- otherwise a record set from the old position can never
+// be beaten from the new one, and the "new range record" notification goes
+// permanently silent.
+export function resetAllTimeMaxRangeKm() {
+  deleteConfig(ALL_TIME_MAX_RANGE_KEY);
 }
 
 // A completely different kind of rule from everything above: those all fire

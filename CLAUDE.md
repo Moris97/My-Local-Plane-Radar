@@ -1189,6 +1189,30 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   keep sharing one exact number. Bearing math (`bearingDegrees`) added to
   `range.js` alongside `distanceKm`.
 
+  **Everything here is relative to the home location it was recorded
+  against**, so moving the receiver invalidates all of it at once and
+  nothing else would ever correct it. `POST /api/stats/antenna/reset`
+  (`requireSettingsAuth`, Settings → Server, next to the receiver location)
+  clears the coverage cells (`clearAntennaStats` — deletes the config key,
+  unlike `resetAntennaStats`, which only drops the in-memory copy and would
+  reload the same blob on the next read), the all-time range record
+  (`resetAllTimeMaxRangeKm` — otherwise a record set from the old position
+  can never be beaten from the new one and its notification goes
+  permanently silent), and the rolling per-minute range samples
+  (`clearRangeSamples`). It deliberately does **not** touch `daily_stats`:
+  those rows are a historical log of what was true on each day, not a
+  current claim about where the antenna reaches.
+
+  **`PUT /api/settings` reports, it does not act**: it answers with
+  `homeMovedKm` (distance between the old and new *effective* home, so
+  dropping a manual override counts too, since it falls back to
+  receiver.json's position) and the Server tab shows a notice above the
+  clear button past `HOME_MOVED_NOTICE_KM` (1 km). Wiping months of
+  coverage as a side effect of correcting a coordinate would be a nasty
+  surprise, and a sector is 2° wide — ~10 km of arc at long range — so
+  nudging the pin by a few hundred metres changes nothing meaningful and
+  must not nag.
+
   **Known open issue** (`TODO.md`, 2026-08-04 audit): samples are recorded
   once per second per aircraft, so a cell's "best 5" are usually 5
   consecutive seconds of one aircraft — measured live, `topAvgRangeKm`
