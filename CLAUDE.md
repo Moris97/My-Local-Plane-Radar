@@ -1156,8 +1156,16 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
     first_seen_at`), guarded the same way as `seen_aircraft`
     (`hasSeenFlight` SELECT before `markFlightSeen` INSERT — hard rule 5,
     getting this guard wrong was a real caught-before-ship bug).
-  - **All-time max range** reuses the notification engine's existing
-    `allTimeMaxRangeKm` config value (`getAllTimeMaxRangeKm`).
+  - **No max-range tile.** `/api/stats/summary` used to compute one (the
+    all-time record for `all`, a re-bucketing of the whole history for
+    every other range) and show it above the range chart already plotting
+    the same figure over the same range. That made **four** differently-
+    scoped range readings on one screen — rolling last hour ("Now" tile),
+    this range (this tile), per time bucket (range chart), per altitude
+    band all-time (antenna section) — under near-identical labels. The tile
+    is gone; the other three each show something the others don't.
+    `getAllTimeMaxRangeKm` is still maintained and still drives the "new
+    range record" notification, it's just not surfaced on this screen.
 - **Doughnut ↔ line toggle** on "most common type/airline" charts
   (`chartView` state, two pill buttons). Line view is *new-registrations-
   of-this-type/airline over time* (reusing the existing "new registrations"

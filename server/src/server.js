@@ -34,7 +34,7 @@ import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getAllAirlinesSummary } from './db.js';
-import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
+import { resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
 import { clearRangeSamples } from './stats-history.js';
@@ -360,20 +360,17 @@ export async function buildServer({ logger = true } = {}) {
   // left every range in between (7d/31d/1y) with nothing to show here at
   // all.
   //
-  // 'all' keeps reading the notification engine's own getAllTimeMaxRangeKm
-  // rather than deriving a max from daily_stats buckets like every other
-  // range does below -- that value already comes from the exact same
-  // self-computed, MLAT-excluded per-tick sampling as daily_stats itself
-  // (see recordRangeAndRegistrationSightings), so re-deriving it a second,
-  // slightly different way here would risk exactly the kind of "two
-  // independently-computed range figures disagree" bug that reusing a
-  // single source of truth already fixed once before.
+  // Counts only. This used to also compute a max-range figure for the
+  // range (re-bucketing the whole history just for one tile), which the
+  // Stats screen showed directly above a chart already plotting the same
+  // number over the same range -- one of four differently-scoped range
+  // readings on that one screen, all labelled almost identically. The
+  // notification engine's own all-time record (getAllTimeMaxRangeKm) is
+  // still maintained and still triggers its notification; it just isn't
+  // surfaced here.
   app.get('/api/stats/summary', async (request) => {
     const range = parseStatsRange(request);
     const sinceMs = rangeStartMs(range);
-    const maxRangeKm = range === 'all'
-      ? getAllTimeMaxRangeKm()
-      : Math.max(0, ...getStatsHistoryForRange(range).map((bucket) => bucket.maxRangeKm ?? 0));
 
     return {
       // Two deliberately different aircraft counts, not one: aircraftSeen
@@ -386,7 +383,6 @@ export async function buildServer({ logger = true } = {}) {
       aircraftSeenCount: getAircraftSeenCount(sinceMs),
       aircraftTrackedCount: getAircraftTrackedCount(sinceMs),
       uniqueFlightsCount: getSeenFlightsCount(sinceMs),
-      maxRangeKm,
       // Deliberately no topTypes/topAirlines: those are what
       // /api/stats/types and /api/stats/airlines already answer, for the
       // same range via the same functions. Returning them here too meant

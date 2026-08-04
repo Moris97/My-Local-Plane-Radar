@@ -771,7 +771,6 @@ export function renderStatsPanel(container) {
     const titleEl = container.querySelector('#mlpr-summary-title');
     if (titleEl) titleEl.textContent = t(RANGE_LABEL_KEYS[currentRange]);
 
-    const { units } = getSettings();
     const summary = await fetchJson(`/api/stats/summary?range=${currentRange}`, null);
     const tilesEl = container.querySelector('#mlpr-summary-tiles');
     if (!summary) {
@@ -779,16 +778,22 @@ export function renderStatsPanel(container) {
       return;
     }
 
-    // Tiles only. The type/airline breakdown used to be drawn here *as well
-    // as* by drawTypeChart/drawAirlineChart below -- same range, same
-    // server-side function (getTypeCounts), same label, twice on one
-    // screen. The surviving pair is the one with the doughnut/line toggle,
-    // moved up into this section where a breakdown-of-the-range belongs.
+    // Counts only, and deliberately no "max range" tile: the range chart
+    // directly below shows that same figure for the same range, with its
+    // distribution over time instead of one collapsed number. Four
+    // differently-scoped range readings on one screen (rolling hour, this
+    // range, per time bucket, per altitude band all-time) with near-
+    // identical labels was the least readable thing here.
+    //
+    // The type/airline breakdown likewise used to be drawn here *as well
+    // as* by drawTypeChart/drawAirlineChart -- same range, same server-side
+    // function (getTypeCounts), same label, twice on one screen. The
+    // surviving pair is the one with the doughnut/line toggle, moved up
+    // into this section where a breakdown-of-the-range belongs.
     tilesEl.innerHTML = [
       tileHtml(t('tileAircraftSeen'), String(summary.aircraftSeenCount)),
       tileHtml(t('tileAircraftTracked'), String(summary.aircraftTrackedCount), t('aircraftTrackedHint')),
       tileHtml(t('tileUniqueFlights'), String(summary.uniqueFlightsCount)),
-      tileHtml(t('maxRange'), formatDistance(summary.maxRangeKm, units) ?? '–'),
     ].join('');
   }
 
