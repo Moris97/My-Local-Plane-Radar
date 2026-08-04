@@ -1,3 +1,7 @@
+// Day boundaries here are local (see time-buckets.js); pin a real
+// non-UTC zone so these assertions mean something on a UTC dev machine.
+process.env.TZ = 'Europe/Warsaw';
+
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';

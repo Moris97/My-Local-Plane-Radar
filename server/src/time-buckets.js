@@ -35,11 +35,36 @@ export function rangeStartMs(range, now = Date.now()) {
   return 0; // 'all' -- no lower bound
 }
 
+function pad(n) {
+  return String(n).padStart(2, '0');
+}
+
+// Every bucket key and every day boundary in the stats layer is in the
+// *local* timezone of the machine running this -- the Pi and the person
+// reading the charts are in the same zone, and UTC boundaries meant "today"
+// rolled over at 02:00 local on a UTC+2 receiver while hour labels read two
+// hours behind the wall clock. Nothing here should ever go back to
+// toISOString(): that is UTC by definition.
+export function localDayString(ms) {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+// The inverse: midnight *local* time of that calendar day. Deliberately not
+// `new Date('YYYY-MM-DD')`, which JS parses as UTC midnight -- that is
+// exactly the mismatch this pair exists to remove.
+export function startOfLocalDayMs(dayString) {
+  const [year, month, day] = dayString.split('-').map(Number);
+  return new Date(year, month - 1, day).getTime();
+}
+
 function isoWeekKey(date) {
   // ISO 8601 week-numbering year + week, computed against a UTC-normalized
   // Thursday of the same week (the standard trick: the ISO week's year is
-  // whichever year owns that week's Thursday).
-  const target = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  // whichever year owns that week's Thursday). Seeded from the *local*
+  // calendar date -- the UTC normalization below is only there to make the
+  // day arithmetic DST-free, not to move the date into UTC.
+  const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
   const dayNumber = (target.getUTCDay() + 6) % 7; // Monday = 0 .. Sunday = 6
   target.setUTCDate(target.getUTCDate() - dayNumber + 3); // nearest Thursday
   const firstThursday = new Date(Date.UTC(target.getUTCFullYear(), 0, 4));
@@ -49,11 +74,11 @@ function isoWeekKey(date) {
 
 export function bucketKey(dateMs, granularity) {
   const d = new Date(dateMs);
-  const iso = d.toISOString();
-  if (granularity === 'hour') return iso.slice(0, 13); // YYYY-MM-DDTHH
-  if (granularity === 'day') return iso.slice(0, 10); // YYYY-MM-DD
+  const day = localDayString(dateMs); // YYYY-MM-DD, local
+  if (granularity === 'hour') return `${day}T${pad(d.getHours())}`; // YYYY-MM-DDTHH
+  if (granularity === 'day') return day;
   if (granularity === 'week') return isoWeekKey(d);
-  return iso.slice(0, 7); // YYYY-MM
+  return day.slice(0, 7); // YYYY-MM
 }
 
 // items: any array. getTime/getValue extract what's needed per item.

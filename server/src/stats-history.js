@@ -1,3 +1,6 @@
+import { localDayString, startOfLocalDayMs } from './time-buckets.js';
+import { roundKm } from './range.js';
+
 // Both in-memory series below are *rolling 24h windows*, pruned by age
 // rather than by a raw sample count, plus an hour of slack so a bucket
 // right at the 24h edge is still complete. They are what the Stats view's
@@ -48,18 +51,18 @@ function pruneWindow(samples, timeOfMs, referenceMs = -Infinity) {
 const historyTimeMs = (s) => s.t * 1000;
 const rangeSampleTimeMs = (s) => s.t;
 
+// The day boundary is *local* midnight, not UTC's -- see time-buckets.js.
+// daily_stats keys, the "Ten dzień" section and every day bucket on the
+// charts all come through this one pair, so they cannot disagree about
+// when a day starts.
 function todayDateString(now = Date.now()) {
-  return new Date(now).toISOString().slice(0, 10);
+  return localDayString(now);
 }
 
 function dayStartMs(dateString) {
-  return new Date(`${dateString}T00:00:00.000Z`).getTime();
+  return startOfLocalDayMs(dateString);
 }
 
-// Start of "today" (UTC midnight), matching the exact day boundary
-// dailyAccumulator/todayDateString already use -- the "Ten dzień" Stats
-// section reuses this same boundary rather than inventing a second,
-// possibly-inconsistent definition of "today" (e.g. local time).
 export function getTodayStartMs(now = Date.now()) {
   return dayStartMs(todayDateString(now));
 }
@@ -157,7 +160,7 @@ export function getDailyAccumulator() {
 // after a burst of calls doesn't look stale for up to 60s.
 export function getRangeSamples() {
   const samples = rangeSamples.slice();
-  if (currentMinuteKey !== null) samples.push({ km: currentMinuteBestKm, t: currentMinuteKey * 60000 });
+  if (currentMinuteKey !== null) samples.push({ km: roundKm(currentMinuteBestKm), t: currentMinuteKey * 60000 });
   return samples;
 }
 
@@ -211,7 +214,7 @@ export function ingestStats(stats, now = Date.now()) {
   const withoutPos = typeof stats.aircraft_without_pos === 'number' ? stats.aircraft_without_pos : 0;
   const aircraftCount = withPos + withoutPos;
   const messagesPerMinute = typeof last1min.messages === 'number' ? last1min.messages : 0;
-  const maxRangeKm = typeof stats.total?.max_distance === 'number' ? stats.total.max_distance / 1000 : 0;
+  const maxRangeKm = typeof stats.total?.max_distance === 'number' ? roundKm(stats.total.max_distance / 1000) : 0;
 
   const sample = { t: last1min.end, aircraftCount, withPos, withoutPos, messagesPerMinute, maxRangeKm };
   // readsb's `last1min` is a *sliding* 60-second window whose `end` is
@@ -254,7 +257,7 @@ export function recordRangeSample(km, now = Date.now()) {
 
   const key = minuteKey(now);
   if (currentMinuteKey === null || key !== currentMinuteKey) {
-    if (currentMinuteKey !== null) rangeSamples.push({ km: currentMinuteBestKm, t: currentMinuteKey * 60000 });
+    if (currentMinuteKey !== null) rangeSamples.push({ km: roundKm(currentMinuteBestKm), t: currentMinuteKey * 60000 });
     pruneWindow(rangeSamples, rangeSampleTimeMs);
     currentMinuteKey = key;
     currentMinuteBestKm = km;

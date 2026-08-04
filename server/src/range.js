@@ -1,5 +1,16 @@
 const EARTH_RADIUS_KM = 6371;
 
+// Every distance this app stores or persists goes through here first: 10 m
+// precision, which is already far finer than anything drawn ("434 km") or
+// compared. A raw double serializes as ~17 characters of noise, and both
+// the antenna-coverage cells and the stats-history snapshot are persisted
+// as JSON config blobs where that noise dominates the payload -- a real SD
+// write cost (hard rule: batch writes, minimize SD wear).
+const KM_PRECISION = 100;
+export function roundKm(km) {
+  return Math.round(km * KM_PRECISION) / KM_PRECISION;
+}
+
 // Whether an aircraft's *position* says anything meaningful about this
 // receiver's own reception range. Only true ADS-B ("adsb_icao",
 // "adsb_icao_nt", "adsb_other") qualifies -- MLAT positions are computed

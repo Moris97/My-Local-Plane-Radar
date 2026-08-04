@@ -1,6 +1,11 @@
+// Pinned to a real non-UTC zone (UTC+1/+2 with DST): every key this module
+// builds is local by design, so running the assertions in UTC would let a
+// regression back to toISOString() pass unnoticed on a UTC dev machine.
+process.env.TZ = 'Europe/Warsaw';
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { granularityForRange, rangeStartMs, bucketKey, bucketize } from './time-buckets.js';
+import { granularityForRange, rangeStartMs, bucketKey, bucketize, localDayString, startOfLocalDayMs } from './time-buckets.js';
 
 const NOW = new Date('2026-03-15T00:00:00Z').getTime();
 const DAYS = 24 * 60 * 60 * 1000;
@@ -50,11 +55,29 @@ test('rangeStartMs computes the expected cutoff for each range', () => {
   assert.equal(rangeStartMs('all', now), 0);
 });
 
-test('bucketKey formats hour/day/month keys correctly', () => {
-  const t = new Date('2026-03-15T14:37:00Z').getTime();
-  assert.equal(bucketKey(t, 'hour'), '2026-03-15T14');
+test('bucketKey formats hour/day/month keys in local time', () => {
+  const t = new Date('2026-03-15T14:37:00Z').getTime(); // 15:37 in Warsaw (UTC+1 in March)
+  assert.equal(bucketKey(t, 'hour'), '2026-03-15T15');
   assert.equal(bucketKey(t, 'day'), '2026-03-15');
   assert.equal(bucketKey(t, 'month'), '2026-03');
+});
+
+// The case that motivated moving off UTC keys: late evening local time is
+// already the next day in UTC, so a UTC key put the reading on tomorrow's
+// bucket and rolled "today" over two hours early.
+test('bucketKey puts a late local evening on the local day, not the UTC one', () => {
+  const t = new Date('2026-07-27T22:30:00Z').getTime(); // 00:30 on the 28th in Warsaw (UTC+2)
+  assert.equal(bucketKey(t, 'day'), '2026-07-28');
+  assert.equal(bucketKey(t, 'hour'), '2026-07-28T00');
+});
+
+test('localDayString and startOfLocalDayMs round-trip through local midnight', () => {
+  const day = '2026-07-27';
+  const midnight = startOfLocalDayMs(day);
+  assert.equal(localDayString(midnight), day);
+  assert.equal(new Date(midnight).getHours(), 0);
+  assert.equal(localDayString(midnight + 23 * 60 * 60 * 1000), day, 'still the same day one hour before the next midnight');
+  assert.equal(localDayString(midnight + 24 * 60 * 60 * 1000), '2026-07-28');
 });
 
 test('bucketKey week format matches ISO 8601 week numbering, including year-boundary edge cases', () => {

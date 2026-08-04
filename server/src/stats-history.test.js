@@ -1,3 +1,7 @@
+// Day boundaries here are local (see time-buckets.js); pin a real
+// non-UTC zone so these assertions mean something on a UTC dev machine.
+process.env.TZ = 'Europe/Warsaw';
+
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -180,6 +184,14 @@ test('a day rollover (via ingestStats or recordRangeSample) resets the range sam
   assert.equal(getRangeSummary().maxRangeKm, 10);
 });
 
+// Same SD-write reasoning as the antenna cells: these samples are persisted
+// as a JSON blob, where a raw double is ~17 characters of noise.
+test('range samples are stored rounded to 10 m', () => {
+  recordRangeSample(300.20524528563544, T0);
+  recordRangeSample(150.98765432109876, T0 + MINUTE);
+  assert.deepEqual(getRangeSamples().map((s) => s.km), [300.21, 150.99]);
+});
+
 test('getRangeSummary is {0, 0} when nothing has been recorded yet', () => {
   const summary = getRangeSummary();
   assert.equal(summary.maxRangeKm, 0);
@@ -315,14 +327,25 @@ test('getMaxRangeLastHourKm is 0 when nothing has been recorded yet', () => {
   assert.equal(getMaxRangeLastHourKm(T0), 0);
 });
 
-test('getTodayStartMs returns UTC midnight of the given day, matching todayDateString\'s boundary', () => {
-  const midday = new Date('2026-03-15T14:23:00.000Z').getTime();
-  assert.equal(getTodayStartMs(midday), new Date('2026-03-15T00:00:00.000Z').getTime());
+test('getTodayStartMs returns local midnight of the given day, matching todayDateString\'s boundary', () => {
+  const midday = new Date(2026, 2, 15, 14, 23).getTime();
+  assert.equal(getTodayStartMs(midday), new Date(2026, 2, 15).getTime());
 });
 
+// Instants built from local calendar fields on purpose: the boundary being
+// tested *is* the local one, and a UTC literal here would sit on the other
+// side of it for most of the world.
 test('getTodayStartMs is stable across the whole day, including right up to the boundary', () => {
-  const justBeforeMidnight = new Date('2026-03-15T23:59:59.999Z').getTime();
-  const justAfterMidnight = new Date('2026-03-16T00:00:00.001Z').getTime();
-  assert.equal(getTodayStartMs(justBeforeMidnight), new Date('2026-03-15T00:00:00.000Z').getTime());
-  assert.equal(getTodayStartMs(justAfterMidnight), new Date('2026-03-16T00:00:00.000Z').getTime());
+  const justBeforeMidnight = new Date(2026, 2, 15, 23, 59, 59, 999).getTime();
+  const justAfterMidnight = new Date(2026, 2, 16, 0, 0, 0, 1).getTime();
+  assert.equal(getTodayStartMs(justBeforeMidnight), new Date(2026, 2, 15).getTime());
+  assert.equal(getTodayStartMs(justAfterMidnight), new Date(2026, 2, 16).getTime());
+});
+
+// The whole point of the local boundary: a reading taken at 23:30 local on
+// a UTC+2 receiver belongs to that evening, not to the next calendar day
+// the way a UTC boundary filed it.
+test('a late local evening still belongs to today, not to tomorrow', () => {
+  const lateEvening = new Date(2026, 6, 27, 23, 30).getTime();
+  assert.equal(getTodayStartMs(lateEvening), new Date(2026, 6, 27).getTime());
 });

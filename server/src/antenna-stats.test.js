@@ -31,6 +31,19 @@ beforeEach(() => {
 
 const HOME = { homeLat: 50.0, homeLon: 20.0 };
 
+// The cells structure is persisted verbatim as one JSON config blob, and at
+// full double precision the digits are the overwhelming majority of it --
+// a real, repeated SD write cost. 10 m is already far finer than anything
+// this figure is ever drawn or compared at.
+test('recorded distances are rounded to 10 m before they are ever stored', () => {
+  recordAntennaSample({ ...HOME, lat: 50.4321987654321, lon: 20.7654321987654, altBaro: 30000 });
+
+  const [sector] = getSectorStats().filter((s) => s.maxRangeKm > 0);
+  assert.notEqual(sector, undefined, 'sanity check: the sample was recorded at all');
+  assert.equal(sector.maxRangeKm, Math.round(sector.maxRangeKm * 100) / 100);
+  assert.ok(String(sector.maxRangeKm).length <= 7, `expected a short number, got ${sector.maxRangeKm}`);
+});
+
 test('altitudeBandIndex buckets a flying aircraft into the band its altitude falls under', () => {
   assert.equal(altitudeBandIndex(1000, false), 0);
   assert.equal(altitudeBandIndex(4999, false), 0);

@@ -23,15 +23,12 @@ export function formatBucketLabel(key) {
   if (typeof key !== 'string') return '';
   const hourMatch = /^(\d{4})-(\d{2})-(\d{2})T(\d{2})$/.exec(key);
   if (hourMatch) {
-    // Bucket keys are UTC (bucketKey() builds them off toISOString), but an
-    // hour label is read as wall-clock time: on a UTC+2 receiver the chart
-    // used to end at "11:00" while the user was looking at it at 13:00.
-    // Only hour keys get converted -- a day/week/month key names a whole
-    // UTC period, and shifting those would relabel the period itself.
-    const [, year, month, day, hour] = hourMatch;
-    const local = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour)));
-    const pad = (n) => String(n).padStart(2, '0');
-    return `${pad(local.getDate())}.${pad(local.getMonth() + 1)} ${pad(local.getHours())}:${pad(local.getMinutes())}`;
+    // Keys are already in the server's local time (time-buckets.js builds
+    // every key off local calendar fields, deliberately never
+    // toISOString()), so the label is a straight reformat -- no timezone
+    // conversion here, and adding one would double-shift it.
+    const [, , month, day, hour] = hourMatch;
+    return `${day}.${month} ${hour}:00`;
   }
   const dayMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key);
   if (dayMatch) {

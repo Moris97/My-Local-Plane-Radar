@@ -1,6 +1,6 @@
 import { getHistory, getRangeSamples, averageOfTopFraction } from './stats-history.js';
 import { getDailyStatsSince, getAllDailyStats, getEarliestDailyStatsDate } from './db.js';
-import { granularityForRange, rangeStartMs, bucketize } from './time-buckets.js';
+import { granularityForRange, rangeStartMs, bucketize, localDayString, startOfLocalDayMs } from './time-buckets.js';
 
 const TOP_FRACTION = 0.1;
 
@@ -11,7 +11,7 @@ const TOP_FRACTION = 0.1;
 // bucket means.
 export function granularityFor(range, now = Date.now()) {
   const earliestDate = getEarliestDailyStatsDate();
-  const earliestDataMs = earliestDate ? new Date(`${earliestDate}T00:00:00.000Z`).getTime() : null;
+  const earliestDataMs = earliestDate ? startOfLocalDayMs(earliestDate) : null;
   return granularityForRange(range, { earliestDataMs, now });
 }
 
@@ -74,11 +74,15 @@ export function getStatsHistoryForRange(range, now = Date.now()) {
     return mergeBucketsByKey([mainBuckets, rangeBuckets]);
   }
 
-  const sinceDate = since === 0 ? null : new Date(since).toISOString().slice(0, 10);
+  const sinceDate = since === 0 ? null : localDayString(since);
   const rows = sinceDate ? getDailyStatsSince(sinceDate) : getAllDailyStats();
 
   return bucketize(rows, {
-    getTime: (r) => new Date(r.date).getTime(),
+    // A daily_stats key is a local calendar day, so it has to be turned
+    // back into local midnight before being re-bucketed -- `new Date(
+    // '2026-08-04')` would parse it as UTC midnight, which lands on the
+    // previous day west of Greenwich and would relabel every bucket there.
+    getTime: (r) => startOfLocalDayMs(r.date),
     getValue: (r) => r,
     granularity,
     reducer: (values) => ({

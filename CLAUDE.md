@@ -900,12 +900,25 @@ granularity through `granularityFor`** (history, new-registrations,
 registrations-trend) so no two charts on one screen can disagree about
 what a bucket means.
 
-Bucket keys are UTC (`bucketKey` builds them off `toISOString`), but
-`chart.js`'s `formatBucketLabel` renders **hour** labels in the viewer's
-local time — an hour label is read as wall-clock time, and a UTC+2
-receiver's chart otherwise ended at "11:00" while the user was looking at
-it at 13:00. Day/week/month labels stay as-is: those keys name a whole UTC
-period, and shifting them would relabel the period itself.
+**Every time boundary in the stats layer is local, never UTC**
+(`time-buckets.js`'s `localDayString`/`startOfLocalDayMs`, used by
+`bucketKey` and by `stats-history.js`'s day rollover): bucket keys,
+`daily_stats` date keys, "Ten dzień", and the accumulator's midnight all
+come through that one pair. UTC boundaries meant a UTC+2 receiver rolled
+"today" over at 02:00 local and drew hour labels two hours behind the wall
+clock. **Never reintroduce `toISOString().slice(...)` here** — that is UTC
+by definition, and it is what this replaced. Consequences to keep in mind:
+`chart.js`'s `formatBucketLabel` is a plain reformat and must *not* convert
+timezones (the keys are already local — converting would double-shift);
+`stats-query.js` turns a `daily_stats` date back into a timestamp with
+`startOfLocalDayMs`, because `new Date('2026-08-04')` parses as UTC
+midnight and lands on the previous day west of Greenwich; `isoWeekKey` is
+seeded from local calendar fields (its internal `Date.UTC` normalization
+only exists to make the day arithmetic DST-free). Rows written before
+v2.1.9 are keyed by UTC day — the same string, just covering shifted
+hours, so no migration was needed and only the changeover day has a seam.
+Tests pin `process.env.TZ = 'Europe/Warsaw'` so a regression to UTC can't
+pass unnoticed on a UTC dev machine.
 
 ### Registrations table (`public/js/stats.js`'s `loadRegistrationsTable`)
 
@@ -1106,8 +1119,30 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   fixed bands, 0–5k ft up to 40k+, ground = 0 ft) and a directional
   coverage rose chart (`renderRoseChartSvg`, 180-sector compass rose).
   Persisted as one JSON blob (`antennaStats` config key), **only when
-  actually dirty** (`flushAntennaStatsIfDirty`). Bearing math
-  (`bearingDegrees`) added to `range.js` alongside `distanceKm`.
+  actually dirty** (`flushAntennaStatsIfDirty`), on its own
+  `ANTENNA_STATS_FLUSH_INTERVAL_MS` (5 min) interval — **not** the 45s
+  daily-stats flush it used to share. This is the largest thing the app
+  writes to the SD card: a full rewrite of every cell, and "only when
+  dirty" bounds nothing while a receiver is still filling in coverage,
+  because nearly every tick brings a new best somewhere. Measured live at
+  108 KB before this, i.e. ~200 MB/day; every distance is now stored via
+  `range.js`'s `roundKm` (10 m — 91% of that blob was float digits on a
+  figure drawn as "434 km"), which took it to ~39 KB and also damps the
+  dirty flag, since a sample that rounds to a value already held is no
+  longer an improvement worth a write. `roundKm` lives in `range.js` (the
+  distance module) and is applied at every point a distance is *stored*:
+  antenna cells, per-minute range samples, and `index.js`'s `bestRangeKm`
+  — that last one rounded **once**, before both `recordRangeSample` and
+  `evaluateRangeRecordRule`, so the daily figure and the all-time record
+  keep sharing one exact number. Bearing math (`bearingDegrees`) added to
+  `range.js` alongside `distanceKm`.
+
+  **Known open issue** (`TODO.md`, 2026-08-04 audit): samples are recorded
+  once per second per aircraft, so a cell's "best 5" are usually 5
+  consecutive seconds of one aircraft — measured live, `topAvgRangeKm`
+  equals `maxRangeKm` in 169 of 180 sectors. The outlier resistance this
+  was built for does not currently exist; the fix is to key the top-K by
+  `hex`. Don't read the two figures as independent until that lands.
 
   Per (altitude band, sector) cell, retains the **best `TOP_K` (5) samples
   ever** (`insertIntoTopK`, sorted-and-capped, still bounded regardless of
@@ -1325,13 +1360,29 @@ end users.
 - Whenever the user says something is deferred ("we'll do that later",
   "improve it later"), add it to `TODO.md` immediately rather than letting
   it evaporate.
+- **Nothing leaves this machine without the user's explicit go-ahead.**
+  Committing locally is fine unprompted; `git push`, pushing a tag, and
+  `gh release create` are not. Propose it ("gotowe do wypchnięcia?") and
+  wait. This reversed an earlier push-immediately default — the point is
+  that the repo and its releases are public, so every push is a
+  publication.
 - **Every version bump gets a git tag and a GitHub release, not just a
   `package.json` commit.** `git tag -a vX.Y.Z -m vX.Y.Z && git push origin
   vX.Y.Z`, then `gh release create vX.Y.Z --title "..." --notes "..."` —
-  same push-immediately, don't-ask-each-time default as commits. Release
-  notes are real prose grouped by feature/theme (see past releases on
-  GitHub for the pattern: a short "Patch release on top of vX.Y.(Z-1)"
-  line, then a `##` heading per notable change with a plain-English
-  explanation), not a bare commit list. Missed once (v2.1.6 shipped a
+  both after approval, per the rule above. Missed once (v2.1.6 shipped a
   commit and a push but no tag/release until asked) — check this is
   actually done, not just intended, whenever a version bump happens.
+- **Release notes are written in Polish** (v2.1.8 onwards; everything up to
+  and including v2.1.7 is in English — don't "fix" those, and don't take
+  them as the pattern for language). Real prose grouped by feature/theme,
+  not a bare commit list: a short "Patch release on top of vX.Y.(Z-1)"
+  line, then a `##` heading per notable change with a plain-language
+  explanation. Code, comments, commit messages and this file stay English —
+  only the release notes (and conversation) are Polish.
+- **Never put real receiver data in a release note, a commit message, or
+  anything else public**: no coordinates or home location (the existing
+  hardcoding ban), and no real figures read off this install — measured
+  ranges, sector/coverage numbers, aircraft counts, registrations,
+  callsigns, ntfy topics. Describing *what* changed is fine; quoting what
+  this antenna actually saw is not. Live readings are for the
+  conversation and for `CLAUDE.local.md`, which is gitignored.

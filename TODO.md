@@ -320,6 +320,57 @@ numbers. What's left:
   existing behaviour, with a log line added where a failure would otherwise
   be invisible.
 
+## From the 2026-08-04 statistics audit
+
+Found while fixing the 24h-window bugs; both were raised and deliberately
+deferred by the user in the same conversation.
+
+- **Antenna coverage: the top-5 mechanism doesn't actually resist outliers**
+  (effort: small, impact: high) — `antenna-stats.js` keeps the best 5
+  samples per (band, sector) cell so that one freak contact can't create a
+  permanent spike, the way VRS's and tar1090's coverage plots do. But
+  samples are recorded **once per second per aircraft**, so those 5 are
+  normally 5 consecutive seconds of the *same* aircraft a few hundred
+  metres apart. Measured live: the median difference between a sector's
+  `maxRangeKm` and its `topAvgRangeKm` was 0.0 km, with 169 of 180 sectors
+  within 0.5 km. So the rose chart's two series are the same number, and
+  the map's coverage fill (top-avg) and outline (max) are the same shape —
+  the whole two-layer design draws one thing twice. Fix: key the top-K by
+  `hex` so it holds the best 5 *distinct aircraft*. Must accept the
+  existing stored blob and convert it rather than failing the shape check
+  in `ensureLoaded`, which would throw away every install's accumulated
+  coverage history.
+- **Storage/write hygiene** (effort: small, impact: medium) — several small
+  things noticed in the same pass: no `PRAGMA journal_mode = WAL` /
+  `synchronous = NORMAL` (`.gitignore` already lists `*.db-wal`/`*.db-shm`,
+  so this looks like an intention that never landed — rollback-journal mode
+  means a journal file created, fsynced and deleted per transaction, and
+  there are six transactions per flush tick); `evaluateRangeRecordRule`
+  writes `allTimeMaxRangeKm` straight from the per-second poll loop on every
+  new record instead of going through a batched flush (a burst on a fresh
+  install, rare afterwards); the five flush calls in `flushDailyStats` could
+  share one transaction instead of five.
+- **Nothing resets antenna statistics when the receiver moves** (effort:
+  small, impact: medium) — every stored bearing and distance was measured
+  against whatever home location was configured at the time, and changing
+  it in Settings silently leaves the old samples in place. There is no
+  "clear statistics" control anywhere. Same applies to `allTimeMaxRangeKm`.
+- **Two different aircraft counts on one screen** (effort: tiny, impact:
+  low) — the "Widziane samoloty" chart comes from readsb's own
+  `aircraft_with_pos`/`aircraft_without_pos`, while the live "Aktualnie"
+  tile counts MLPR's own tracked list; they use different eviction rules
+  and can visibly disagree. Related: `history[].maxRangeKm` (readsb's
+  unfiltered `total.max_distance`) is still broadcast to the browser in the
+  `stats` WebSocket message and kept in `radar-state`, though nothing
+  displays it — vestigial, and exactly the trap that produced the "today >
+  all time" inversion once already.
+- **Historical `total_messages` rows are ~4x inflated** (effort: n/a,
+  impact: none today) — `last1min.messages` is a rolling 60-second count
+  that was being summed on every 15s poll, fixed in v2.1.8. Nothing
+  displays this column, so there is nothing to correct; but a future "daily
+  messages" chart would show a step at the upgrade and should either start
+  from that date or say so.
+
 ### Measured and deliberately NOT done
 
 - **Row-diffing the List table instead of rebuilding it.** Proposed as a
@@ -334,4 +385,11 @@ numbers. What's left:
   row and the client sorts/filters/pages over the array, which is a
   deliberate, already-documented decision (see the "Registrations table"
   section in CLAUDE.md). It is lazy-loaded behind a button and fetched once
-  per panel open, so there is nothing to fix at present scale.
+  per panel open, so there is nothing to fix at present scale. Measured
+  2026-08-04 on a two-day-old install: **88 KB for 650 registrations**, so
+  roughly 135 bytes a row. That scales linearly with distinct airframes
+  ever seen — an established receiver adding a few hundred a day reaches a
+  multi-megabyte response, held in full in the Pi's memory *and* the
+  phone's, within a year. Revisit when the response passes ~1 MB; the fix
+  is server-side paging plus dropping the full-table in-memory cache, not a
+  smaller payload per row.

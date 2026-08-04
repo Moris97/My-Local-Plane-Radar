@@ -27,7 +27,7 @@ import { recordPosition, evictStaleTrails } from './trail-history.js';
 import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
-import { distanceKm, isRangeEligible } from './range.js';
+import { distanceKm, isRangeEligible, roundKm } from './range.js';
 import { recordAntennaSample, recordSignalReading, flushAntennaStatsIfDirty } from './antenna-stats.js';
 import { resolvePort } from './server-config.js';
 
@@ -44,6 +44,14 @@ const DAILY_STATS_FLUSH_INTERVAL_MS = 45000;
 // systemctl restart/reboot loses at most this interval's worth of the
 // current in-progress minute, not the whole day.
 const STATS_HISTORY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
+// Deliberately much slower than the 45s daily-stats flush this used to
+// share: the antenna blob is by far the largest thing this app writes to
+// the SD card (a full rewrite of every band/sector cell, ~40 KB), and
+// while a receiver is still filling in its coverage almost every tick has
+// *something* new, so "only when dirty" alone doesn't bound it. Losing up
+// to five minutes of new maxima to an unclean shutdown is irrelevant --
+// they are best-ever records that the next contact re-establishes.
+const ANTENNA_STATS_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
 const STATS_HISTORY_SNAPSHOT_CONFIG_KEY = 'statsHistorySnapshot';
 const COOLDOWN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const TRAIL_EVICTION_INTERVAL_MS = 60 * 1000;
@@ -156,6 +164,11 @@ function recordRangeAndRegistrationSightings() {
   }
 
   if (bestRangeKm !== null) {
+    // Rounded once, here, so the daily figure and the all-time record are
+    // fed the exact same number -- they already share this one source of
+    // truth (see below), and rounding them separately would be a way to
+    // quietly reintroduce the "today > all time" disagreement.
+    bestRangeKm = roundKm(bestRangeKm);
     recordRangeSample(bestRangeKm);
     // Same MLAT-filtered, self-computed reading "today"'s max range
     // (getRangeSummary) is already based on -- the all-time record used to
@@ -270,15 +283,15 @@ async function main() {
     } catch (err) {
       app.log.error(err, 'daily stats flush failed');
     }
+  }, DAILY_STATS_FLUSH_INTERVAL_MS);
+
+  setInterval(() => {
     try {
-      // Same cadence as the daily stats flush above -- flushAntennaStatsIfDirty
-      // is a no-op (no SD write at all) once a receiver's band/sector maxima
-      // stop moving, so checking this often costs nothing extra.
       flushAntennaStatsIfDirty();
     } catch (err) {
       app.log.error(err, 'antenna stats flush failed');
     }
-  }, DAILY_STATS_FLUSH_INTERVAL_MS);
+  }, ANTENNA_STATS_FLUSH_INTERVAL_MS);
 
   setInterval(() => {
     try {

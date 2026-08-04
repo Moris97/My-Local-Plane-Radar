@@ -1,4 +1,4 @@
-import { distanceKm, bearingDegrees } from './range.js';
+import { distanceKm, bearingDegrees, roundKm } from './range.js';
 import { getConfigJSON, setConfigJSON } from './db.js';
 
 const CONFIG_KEY = 'antennaStats';
@@ -113,7 +113,13 @@ function insertIntoTopK(list, value) {
 export function recordAntennaSample({ homeLat, homeLon, lat, lon, altBaro, onGround }) {
   ensureLoaded();
 
-  const km = distanceKm(homeLat, homeLon, lat, lon);
+  // Rounded to 10 m before it is ever stored. The whole cells structure is
+  // persisted as one JSON config blob, and at full double precision the
+  // digits *are* the blob -- 17 characters per number where three decimals
+  // is already metre-level, on a figure only ever drawn as "434 km". Also
+  // damps the dirty flag: a sample that rounds to a value already held no
+  // longer counts as an improvement worth rewriting the blob for.
+  const km = roundKm(distanceKm(homeLat, homeLon, lat, lon));
   const bandIdx = altitudeBandIndex(altBaro, onGround);
   const slot = bandIdx === -1 ? UNKNOWN_BAND_SLOT : bandIdx;
   const secIdx = sectorIndex(bearingDegrees(homeLat, homeLon, lat, lon));
