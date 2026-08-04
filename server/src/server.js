@@ -34,7 +34,7 @@ import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getAllAirlinesSummary } from './db.js';
-import { resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
+import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
 import { clearRangeSamples } from './stats-history.js';
@@ -360,17 +360,22 @@ export async function buildServer({ logger = true } = {}) {
   // left every range in between (7d/31d/1y) with nothing to show here at
   // all.
   //
-  // Counts only. This used to also compute a max-range figure for the
-  // range (re-bucketing the whole history just for one tile), which the
-  // Stats screen showed directly above a chart already plotting the same
-  // number over the same range -- one of four differently-scoped range
-  // readings on that one screen, all labelled almost identically. The
-  // notification engine's own all-time record (getAllTimeMaxRangeKm) is
-  // still maintained and still triggers its notification; it just isn't
-  // surfaced here.
+  // 'all' reads the notification engine's own getAllTimeMaxRangeKm rather
+  // than deriving a max from daily_stats buckets like every other range
+  // does -- that value comes from the exact same self-computed,
+  // MLAT-excluded per-tick sampling as daily_stats itself (see
+  // recordRangeAndRegistrationSightings), so re-deriving it a second,
+  // slightly different way here would risk exactly the "two independently
+  // computed range figures disagree" bug that reusing one source of truth
+  // already fixed once. This tile is also the *only* place the all-time
+  // record is visible: nothing else surfaces it, and it is what the "new
+  // range record" notification fires on.
   app.get('/api/stats/summary', async (request) => {
     const range = parseStatsRange(request);
     const sinceMs = rangeStartMs(range);
+    const maxRangeKm = range === 'all'
+      ? getAllTimeMaxRangeKm()
+      : Math.max(0, ...getStatsHistoryForRange(range).map((bucket) => bucket.maxRangeKm ?? 0));
 
     return {
       // Two deliberately different aircraft counts, not one: aircraftSeen
@@ -383,6 +388,7 @@ export async function buildServer({ logger = true } = {}) {
       aircraftSeenCount: getAircraftSeenCount(sinceMs),
       aircraftTrackedCount: getAircraftTrackedCount(sinceMs),
       uniqueFlightsCount: getSeenFlightsCount(sinceMs),
+      maxRangeKm,
       // Deliberately no topTypes/topAirlines: those are what
       // /api/stats/types and /api/stats/airlines already answer, for the
       // same range via the same functions. Returning them here too meant
@@ -407,6 +413,30 @@ export async function buildServer({ logger = true } = {}) {
     const ring = points.map((p) => [p.lon, p.lat]);
     ring.push(ring[0]); // GeoJSON polygons must be a closed ring.
     return ring;
+  }
+
+  // Below this many *sampled* sectors there is no shape worth drawing:
+  // joining three or four scattered bearings into a polygon would claim
+  // coverage across every direction in between, which is the opposite of
+  // what a coverage map is for. Nothing is drawn instead, and it fills in
+  // as traffic arrives.
+  const MIN_COVERAGE_SECTORS = 8;
+
+  // A sector with nothing recorded is a *sampling* gap, not a reception
+  // gap: it means no aircraft has flown through that 2° slice yet, not
+  // that the antenna is deaf in that direction. Emitting a vertex at
+  // distance 0 for it -- which is what this did until now -- drags the
+  // polygon boundary all the way back to the receiver and out again, so
+  // every unsampled sector becomes a spike. Harmless on a long-established
+  // install where every sector has eventually been hit, ruinous on a fresh
+  // one: reported live right after v2.1.10 reset the stored coverage,
+  // when 113 of 180 sectors were empty and the map drew 113 spikes.
+  // Skipping them lets the ring join its neighbouring real measurements.
+  function coverageRing(sectors, home, distanceOf) {
+    const points = sectors
+      .filter((sector) => distanceOf(sector) > 0)
+      .map((sector) => destinationPoint(home.lat, home.lon, sector.bearingDeg, distanceOf(sector)));
+    return points.length >= MIN_COVERAGE_SECTORS ? closedRing(points) : null;
   }
 
   // Gated the same as /api/settings: the polygon this returns is derived
@@ -453,8 +483,8 @@ export async function buildServer({ logger = true } = {}) {
       // to be drawn as a thin outline around the fill rather than its own
       // filled shape -- see CLAUDE.md for why (VRS's/tar1090's plots are
       // exactly this max value alone, and that's what makes them spiky).
-      fillPolygon: closedRing(sectors.map((s) => destinationPoint(home.lat, home.lon, s.bearingDeg, s.topAvgRangeKm))),
-      maxPolygon: closedRing(sectors.map((s) => destinationPoint(home.lat, home.lon, s.bearingDeg, s.maxRangeKm))),
+      fillPolygon: coverageRing(sectors, home, (s) => s.topAvgRangeKm),
+      maxPolygon: coverageRing(sectors, home, (s) => s.maxRangeKm),
     };
   });
 

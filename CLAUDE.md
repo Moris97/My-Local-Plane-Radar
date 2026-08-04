@@ -1156,16 +1156,17 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
     first_seen_at`), guarded the same way as `seen_aircraft`
     (`hasSeenFlight` SELECT before `markFlightSeen` INSERT — hard rule 5,
     getting this guard wrong was a real caught-before-ship bug).
-  - **No max-range tile.** `/api/stats/summary` used to compute one (the
-    all-time record for `all`, a re-bucketing of the whole history for
-    every other range) and show it above the range chart already plotting
-    the same figure over the same range. That made **four** differently-
-    scoped range readings on one screen — rolling last hour ("Now" tile),
-    this range (this tile), per time bucket (range chart), per altitude
-    band all-time (antenna section) — under near-identical labels. The tile
-    is gone; the other three each show something the others don't.
-    `getAllTimeMaxRangeKm` is still maintained and still drives the "new
-    range record" notification, it's just not surfaced on this screen.
+  - **Max-range tile** (`/api/stats/summary`'s `maxRangeKm`): the all-time
+    record via `getAllTimeMaxRangeKm` on the `all` range, a max over the
+    range's buckets otherwise. This overlapped with a time-bucketed range
+    bar chart that plotted the same figure over the same range; **the chart
+    was dropped and the tile kept**, deliberately that way round — on the
+    `all` range this tile is the only place the all-time record is visible
+    anywhere in the UI, and it's the exact value the "new range record"
+    notification fires on, whereas a chart of a record over time was the
+    weaker of the two. Range readings now left on the screen: rolling last
+    hour ("Now" tile), this range (this tile), per altitude band all-time
+    (antenna section) — three, each showing something the others don't.
 - **Doughnut ↔ line toggle** on "most common type/airline" charts
   (`chartView` state, two pill buttons). Line view is *new-registrations-
   of-this-type/airline over time* (reusing the existing "new registrations"
@@ -1332,9 +1333,24 @@ of `distanceKm`/`bearingDegrees`, round-trip verified in `range.test.js`)
 turns each (bearing, range) into a real lat/lon. **Gated by
 `requireSettingsAuth`, same as `/api/settings`** — every vertex is `home ±
 bearing ± distance`, exactly as revealing of the receiver's location as the
-home marker. A sector with nothing recorded resolves to distance 0 (the
-polygon pinches to the home coordinate there — an honest "no data" shape,
-not a bug).
+home marker.
+
+**Sectors with nothing recorded are skipped, not drawn at distance 0**
+(`coverageRing`). They used to emit a vertex at the home coordinate, on the
+reasoning that this was an honest "no data" shape — that reasoning was
+wrong, twice over. An empty sector is a *sampling* gap, not a reception
+gap: it means no aircraft has flown through that 2° slice yet, not that the
+antenna is deaf there, so drawing zero range is a claim the data doesn't
+support. And visually it drags the boundary back to the receiver and out
+again, so every unsampled sector becomes a spike. Invisible on a
+long-established install where every sector has eventually been hit,
+ruinous on a fresh one — reported live right after v2.1.10 reset the stored
+coverage: 113 of 180 sectors were empty, and 113 of the polygon's 181
+vertices sat exactly on the home coordinate. Skipping them lets the ring
+join its neighbouring real measurements (same data, 68 points, no spikes).
+Below `MIN_COVERAGE_SECTORS` (8) sampled sectors nothing is drawn at all —
+joining three or four scattered bearings would claim coverage across every
+direction between them.
 
 **Client**: `showCoverage` (default off) and `coverageBand` (`'all'` or an
 `ALTITUDE_BANDS` index) in `settings-state.js`. Color from

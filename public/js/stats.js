@@ -409,12 +409,6 @@ export function renderStatsPanel(container) {
           </section>
 
           <section class="mlpr-stat-chart">
-            <p class="mlpr-chart-label">${t('chartRange')}</p>
-            <div id="mlpr-chart-range"></div>
-            <div class="mlpr-chart-legend" id="mlpr-legend-range"></div>
-          </section>
-
-          <section class="mlpr-stat-chart">
             <p class="mlpr-chart-label">${t('chartNewRegistrations')}</p>
             <div id="mlpr-chart-new-registrations"></div>
           </section>
@@ -614,28 +608,6 @@ export function renderStatsPanel(container) {
     wireChartTooltip(el, history, series);
   }
 
-  function drawRangeChart(history) {
-    const { units } = getSettings();
-    const el = container.querySelector('#mlpr-chart-range');
-    const legendEl = container.querySelector('#mlpr-legend-range');
-    if (history.length === 0) {
-      emptyChartMessage(el);
-      legendEl.innerHTML = '';
-      return;
-    }
-    const series = [
-      { key: 'maxRangeKm', color: '#3ddc84', label: t('chartRangeMax') },
-      { key: 'rangeTopAvgKm', color: '#3d8bdc', label: t('chartRangeTopAvg') },
-    ];
-    const formatValue = (v) => formatDistance(v, units);
-    el.innerHTML = renderBarChartSvg(history, series, { formatValue });
-    const last = history[history.length - 1];
-    legendEl.innerHTML =
-      legendItemHtml('#3ddc84', t('chartRangeMax'), formatDistance(last.maxRangeKm, units)) +
-      legendItemHtml('#3d8bdc', t('chartRangeTopAvg'), formatDistance(last.rangeTopAvgKm, units));
-    wireChartTooltip(el, history, series, { formatValue });
-  }
-
   function drawNewRegistrationsChart(buckets) {
     const el = container.querySelector('#mlpr-chart-new-registrations');
     if (buckets.length === 0) {
@@ -752,7 +724,6 @@ export function renderStatsPanel(container) {
     const history = await fetchJson(`/api/stats/history?range=${currentRange}`, []);
     drawAircraftCountChart(history);
     drawPositionChart(history);
-    drawRangeChart(history);
 
     const newRegistrations = await fetchJson(`/api/stats/new-registrations?range=${currentRange}`, []);
     drawNewRegistrationsChart(newRegistrations);
@@ -771,6 +742,7 @@ export function renderStatsPanel(container) {
     const titleEl = container.querySelector('#mlpr-summary-title');
     if (titleEl) titleEl.textContent = t(RANGE_LABEL_KEYS[currentRange]);
 
+    const { units } = getSettings();
     const summary = await fetchJson(`/api/stats/summary?range=${currentRange}`, null);
     const tilesEl = container.querySelector('#mlpr-summary-tiles');
     if (!summary) {
@@ -778,12 +750,12 @@ export function renderStatsPanel(container) {
       return;
     }
 
-    // Counts only, and deliberately no "max range" tile: the range chart
-    // directly below shows that same figure for the same range, with its
-    // distribution over time instead of one collapsed number. Four
-    // differently-scoped range readings on one screen (rolling hour, this
-    // range, per time bucket, per altitude band all-time) with near-
-    // identical labels was the least readable thing here.
+    // The max-range tile is the *only* place the all-time range record is
+    // visible (on the "all" range it reads the very value the "new range
+    // record" notification fires on), which is why the time-bucketed range
+    // chart was dropped instead when these two turned out to overlap: a
+    // record is a single number, and a chart of it over time was the
+    // weaker of the two ways to show that.
     //
     // The type/airline breakdown likewise used to be drawn here *as well
     // as* by drawTypeChart/drawAirlineChart -- same range, same server-side
@@ -794,6 +766,7 @@ export function renderStatsPanel(container) {
       tileHtml(t('tileAircraftSeen'), String(summary.aircraftSeenCount)),
       tileHtml(t('tileAircraftTracked'), String(summary.aircraftTrackedCount), t('aircraftTrackedHint')),
       tileHtml(t('tileUniqueFlights'), String(summary.uniqueFlightsCount)),
+      tileHtml(t('maxRange'), formatDistance(summary.maxRangeKm, units) ?? '–'),
     ].join('');
   }
 
