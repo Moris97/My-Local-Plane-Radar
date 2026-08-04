@@ -1484,13 +1484,15 @@ end users.
   both after approval, per the rule above. Missed once (v2.1.6 shipped a
   commit and a push but no tag/release until asked) — check this is
   actually done, not just intended, whenever a version bump happens.
-- **Release notes are written in Polish** (v2.1.8 onwards; everything up to
-  and including v2.1.7 is in English — don't "fix" those, and don't take
-  them as the pattern for language). Real prose grouped by feature/theme,
-  not a bare commit list: a short "Patch release on top of vX.Y.(Z-1)"
-  line, then a `##` heading per notable change with a plain-language
-  explanation. Code, comments, commit messages and this file stay English —
-  only the release notes (and conversation) are Polish.
+- **Release notes are English, always** — GitHub is English-only, no
+  exception. v2.1.8 and v2.1.9 were briefly published in Polish and have
+  since been corrected; if either is ever seen in Polish again (e.g. a
+  stale cache), re-edit it, don't treat it as the pattern. Real prose
+  grouped by feature/theme, not a bare commit list: a short "Patch release
+  on top of vX.Y.(Z-1)" line, then a `##` heading per notable change with a
+  plain-language explanation. Conversation with the user still happens in
+  Polish per the project-wide rule above — this bullet is about the GitHub
+  release text specifically.
 - **Never put real receiver data in a release note, a commit message, or
   anything else public**: no coordinates or home location (the existing
   hardcoding ban), and no real figures read off this install — measured
