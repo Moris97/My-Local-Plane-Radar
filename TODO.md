@@ -381,15 +381,14 @@ deferred by the user in the same conversation.
   the hover cross-highlight and three per-row event listeners at risk for
   no measurable gain. Revisit only if a real complaint appears, and measure
   again first.
-- **Paginating `/api/stats/registrations` server-side.** It returns every
-  row and the client sorts/filters/pages over the array, which is a
-  deliberate, already-documented decision (see the "Registrations table"
-  section in CLAUDE.md). It is lazy-loaded behind a button and fetched once
-  per panel open, so there is nothing to fix at present scale. Measured
-  2026-08-04 on a two-day-old install: **88 KB for 650 registrations**, so
-  roughly 135 bytes a row. That scales linearly with distinct airframes
-  ever seen — an established receiver adding a few hundred a day reaches a
-  multi-megabyte response, held in full in the Pi's memory *and* the
-  phone's, within a year. Revisit when the response passes ~1 MB; the fix
-  is server-side paging plus dropping the full-table in-memory cache, not a
-  smaller payload per row.
+- ~~**Paginating `/api/stats/registrations` server-side.**~~ **Done in
+  v2.1.9.** This had been recorded here as a deliberate non-issue at
+  present scale; measuring it changed the answer. It was 88 KB for 650
+  registrations two days into an install (~135 bytes a row, growing with
+  every airframe ever seen), and the browser was doing all the filtering,
+  sorting and paging — so the pagination control was real while the paging
+  was not. Both Stats tables are now searched, sorted and paged on the
+  server (`stats-table.js`). What is left of the original concern: the
+  full registrations cache still lives in the Pi's memory, because
+  `recordSighting` needs it on every poll tick, and `getAllAirlinesSummary`
+  re-runs its `GROUP BY` on every page click.

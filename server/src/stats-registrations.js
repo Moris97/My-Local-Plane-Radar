@@ -1,5 +1,6 @@
 import { upsertRegistrations, getAllRegistrations } from './db.js';
 import { bucketize } from './time-buckets.js';
+import { queryTable } from './stats-table.js';
 
 // Less than this gap since the last contact = still the same "visit" (e.g.
 // briefly dropping out of range and coming back); at or beyond it, the
@@ -18,6 +19,12 @@ function ensureLoaded() {
   loaded = true;
   for (const row of getAllRegistrations()) {
     cache.set(row.registration, {
+      // The key is repeated inside the value on purpose: every read path
+      // (the paged table query, the CSV export, the counts below) wants
+      // whole rows, and carrying it here means they can iterate
+      // cache.values() directly instead of rebuilding a row object per
+      // entry on every request.
+      registration: row.registration,
       typeCode: row.type_code,
       airlineIcao: row.airline_icao,
       firstSeenAt: row.first_seen_at,
@@ -34,6 +41,7 @@ export function recordSighting(registration, { typeCode, airlineIcao } = {}, now
 
   if (!entry) {
     cache.set(registration, {
+      registration,
       typeCode: typeCode ?? null,
       airlineIcao: airlineIcao ?? null,
       firstSeenAt: now,
@@ -72,16 +80,55 @@ export function flushDirtyRegistrations() {
   return dirty.length;
 }
 
-export function getRegistrationsList() {
-  ensureLoaded();
-  return Array.from(cache.entries()).map(([registration, e]) => ({
-    registration,
+function publicRow(e) {
+  return {
+    registration: e.registration,
     typeCode: e.typeCode,
     airlineIcao: e.airlineIcao,
     firstSeenAt: e.firstSeenAt,
     lastSeenAt: e.lastSeenAt,
     timesSeen: e.timesSeen,
-  }));
+  };
+}
+
+// Searched and sorted on the *resolved* airline name, not the ICAO code --
+// that is what the column actually shows, so sorting it by code produced a
+// name column in no visible order. airlineNameFor is injected rather than
+// imported so this module stays independent of airlines-data.js (and the
+// tests don't need a loaded airline file).
+function tableSpec(airlineNameFor) {
+  const airlineName = (e) => (e.airlineIcao ? airlineNameFor(e.airlineIcao) : '');
+  return {
+    searchFields: [(e) => e.registration, (e) => e.typeCode, (e) => e.airlineIcao, airlineName],
+    sortFields: {
+      registration: (e) => e.registration,
+      typeCode: (e) => e.typeCode,
+      airlineIcao: airlineName,
+      firstSeenAt: (e) => e.firstSeenAt,
+      lastSeenAt: (e) => e.lastSeenAt,
+      timesSeen: (e) => e.timesSeen,
+    },
+    // "What shows up a lot" is more useful to a spotter than "what showed
+    // up last"; recency is one click away.
+    defaultSort: { key: 'timesSeen', dir: 'desc' },
+  };
+}
+
+// Every row, unpaged. Deliberately NOT reachable from any HTTP route --
+// that is exactly what queryRegistrations replaced. Kept for tests and for
+// in-process callers that genuinely need the whole set.
+export function getRegistrationsList() {
+  ensureLoaded();
+  return [...cache.values()].map(publicRow);
+}
+
+// One page of the registrations table, filtered and sorted server-side.
+// Only the page itself is turned into response objects -- the filter and
+// sort run over the cache's own entries.
+export function queryRegistrations(params, airlineNameFor) {
+  ensureLoaded();
+  const result = queryTable([...cache.values()], tableSpec(airlineNameFor), params);
+  return { ...result, rows: result.rows.map(publicRow) };
 }
 
 // "Seen during the range" = last contact at or after sinceMs (0 = since the

@@ -355,6 +355,11 @@ export function getRegistrationsSince(sinceMs) {
 // callsigns) are excluded, same as the doughnut chart. Airline names
 // themselves come from /api/airlines (OpenFlights data) and are resolved
 // client-side, same as the existing registrations table.
+// One row per airline, so this is bounded by how many airlines exist (a
+// few hundred), not by how many airframes the receiver has seen -- unlike
+// the registrations table, the *size* of this result was never the problem.
+// It is paged server-side anyway, purely so both Stats tables share one
+// client-side code path.
 export function getAllAirlinesSummary() {
   return db
     .prepare(

@@ -19,7 +19,6 @@ import { rowsToCsv } from './csv.js';
 import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 
 const HISTORY_REFRESH_MS = 20000;
-const TABLE_PAGE_SIZE = 20;
 const TREND_TOP_N = 5;
 // The directional coverage rose is rendered from the server's full 180-sector
 // resolution (server/src/antenna-stats.js's SECTOR_COUNT), which at 2° per
@@ -931,10 +930,15 @@ export function renderStatsPanel(container) {
   }
 
   // Shared by the registrations and all-airlines tables below: both are
-  // "load on click, then sort/search/paginate entirely client-side over one
-  // fetched array" -- same shape as list.js's live aircraft table, and
-  // reasonable at this project's scale (a home receiver, realistically
-  // hundreds to low thousands of rows even after a year).
+  // "load on click", then search/sort/paginate *server-side* -- one request
+  // per interaction returning just the visible page, instead of the old
+  // shape where the whole table was fetched once and the browser did all
+  // three. The pagination control was already here; this is what makes it
+  // mean something (see server/src/stats-table.js).
+  //
+  // The airline map is still fetched for rendering, because the server
+  // can't format a name into the viewer's own locale-formatted row -- but
+  // it is no longer what search and sort run on.
   async function loadLazyTable({
     loadBtnId,
     controlsId,
@@ -948,7 +952,6 @@ export function renderStatsPanel(container) {
     defaultSortKey,
     defaultSortAsc,
     rowHtml,
-    matchesQuery,
   }) {
     const tableWrap = container.querySelector(`#${tableWrapId}`);
     const paginationEl = container.querySelector(`#${paginationId}`);
@@ -959,60 +962,62 @@ export function renderStatsPanel(container) {
     loadBtn.remove();
     tableWrap.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
 
-    const [airlines, rows] = await Promise.all([getAirlinesMap(), fetchJson(fetchUrl, [])]);
+    const airlines = await getAirlinesMap();
 
     let sortKey = defaultSortKey;
     let sortAsc = defaultSortAsc;
     let page = 1;
     let query = '';
-    // Kept in sync by every draw() so the export button can download
-    // exactly the current search/sort view (every matching row, not just
-    // the current page) without redoing the filter/sort work at click time.
-    let currentSorted = rows;
+    // Every draw() is a request now, and a fast typist or a rapid click on
+    // "next" can have two in flight at once. Only the newest one is allowed
+    // to paint, so a slow earlier response can't overwrite a newer view.
+    let latestRequest = 0;
 
-    function draw() {
-      if (rows.length === 0) {
-        tableWrap.innerHTML = `<p class="mlpr-empty">${t('noStatsData')}</p>`;
+    function queryString(overrides = {}) {
+      const params = new URLSearchParams({
+        search: query.trim(),
+        sort: sortKey,
+        dir: sortAsc ? 'asc' : 'desc',
+        page: String(page),
+        ...overrides,
+      });
+      return `${fetchUrl}?${params}`;
+    }
+
+    async function draw() {
+      const requestId = ++latestRequest;
+      const result = await fetchJson(queryString(), null);
+      if (requestId !== latestRequest) return;
+
+      if (!result || result.total === 0) {
+        tableWrap.innerHTML = `<p class="mlpr-empty">${query.trim() ? t('noSearchResults') : t('noStatsData')}</p>`;
         paginationEl.innerHTML = '';
         return;
       }
 
-      const filtered = rows.filter((row) => matchesQuery(row, query.trim().toLowerCase(), airlines));
-      const sorted = [...filtered].sort((a, b) => {
-        const cmp = String(a[sortKey] ?? '').localeCompare(String(b[sortKey] ?? ''), undefined, { numeric: true });
-        return sortAsc ? cmp : -cmp;
-      });
-      currentSorted = sorted;
+      page = result.page;
 
-      const totalPages = Math.max(1, Math.ceil(sorted.length / TABLE_PAGE_SIZE));
-      page = Math.min(page, totalPages);
-      const pageRows = sorted.slice((page - 1) * TABLE_PAGE_SIZE, page * TABLE_PAGE_SIZE);
+      const sortIndicator = (key) => (sortKey === key ? (sortAsc ? ' ▲' : ' ▼') : '');
+      tableWrap.innerHTML = `
+        <table class="mlpr-list-table">
+          <thead><tr>${columns.map((col) => `<th data-key="${col.key}">${col.label()}${sortIndicator(col.key)}</th>`).join('')}</tr></thead>
+          <tbody>${result.rows.map((r) => rowHtml(r, airlines)).join('')}</tbody>
+        </table>`;
 
-      if (pageRows.length === 0) {
-        tableWrap.innerHTML = `<p class="mlpr-empty">${t('noSearchResults')}</p>`;
-      } else {
-        const sortIndicator = (key) => (sortKey === key ? (sortAsc ? ' ▲' : ' ▼') : '');
-        tableWrap.innerHTML = `
-          <table class="mlpr-list-table">
-            <thead><tr>${columns.map((col) => `<th data-key="${col.key}">${col.label()}${sortIndicator(col.key)}</th>`).join('')}</tr></thead>
-            <tbody>${pageRows.map((r) => rowHtml(r, airlines)).join('')}</tbody>
-          </table>`;
-
-        for (const th of tableWrap.querySelectorAll('th')) {
-          th.addEventListener('click', () => {
-            if (sortKey === th.dataset.key) {
-              sortAsc = !sortAsc;
-            } else {
-              sortKey = th.dataset.key;
-              sortAsc = true;
-            }
-            page = 1;
-            draw();
-          });
-        }
+      for (const th of tableWrap.querySelectorAll('th')) {
+        th.addEventListener('click', () => {
+          if (sortKey === th.dataset.key) {
+            sortAsc = !sortAsc;
+          } else {
+            sortKey = th.dataset.key;
+            sortAsc = true;
+          }
+          page = 1;
+          draw();
+        });
       }
 
-      paginationEl.innerHTML = paginationHtml(page, totalPages);
+      paginationEl.innerHTML = paginationHtml(result.page, result.totalPages);
       for (const btn of paginationEl.querySelectorAll('.mlpr-page-btn:not([disabled])')) {
         btn.addEventListener('click', () => {
           page = Number(btn.dataset.page);
@@ -1023,10 +1028,7 @@ export function renderStatsPanel(container) {
 
     // Outside draw()'s rebuilt subtree deliberately -- same reasoning as
     // list.js's search box, so typing doesn't lose focus on every redraw.
-    // Debounced because this table filters, sorts and re-renders the whole
-    // matching set on every call, over an array that grows for the life of
-    // the install -- unlike the live aircraft list, which is bounded by
-    // what's currently in range.
+    // Still debounced now that each keystroke would otherwise be a request.
     const runSearch = debounce(() => {
       query = searchInput.value;
       page = 1;
@@ -1034,15 +1036,26 @@ export function renderStatsPanel(container) {
     }, SEARCH_DEBOUNCE_MS);
     searchInput.addEventListener('input', runSearch);
 
-    exportBtn.addEventListener('click', () => {
-      const csv = rowsToCsv(columns, currentSorted, airlines);
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${csvFilenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
-      link.click();
-      URL.revokeObjectURL(url);
+    // The export is the one place that still wants every matching row:
+    // pageSize=0 asks for the current search/sort view in full. It is an
+    // explicit, occasional click, not something that happens on open --
+    // which is the whole difference from how this table used to work.
+    exportBtn.addEventListener('click', async () => {
+      exportBtn.disabled = true;
+      try {
+        const result = await fetchJson(queryString({ pageSize: '0' }), null);
+        if (!result) return;
+        const csv = rowsToCsv(columns, result.rows, airlines);
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${csvFilenamePrefix}-${new Date().toISOString().slice(0, 10)}.csv`;
+        link.click();
+        URL.revokeObjectURL(url);
+      } finally {
+        exportBtn.disabled = false;
+      }
     });
 
     controlsEl.style.display = '';
@@ -1062,19 +1075,14 @@ export function renderStatsPanel(container) {
         paginationId: 'mlpr-reg-pagination',
         fetchUrl: '/api/stats/registrations',
         columns: REGISTRATIONS_COLUMNS,
-        // Default view: the 20 most-often-seen aircraft first, rather than
+        // Default view: the most-often-seen aircraft first, rather than
         // most-recently-seen -- "most popular" is what a spotter actually
-        // wants to see by default; recency is still one click away.
+        // wants to see by default; recency is still one click away. Sent
+        // explicitly on the first request, and mirrored by the server's own
+        // defaultSort so a request without it lands on the same view.
         defaultSortKey: 'timesSeen',
         defaultSortAsc: false,
         rowHtml: watchEntryRowHtml,
-        matchesQuery: (entry, needle, airlines) => {
-          if (!needle) return true;
-          const airlineName = entry.airlineIcao ? (airlines.get(entry.airlineIcao)?.name ?? entry.airlineIcao) : '';
-          return [entry.registration, entry.typeCode, entry.airlineIcao, airlineName].some((value) =>
-            String(value ?? '').toLowerCase().includes(needle),
-          );
-        },
       }),
     { once: true },
   );
@@ -1095,11 +1103,6 @@ export function renderStatsPanel(container) {
         defaultSortKey: 'registrationsCount',
         defaultSortAsc: false,
         rowHtml: airlineRowHtml,
-        matchesQuery: (entry, needle, airlines) => {
-          if (!needle) return true;
-          const airlineName = airlines.get(entry.airlineIcao)?.name ?? '';
-          return [entry.airlineIcao, airlineName].some((value) => String(value ?? '').toLowerCase().includes(needle));
-        },
       }),
     { once: true },
   );

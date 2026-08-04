@@ -18,13 +18,14 @@ import {
 import { exportConfig, importConfig } from './config-backup.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange, granularityFor } from './stats-query.js';
+import { queryTable } from './stats-table.js';
 import { rangeStartMs } from './time-buckets.js';
 import {
   getTypeCounts,
   getAirlineCounts,
   getNewRegistrationsBuckets,
   getNewRegistrationsBucketsByKey,
-  getRegistrationsList,
+  queryRegistrations,
 } from './stats-registrations.js';
 import { getSeenFlightsCount } from './seen-flights.js';
 import { getAircraftSeenCount } from './aircraft-seen.js';
@@ -55,6 +56,21 @@ const mapDataDir = join(__dirname, '..', '..', 'data', 'naturalearth');
 // second, NODE_ENV-gated mechanism (see below).
 const devDir = join(__dirname, '..', '..', 'dev');
 const appVersion = require('../../package.json').version;
+
+// Mirrors public/js/stats.js's AIRLINES_COLUMNS: same fields, same
+// resolved-name-not-ICAO rule as the registrations table.
+const AIRLINES_TABLE_SPEC = (airlineNameFor) => ({
+  searchFields: [(r) => r.airlineIcao, (r) => airlineNameFor(r.airlineIcao)],
+  sortFields: {
+    name: (r) => airlineNameFor(r.airlineIcao),
+    airlineIcao: (r) => r.airlineIcao,
+    registrationsCount: (r) => r.registrationsCount,
+    totalTimesSeen: (r) => r.totalTimesSeen,
+    firstSeenAt: (r) => r.firstSeenAt,
+    lastSeenAt: (r) => r.lastSeenAt,
+  },
+  defaultSort: { key: 'registrationsCount', dir: 'desc' },
+});
 
 export async function buildServer({ logger = true } = {}) {
   const app = Fastify({ logger });
@@ -303,14 +319,23 @@ export async function buildServer({ logger = true } = {}) {
     return getNewRegistrationsBucketsByKey(rangeStartMs(range), granularityFor(range), extractor, keys);
   });
 
-  // Full list, unfiltered by range -- the point-7 table is "loaded on
-  // click" and does its own client-side sorting, same as list.js's live
-  // aircraft table.
-  app.get('/api/stats/registrations', async () => getRegistrationsList());
+  // Both Stats tables are searched, sorted and paged *server-side* and
+  // answer `{ rows, total, page, pageSize, totalPages, sort, dir }`. They
+  // used to return the whole table and let the browser do all three, which
+  // meant the pagination control was real while the paging wasn't: an
+  // install's entire registration history crossed the network, and sat in
+  // both the Pi's and the phone's memory, to show twenty rows.
+  //
+  // Airline names are resolved here rather than by the client because
+  // that's what the column shows, so it's what search and sort have to
+  // work on. `pageSize=0` is the CSV export's own request for the full
+  // current view -- a deliberate, rare download, not the default path.
+  const airlineNameFor = (icao) => getAirlines().get(icao)?.name ?? icao;
 
-  // Same pattern as /api/stats/registrations above, but the aggregated
-  // per-airline view -- see db.js's getAllAirlinesSummary.
-  app.get('/api/stats/all-airlines', async () => getAllAirlinesSummary());
+  app.get('/api/stats/registrations', async (request) => queryRegistrations(request.query ?? {}, airlineNameFor));
+
+  app.get('/api/stats/all-airlines', async (request) =>
+    queryTable(getAllAirlinesSummary(), AIRLINES_TABLE_SPEC(airlineNameFor), request.query ?? {}));
 
   // One summary for whichever range the Stats panel's own selector is
   // currently on (same 24h/7d/31d/1y/all as every other stats endpoint,

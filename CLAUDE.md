@@ -922,13 +922,37 @@ pass unnoticed on a UTC dev machine.
 
 ### Registrations table (`public/js/stats.js`'s `loadRegistrationsTable`)
 
-`GET /api/stats/registrations` returns every registration ever seen,
-unfiltered — sort/search/page are client-side. Defaults to sorted by
-`timesSeen` descending ("what shows up a lot" is more useful than "most
-recent" for a spotter). Paginated 20 rows (`REGISTRATIONS_PAGE_SIZE`) with
-`paginationHtml`'s prev/first/window/last/next control. Search box matches
-registration, type, ICAO airline code, and resolved airline name; lives
-outside the rebuilt subtree so typing doesn't lose focus.
+**Searched, sorted and paged server-side** (`server/src/stats-table.js`'s
+`queryTable`, shared with the all-airlines table): `GET
+/api/stats/registrations?search&sort&dir&page&pageSize` answers `{rows,
+total, page, pageSize, totalPages, sort, dir}`. It used to return every
+registration ever seen and let the browser do all three — measured at 88 KB
+for 650 rows two days into an install, growing with every airframe ever
+seen, so the pagination control was real while the paging wasn't. At 5,000
+registrations a page is ~2.8 KB against ~669 KB for the whole table.
+Load-bearing details:
+- **Airline columns search and sort on the resolved *name*, not the ICAO
+  code** — that's what the column displays. (The old client-side sort used
+  the raw code, so the name column came out in no visible order.) The
+  server resolves names via `airlines-data.js`; the client still fetches
+  `/api/airlines` because only it can render locale-formatted rows.
+- **`pageSize=0` means "every matching row"** and exists for exactly one
+  caller: the CSV export, which downloads the current search/sort view in
+  full. A rare explicit click, not the default path. Everything else is
+  clamped to `MAX_PAGE_SIZE`.
+- **Missing values sort last in both directions** (same convention
+  `list.js` uses), and an unknown `sort` key falls back to the spec's
+  default rather than erroring — a query string is a view preference, not a
+  command.
+- Client-side, every interaction is now a request, so `draw()` tracks a
+  request id and only the newest response is allowed to paint. Defaults to
+  `timesSeen` descending ("what shows up a lot" is more useful than "most
+  recent" for a spotter), mirrored by the server's own `defaultSort`.
+- The search box still lives outside the rebuilt subtree so typing doesn't
+  lose focus, and is still debounced.
+- `getRegistrationsList()` (every row, unpaged) survives for tests and
+  in-process callers — **no HTTP route may return it wholesale**, which is
+  the thing this replaced.
 
 **CSV export** (`public/js/csv.js`'s `rowsToCsv`): exports the current
 search-filtered, sorted view (every matching row, not just the current
@@ -1173,10 +1197,13 @@ Three new top sections in `stats.js`, ahead of the range-selected charts:
   a `--net-only` readsb with no local SDR — shown as "not available," never
   a misleading `0 dBFS`.
 - **All airlines table**: mirrors the registrations table, lazy-loaded,
-  client-side sort/search/paginate. `db.js`'s `getAllAirlinesSummary` is a
-  `GROUP BY airline_icao` off the existing `registrations` table. Both
-  lazy-table implementations share `loadLazyTable` (worth factoring once
-  there were genuinely two ~150-line call sites).
+  server-side sort/search/paginate through the same `queryTable`. `db.js`'s
+  `getAllAirlinesSummary` is a `GROUP BY airline_icao` off the existing
+  `registrations` table. Its result is bounded by how many airlines exist
+  (a few hundred), not by airframes seen, so paging it was never about
+  payload size — it's there so both tables share one client code path
+  (`loadLazyTable`). Cost to be aware of: that `GROUP BY` now re-runs on
+  every page/sort click rather than once per table open.
 
 ### Reception coverage map layer (Settings → Map, off by default)
 
