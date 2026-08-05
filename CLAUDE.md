@@ -1373,10 +1373,36 @@ liable to be revisited again as data accumulates:
 from `trail.js`'s `colorForAltitude`, fed a representative midpoint
 altitude per band (`COVERAGE_BAND_MIDPOINT_FT`); "all altitudes" gets a
 fixed neutral green. Re-fetched when the settings change **and** on a
-`COVERAGE_REFRESH_INTERVAL_MS` (15s) timer while on — a tab left open needs
-to catch up with new farther contacts recorded server-side, nothing else
-would drive a refresh. Cached GeoJSON is reapplied by `ensureCoverageLayer`
-whenever the style resets (`setStyle` wipes sources on basemap switch).
+`COVERAGE_REFRESH_INTERVAL_MS` (2s, since 2026-08-05 — requested
+specifically to watch the coverage map build up live as data accumulates,
+was 15s) timer while on. Cached GeoJSON is reapplied by
+`ensureCoverageLayer` whenever the style resets (`setStyle` wipes sources
+on basemap switch).
+
+**The 2s cadence is only safe because most ticks are cheap.**
+`recordAntennaSample` bumps an in-memory `revision` counter
+(`antenna-stats.js`) on every genuine change — a sample that actually
+improved a cell, or a manual clear via `clearAntennaStats`. `GET
+/api/stats/antenna/revision` (same auth gate as the coverage endpoint)
+answers just that bare integer — no sector iteration, no
+`destinationPoint` trig, nothing the coverage endpoint itself does.
+`refreshCoverage(force)`: the periodic timer calls it with `force=false`,
+which polls `/revision` first and returns immediately if it matches
+`lastKnownCoverageRevision` — skipping the real coverage fetch **and** the
+MapLibre `setData()` call that would otherwise re-upload the whole polygon
+to the GPU every two seconds regardless of whether anything changed.
+`force=true` (initial load, a tab regaining visibility, or the
+`coverageBand`/`showCoverage` setting itself just changing) always does
+the real fetch — a stale cached revision could still equal the current one
+after a band switch, since revision tracks "did antenna data change,
+period," not "for this specific band." Compared with `!==`, not `>`,
+specifically so a server restart (revision resets to 0) still reads as
+"different" and triggers a catch-up fetch, rather than the client's
+higher cached number looking frozen at "up to date" forever. The
+coverage endpoint's own response also carries `revision` (not just
+`/revision`), so a `force=true` fetch updates the client's bookmark from
+the exact data it just rendered, instead of racing a separate poll against
+it.
 
 **`'stacked'` is an explicitly experimental option** (labelled as such in
 the dropdown), added 2026-08-05 to answer one question: is every altitude

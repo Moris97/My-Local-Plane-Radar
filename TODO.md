@@ -391,7 +391,10 @@ deferred by the user in the same conversation.
   Open question: does the spiky look actually fade as sectors fill in over
   real days/weeks, as suspected, or does a typical install settle at a
   sparsity where it stays rough long-term? Check against real accumulated
-  data before changing this again.
+  data before changing this again. The coverage layer now refreshes every
+  2s instead of 15s (v2.1.12, gated by a cheap `/revision` poll so idle
+  ticks stay nearly free) specifically so this can be watched building up
+  live rather than checked back on once a day.
 
 ### Measured and deliberately NOT done
 

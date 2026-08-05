@@ -35,7 +35,7 @@ import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getAllAirlinesSummary } from './db.js';
 import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
-import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats } from './antenna-stats.js';
+import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats, getAntennaStatsRevision } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
 import { clearRangeSamples } from './stats-history.js';
 
@@ -460,9 +460,24 @@ export async function buildServer({ logger = true } = {}) {
     return { ok: true };
   });
 
+  // Deliberately the only thing the client polls on a fast (1-2s) cadence
+  // to watch the coverage map build up live: a bare integer read, no
+  // sector iteration, no geometry, no destinationPoint calls -- the actual
+  // coverage fetch below is comparatively expensive (180 sectors' worth of
+  // trig per request, times nine for the stacked view) and re-uploads the
+  // whole polygon to the GPU via MapLibre's setData() on every call, so
+  // doing that every second regardless of whether anything changed would
+  // be wasted work almost all the time. Same auth gate as the coverage
+  // endpoint for consistency, even though a bare counter reveals nothing
+  // location-specific on its own.
+  app.get('/api/stats/antenna/revision', { preHandler: requireSettingsAuth }, async () => ({
+    revision: getAntennaStatsRevision(),
+  }));
+
   app.get('/api/stats/antenna/coverage', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const home = getEffectiveHome();
     const bandParam = request.query?.band;
+    const revision = getAntennaStatsRevision();
 
     // Experimental "every band at once" view (see CLAUDE.md): the client
     // wants all nine bands' fill shapes in one response so it can layer
@@ -474,16 +489,17 @@ export async function buildServer({ logger = true } = {}) {
     // "one round trip, not a fan-out" discipline even though the saving
     // here is small.
     if (bandParam === 'stacked') {
-      if (!home) return { bands: [] };
+      if (!home) return { bands: [], revision };
       return {
         bands: ALTITUDE_BANDS.map((_, bandIndex) => ({
           band: bandIndex,
           fillPolygon: coverageRing(getSectorStats(bandIndex), home, (s) => s.topAvgRangeKm),
         })),
+        revision,
       };
     }
 
-    if (!home) return { fillPolygon: null, maxPolygon: null };
+    if (!home) return { fillPolygon: null, maxPolygon: null, revision };
 
     let bandIndex = null;
     if (bandParam !== undefined && bandParam !== 'all') {
@@ -503,6 +519,12 @@ export async function buildServer({ logger = true } = {}) {
       // exactly this max value alone, and that's what makes them spiky).
       fillPolygon: coverageRing(sectors, home, (s) => s.topAvgRangeKm),
       maxPolygon: coverageRing(sectors, home, (s) => s.maxRangeKm),
+      // Bundled here too (not just on /revision) so the client can update
+      // its bookmark from the very response it just rendered, rather than
+      // racing a separate /revision poll against this fetch -- a sample
+      // landing in between the two would otherwise leave the client
+      // thinking it's already current when it just missed one.
+      revision,
     };
   });
 

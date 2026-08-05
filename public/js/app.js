@@ -61,7 +61,13 @@ const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
 // stats.js's per-cell top-5 lists rarely change once an install is a few
 // weeks old), not worth a dedicated push channel the way live aircraft
 // deltas are.
-const COVERAGE_REFRESH_INTERVAL_MS = 15000;
+// Fast enough to watch the coverage map build up live sample by sample
+// (requested 2026-08-05, specifically to observe this while real data
+// accumulates), safe at this cadence only because most ticks are a bare
+// revision-number check (see refreshCoverage) rather than a real
+// fetch/re-render -- an unconditional full refresh this often would mean
+// constant polygon re-fetches and GPU buffer re-uploads for nothing.
+const COVERAGE_REFRESH_INTERVAL_MS = 2000;
 // Below this zoom, dozens of overlapping labels would be pure noise rather
 // than useful -- matches the "at appropriate zoom levels" behavior other
 // ADS-B radar UIs default to.
@@ -271,8 +277,17 @@ function stackedCoverageFeatures(bands) {
 let coverageGeoJSON = { type: 'FeatureCollection', features: [] };
 let lastRequestedShowCoverage = null;
 let lastRequestedCoverageBand = null;
+let lastKnownCoverageRevision = null;
 
-async function refreshCoverage() {
+// force=true always does the real fetch (initial load, a tab regaining
+// visibility, or the coverage-band/show-coverage setting itself just
+// changed -- see the call sites below). Every other call -- the
+// COVERAGE_REFRESH_INTERVAL_MS timer, now every couple of seconds -- is
+// force=false: it checks the cheap /revision endpoint first and only does
+// the real fetch (which re-uploads the whole polygon to the GPU via
+// MapLibre's setData()) if the antenna data has actually changed since the
+// last time this drew anything.
+async function refreshCoverage(force = false) {
   const { showCoverage, coverageBand } = getSettings();
   lastRequestedShowCoverage = showCoverage;
   lastRequestedCoverageBand = coverageBand;
@@ -280,13 +295,26 @@ async function refreshCoverage() {
   if (!showCoverage) {
     coverageGeoJSON = { type: 'FeatureCollection', features: [] };
     map.getSource(COVERAGE_SOURCE_ID)?.setData(coverageGeoJSON);
+    lastKnownCoverageRevision = null; // re-enabling later must always do a real fetch
     return;
+  }
+
+  if (!force) {
+    try {
+      const revResponse = await fetch('/api/stats/antenna/revision');
+      if (!revResponse.ok) return;
+      const { revision } = await revResponse.json();
+      if (revision === lastKnownCoverageRevision) return; // nothing changed -- skip the expensive part entirely
+    } catch {
+      return; // offline/unreachable -- leave whatever was last shown rather than flapping
+    }
   }
 
   try {
     const response = await fetch(`/api/stats/antenna/coverage?band=${coverageBand}`);
     if (!response.ok) return; // 401 (Settings password set, not logged in) or offline -- leave whatever was last shown
     const data = await response.json();
+    lastKnownCoverageRevision = data.revision;
 
     if (coverageBand === 'stacked') {
       coverageGeoJSON = { type: 'FeatureCollection', features: stackedCoverageFeatures(data.bands) };
@@ -492,7 +520,7 @@ map.on('load', async () => {
     handleSnapshot(snapshot);
   }
   refreshTrailForSettings();
-  refreshCoverage();
+  refreshCoverage(true); // first-ever load -- no cached revision to compare against yet
 });
 
 // A tab nobody is looking at shouldn't be fetching. Browsers throttle
@@ -529,9 +557,11 @@ document.addEventListener('visibilitychange', () => {
   if (isHidden()) return;
   // Catch up on whatever was skipped while hidden. Both are cheap and
   // idempotent, so an unconditional refresh is simpler (and more obviously
-  // correct) than tracking what was actually missed.
+  // correct) than tracking what was actually missed. Coverage is forced
+  // (not just a revision check) so the tab is current the instant it's
+  // looked at again, rather than waiting for the next poll tick too.
   refreshDaylightTheme();
-  if (getSettings().showCoverage) refreshCoverage();
+  if (getSettings().showCoverage) refreshCoverage(true);
 });
 
 function passesAltitudeFilter(aircraft) {
@@ -562,7 +592,7 @@ onSettingsChange(() => {
   }
   const { showCoverage, coverageBand } = getSettings();
   if (showCoverage !== lastRequestedShowCoverage || coverageBand !== lastRequestedCoverageBand) {
-    refreshCoverage();
+    refreshCoverage(true); // the setting itself changed -- a stale cached revision could still equal the new one
   }
   // Self-heals a never-succeeded first fetch (e.g. toggled on before the
   // initial map.on('load') request finished, or that request failed) --

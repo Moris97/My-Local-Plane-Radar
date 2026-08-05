@@ -93,6 +93,24 @@ let latestPeakSignalDbfs = null;
 let loaded = false;
 let dirty = false;
 
+// Bumped on every genuine content change (a sample that actually improved
+// a cell, or a manual clear) -- lets the client poll a cheap `{ revision }`
+// endpoint every second or two to watch the coverage map build up live,
+// without recomputing/re-fetching/re-uploading the whole polygon to the
+// GPU on every tick regardless of whether anything changed. Independent of
+// `dirty`: that flag drives the SD-card flush cadence (minutes) and is
+// cleared after each write, while this is purely an in-memory "has
+// anything happened since the client last looked" counter and never
+// resets on its own. The client compares with `!==`, not `>`, so a server
+// restart (revision resets to 0) is still detected as "different" and
+// triggers a catch-up fetch, rather than looking frozen at a now-stale
+// higher number forever.
+let revision = 0;
+
+export function getAntennaStatsRevision() {
+  return revision;
+}
+
 // Persisted as compact [km, hex] tuples rather than {km, hex} objects --
 // repeated JSON field names were most of the weight of a similar blob
 // elsewhere in this app (stats-history.js's snapshot), and at up to
@@ -194,6 +212,7 @@ export function recordAntennaSample({ homeLat, homeLon, lat, lon, altBaro, onGro
 
   if (insertIntoTopK(cells[slot][secIdx], hex, km)) {
     dirty = true;
+    revision += 1;
   }
 }
 
@@ -282,6 +301,7 @@ export function clearAntennaStats() {
   cells = createEmptyCells();
   loaded = true;
   dirty = false;
+  revision += 1; // the client's cached shape is now stale too, same as a real sample arriving
   deleteConfig(CONFIG_KEY);
 }
 
@@ -291,4 +311,5 @@ export function resetAntennaStats() {
   latestPeakSignalDbfs = null;
   loaded = false;
   dirty = false;
+  revision = 0;
 }

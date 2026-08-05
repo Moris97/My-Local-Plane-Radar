@@ -21,6 +21,7 @@ const {
   flushAntennaStatsIfDirty,
   clearAntennaStats,
   resetAntennaStats,
+  getAntennaStatsRevision,
 } = await import('./antenna-stats.js');
 
 after(() => {
@@ -278,6 +279,39 @@ test('the retained top-K set only grows to accept genuinely better samples, capp
 
   // The tiny samples never beat the retained top 5, so the average is unchanged.
   assert.equal(afterTwentyTiny, afterFive);
+});
+
+// Lets the client poll a bare integer every couple of seconds instead of
+// re-fetching/re-rendering the whole coverage polygon on a timer
+// regardless of whether anything changed.
+test('the revision counter only advances on a genuine change', () => {
+  assert.equal(getAntennaStatsRevision(), 0);
+
+  const firstPlane = hex();
+  recordAntennaSample(sample({ hex: firstPlane, lat: 51.0, lon: 20.0 }));
+  assert.equal(getAntennaStatsRevision(), 1);
+
+  // Same hex, same (or worse) distance -- insertIntoTopK is a no-op, so
+  // this must not look like a change either.
+  recordAntennaSample(sample({ hex: firstPlane, lat: 50.5, lon: 20.0 }));
+  assert.equal(getAntennaStatsRevision(), 1);
+
+  // Below the message-count floor -- never reaches insertIntoTopK at all.
+  recordAntennaSample(sample({ lat: 52.0, lon: 20.0, messages: 1 }));
+  assert.equal(getAntennaStatsRevision(), 1);
+
+  // A genuinely new, distinct aircraft -- a real change.
+  recordAntennaSample(sample({ lat: 51.0, lon: 25.0 }));
+  assert.equal(getAntennaStatsRevision(), 2);
+});
+
+test('clearAntennaStats bumps the revision too -- the client\'s cached shape is now stale', () => {
+  recordAntennaSample(sample({ lat: 51.0, lon: 20.0 }));
+  const before = getAntennaStatsRevision();
+
+  clearAntennaStats();
+
+  assert.notEqual(getAntennaStatsRevision(), before);
 });
 
 test('recordSignalReading tracks the latest signal reading, overwriting on each call', () => {
