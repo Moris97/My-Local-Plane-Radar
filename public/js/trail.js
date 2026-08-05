@@ -203,6 +203,31 @@ export function smoothMlatPositions(points) {
   });
 }
 
+// A live position update can arrive with no barometric altitude even
+// mid-flight -- a weak/fringe decode can drop the altitude subfield while
+// lat/lon still checksum, often right as an aircraft is about to lose
+// contact entirely (reported live: a solid golden-green "ground level" trail
+// segment appearing right where an aircraft was fading out, not a dashed
+// gap). recordPosition/seedHistory store exactly what was received,
+// undefined included -- bandedColor's fallback treats a non-number
+// altitude as ground (colorForAltitude's own contract, correct for a
+// contact with no altitude at all, e.g. Mode-S-only). Carrying the last
+// known altitude forward here, at render time only, never touching stored
+// history, keeps that fallback honest for its real use case instead of
+// misrepresenting a fleeting missing-field tick as a dive to the ground. A
+// no-op whenever every point already has a real altitude (the common case).
+function carryForwardAltitude(points) {
+  let lastKnownAlt = null;
+  return points.map((point) => {
+    if (typeof point.alt === 'number') {
+      lastKnownAlt = point.alt;
+      return point;
+    }
+    if (lastKnownAlt === null) return point; // no prior altitude to carry forward yet (e.g. trail start)
+    return { ...point, alt: lastKnownAlt };
+  });
+}
+
 // Consecutive segments sharing a color (and gap-ness) are emitted as a
 // single multi-point LineString rather than one 2-point feature each.
 // Two reasons, both about the "trail looks dashed when zoomed out" report:
@@ -213,12 +238,12 @@ export function smoothMlatPositions(points) {
 // are never merged into a colored run -- they are drawn by their own dashed
 // layer (see app.js) and must stay separate features.
 export function trailFeaturesFor(hex) {
-  // Both passes are no-ops on a trail with no MLAT points (the overwhelming
-  // common case -- most installs see ADS-B for the vast majority of
-  // traffic), and cheap even on a full 1000-point trail, so there's no need
-  // to cache the result or gate this on trailMode/whether MLAT is actually
-  // present.
-  const points = smoothMlatPositions(filterMlatAnomalies(getHistory(hex)));
+  // All three passes are no-ops on a trail with no MLAT points and no
+  // missing altitudes (the overwhelming common case -- most installs see
+  // ADS-B for the vast majority of traffic), and cheap even on a full
+  // 1000-point trail, so there's no need to cache the result or gate this
+  // on trailMode/whether MLAT is actually present.
+  const points = smoothMlatPositions(filterMlatAnomalies(carryForwardAltitude(getHistory(hex))));
   const features = [];
   let run = null;
 

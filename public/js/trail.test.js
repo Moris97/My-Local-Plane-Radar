@@ -136,6 +136,42 @@ test('a gap segment is its own feature, flagged and grey, and never merged into 
   assert.ok(features.every((f) => f.properties.isGap || f.properties.color !== '#888a8f'));
 });
 
+test('a missing altitude mid-trail carries the previous altitude forward instead of falling to ground/yellow', () => {
+  // Regression test: a weak/fringe decode can drop the altitude subfield
+  // while lat/lon still checksum, often right as an aircraft is about to
+  // lose contact -- reported live as a solid golden-green "ground level"
+  // segment appearing where the trail should have just kept its cruise
+  // color (or gone dashed grey, if it was a real gap).
+  record(20.0, 35000);
+  record(20.01, 35000);
+  record(20.02, undefined);
+  record(20.03, undefined);
+
+  const features = trailFeaturesFor(HEX);
+  const groundColor = colorForAltitude(0);
+  assert.ok(features.every((f) => f.properties.color !== groundColor));
+  assert.equal(features.length, 1, 'should read as one continuous run, not a break to a different color');
+});
+
+test('a missing altitude with nothing earlier to carry forward still falls back to ground/yellow', () => {
+  record(20.0, undefined);
+  record(20.01, undefined);
+
+  const features = trailFeaturesFor(HEX);
+  assert.equal(features[0].properties.color, colorForAltitude(0));
+});
+
+test('a gap segment stays grey even when the reappearing point has no altitude to report', () => {
+  record(20.0, 35000);
+  record(20.01, 35000);
+  record(20.5, undefined, true); // reappeared after a loss of contact, altitude not yet decoded again
+
+  const features = trailFeaturesFor(HEX);
+  const gaps = features.filter((f) => f.properties.isGap);
+  assert.equal(gaps.length, 1);
+  assert.equal(gaps[0].properties.color, '#888a8f');
+});
+
 test('every feature carries an explicit isGap boolean so the dashed layer filter can match on it', () => {
   record(20.0, 35000);
   record(20.01, 35000);

@@ -136,6 +136,42 @@ export function regularPolygonPoints(lat, lon, radiusKm, sides) {
   return Array.from({ length: sides }, (_, i) => destinationPoint(lat, lon, (i * 360) / sides, radiusKm));
 }
 
+// A live update can arrive with no track/heading at all -- the same
+// failure mode as a missing altitude (a weak/fringe decode drops the field
+// while lat/lon still checksum), most visibly right as an aircraft
+// reappears after a signal gap: reported live as the marker snapping to
+// due north instead of its real course. Deriving a heading from the
+// bearing between the last known position and the new one uses the
+// aircraft's own actual displacement -- unlike carrying forward the last
+// *reported* track (the fix used for altitude), this reflects a turn made
+// during the gap rather than assuming the aircraft kept flying the old
+// heading.
+//
+// The noise floor is source-aware, mirroring trail.js's own ADS-B/MLAT
+// split ("ADS-B positions are broadcast directly by the aircraft and are
+// never touched... regardless of how implausible a neighboring MLAT point
+// looks"): an initial version applied MLAT_MIN_TURN_CHECK_KM's 0.3 km floor
+// unconditionally, copied over from trail.js's MLAT turn-rate guard for
+// consistency rather than derived for this use case -- which turned out to
+// suppress the derivation for exactly its main target (a single missing
+// track field mid-flight on an otherwise-good ADS-B update), since a normal
+// 1 Hz poll interval only covers ~55-250 m of real displacement for typical
+// aircraft speeds, well under 300 m. ADS-B position error is on the order
+// of tens of metres (broadcast straight from the aircraft's own GPS), so a
+// bearing derived from even a modest ADS-B hop is trustworthy without any
+// floor -- the floor only matters for MLAT, whose triangulated position
+// error is commonly 100-500 m depending on receiver geometry, which is
+// what the 300 m figure actually guards against.
+const MLAT_MIN_HEADING_DERIVATION_DISTANCE_KM = 0.3;
+
+export function deriveHeadingDegrees(trackDegrees, prevLat, prevLon, lat, lon, isMlat = false) {
+  if (typeof trackDegrees === 'number') return trackDegrees;
+  if (typeof prevLat !== 'number' || typeof prevLon !== 'number') return undefined;
+  if (typeof lat !== 'number' || typeof lon !== 'number') return undefined;
+  if (isMlat && distanceKm(prevLat, prevLon, lat, lon) < MLAT_MIN_HEADING_DERIVATION_DISTANCE_KM) return undefined;
+  return bearingDegrees(prevLat, prevLon, lat, lon);
+}
+
 // aircraftList: normalized aircraft objects (radar-state.js's getLiveAircraft()).
 // home: { lat, lon } | null. Returns { nearest, farthest }, each either null
 // (no home configured, or no aircraft with a position) or the original

@@ -407,7 +407,33 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   reveal depends on.
 - **Dark theme is the default** — night-readable radar display. Color
   theme: green, blue, black.
-- Plane icon rotates to heading. Click shows trail + basic info popup with a
+- **Plane icon rotates to heading, derived when `track` is missing**
+  (`public/js/geo.js`'s `deriveHeadingDegrees`, called from `app.js`'s
+  `applyAircraftUpdate` right before `state.lastLngLat` gets overwritten
+  with the current update's position — needs the *previous* one).
+  `aircraft.track` can be absent on an otherwise-good position update, the
+  same failure mode documented above for missing altitude — reported live
+  as a marker snapping to due north (`setPlaneHeading`'s own fallback for a
+  non-number) instead of its real course, most visibly right after an
+  aircraft reappears from a signal gap. Rather than carrying the last
+  *reported* track forward (the altitude fix's approach), this derives a
+  bearing from the aircraft's own actual displacement (last known position
+  → new position) — correct even if the aircraft turned during the gap,
+  which carrying forward a stale track value would get wrong.
+  **The noise floor is source-aware, not a flat distance check** — an ADS-B
+  hop is trusted at any distance (position error is tens of metres, straight
+  from the aircraft's own GPS); only an MLAT hop under
+  `MLAT_MIN_HEADING_DERIVATION_DISTANCE_KM` (0.3 km, same figure/reason as
+  `trail.js`'s `MLAT_MIN_TURN_CHECK_KM` — MLAT's triangulated error is
+  commonly 100-500 m) returns `undefined` rather than trust the noise,
+  falling back to the pre-existing due-north default. A first version
+  applied that 0.3 km floor unconditionally (copied from trail.js for
+  consistency, not re-derived for this use case) — caught before shipping:
+  a normal 1 Hz poll only covers ~55-250 m of real displacement at typical
+  aircraft speeds, so the flat floor silently suppressed the derivation for
+  its main target, a single missing track field mid-flight on an
+  otherwise-good ADS-B update.
+- Click shows trail + basic info popup with a
   "show more details" button opening the full aircraft details panel
   (`PANELS.aircraft`, opened via `openPanel('aircraft')` after
   `setInspectedHex(hex)`). Popup offset:
@@ -565,6 +591,42 @@ Planespotters photo fetch.
   polyline. Combined with `line-cap: round` and `tolerance: 0` on the source
   (disabling geojson-vt simplification) — both needed, they fix different
   halves of "trail looks dashed when zoomed out."
+- **A trail point with no barometric altitude carries the previous point's
+  altitude forward for coloring, at render time only** (`trail.js`'s
+  `carryForwardAltitude`, applied inside `trailFeaturesFor` before the MLAT
+  passes below — stored history keeps whatever was actually received,
+  undefined included). A weak/fringe decode can drop the altitude subfield
+  while lat/lon still checksum, often right as an aircraft is about to lose
+  contact — `colorForAltitude`'s "unknown altitude = ground" fallback is
+  correct for a contact with no altitude at all (e.g. Mode-S-only), but
+  applied to a single missing tick mid-cruise it painted a solid
+  golden-green "ground level" segment (reported live, screenshot showing a
+  bright yellow trail exactly where a plane was fading out) instead of
+  either holding the previous cruise color or going dashed grey. Only
+  applies when there's a real prior altitude to carry — a trail with no
+  altitude ever (from the first point) still falls back to ground, unchanged.
+- **The marker fade/removal timer (`FADE_START_MS`/`FADE_END_MS`/
+  `REMOVE_MS`) and the trail-gap flag on reappearance are keyed off position
+  freshness (`aircraftState`'s `lastPositionAt`), not "any update at all"**
+  (`lastUpdateAt`, used only for the signalLoss color fade itself, per its
+  own doc above). A Mode-S-only ping (no decodable position) still refreshes
+  `lastUpdateAt` and `noteAircraft` — a real contact, correctly kept visible
+  to List/Stats — but `applyAircraftUpdate` deliberately leaves
+  `lastPositionAt`/`goneAt` untouched on that path. Before this fix both
+  timers read `lastUpdateAt`, so a run of position-less pings (readsb can
+  report Mode-S traffic for a while with no decodable position) kept
+  resetting the removal clock indefinitely: the marker just sat frozen at
+  its last known spot — never fading, never removed, `goneAt` never set —
+  however stale the position actually was. When a real position finally
+  came back, `wasGone` read `false` (it had been getting reset to `null` by
+  every position-less tick in between), so the trail joined the old frozen
+  point straight to the new one with a normal colored segment instead of a
+  dashed gap — reported live as a plane appearing to freeze then jump to a
+  new spot with a plain/yellow line, not a dashed one, distinct from the
+  missing-altitude bug above (this one can happen with a perfectly good
+  altitude reading on both sides). An aircraft never yet plotted at all has
+  `lastPositionAt === null` and is skipped by this check entirely — nothing
+  to fade or remove.
 - **MLAT-derived trail points get anomaly-filtered and smoothed; ADS-B
   points never do** (`trail.js`'s `filterMlatAnomalies`/
   `smoothMlatPositions`, applied inside `trailFeaturesFor`, so both

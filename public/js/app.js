@@ -21,6 +21,7 @@ import { getSettings, onSettingsChange } from './settings-state.js';
 import { queuePendingMessage } from './pending-queue.js';
 import { openPanel } from './panels.js';
 import { formatAltitude, formatSpeed } from './units.js';
+import { deriveHeadingDegrees } from './geo.js';
 
 // aircraft.flight/typeCode ultimately come from readsb's aircraft.json --
 // trusted when read from the local file, but HttpSource fetches the same
@@ -912,14 +913,12 @@ function applyAircraftUpdate(aircraft) {
   let state = aircraftState.get(aircraft.hex);
 
   if (!state) {
-    state = { marker: null, lastUpdateAt: now, lastLngLat: null, goneAt: null };
+    state = { marker: null, lastUpdateAt: now, lastPositionAt: null, lastLngLat: null, goneAt: null };
     aircraftState.set(aircraft.hex, state);
   }
 
-  const wasGone = state.goneAt !== null;
   state.lastUpdateAt = now;
   state.lastAircraft = aircraft;
-  state.goneAt = null;
 
   noteAircraft(aircraft.hex, aircraft);
 
@@ -931,8 +930,22 @@ function applyAircraftUpdate(aircraft) {
     // that marker exactly where it last was rather than snapping it away
     // or deleting it -- the regular fade/forget timers below retire it on
     // their own schedule if a real position never comes back.
+    //
+    // Deliberately does NOT touch goneAt/lastPositionAt here (unlike
+    // lastUpdateAt above) -- a run of position-less pings (readsb can keep
+    // reporting Mode-S traffic for a while with no decodable position) must
+    // not keep resetting "when did we last actually know where this
+    // aircraft is," or the fade/removal timer below -- and the trail-gap
+    // flag on reappearance -- would never fire no matter how stale the
+    // real position has become. Reported live: a marker appeared to freeze
+    // in place then jump to a new spot joined by a plain colored trail
+    // line, never a dashed gap, after a long position-less patch.
     return;
   }
+
+  const wasGone = state.goneAt !== null;
+  state.goneAt = null;
+  state.lastPositionAt = now;
 
   const lngLat = [aircraft.lon, aircraft.lat];
 
@@ -962,7 +975,13 @@ function applyAircraftUpdate(aircraft) {
 
   const { aircraftLabelFields, units } = getSettings();
   setPlaneKind(state.marker.getElement(), aircraft);
-  setPlaneHeading(state.marker.getElement(), aircraft.track);
+  // aircraft.track can be missing on an otherwise-good position update (see
+  // deriveHeadingDegrees) -- state.lastLngLat still holds the *previous*
+  // position here, one line above where it gets overwritten with this
+  // update's lngLat.
+  const [prevLon, prevLat] = state.lastLngLat ?? [];
+  const isMlat = aircraft.sourceType === 'mlat';
+  setPlaneHeading(state.marker.getElement(), deriveHeadingDegrees(aircraft.track, prevLat, prevLon, aircraft.lat, aircraft.lon, isMlat));
   setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
   setPlaneLabel(state.marker.getElement(), buildAircraftLabel(aircraft, aircraftLabelFields, units));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
@@ -1041,9 +1060,14 @@ setInterval(() => {
       continue;
     }
 
-    const elapsed = now - state.lastUpdateAt;
-
-    if (elapsed >= REMOVE_MS) {
+    // Keyed off position freshness, not "any update at all" -- a Mode-S-only
+    // contact can keep pinging with no position for a long time after its
+    // last real fix (applyAircraftUpdate's early return leaves
+    // lastPositionAt untouched for exactly this reason), and using
+    // lastUpdateAt here let that postpone removal indefinitely. No marker
+    // exists yet (lastPositionAt still null) for an aircraft never plotted
+    // at all -- nothing to fade or remove.
+    if (state.lastPositionAt !== null && now - state.lastPositionAt >= REMOVE_MS) {
       state.marker?.remove();
       state.marker = null;
       state.goneAt = now;
@@ -1053,6 +1077,8 @@ setInterval(() => {
       trailNeedsRefresh = true;
       continue;
     }
+
+    const elapsed = now - state.lastUpdateAt;
 
     // Only the 'signalLoss' mode depends on elapsed time -- the other modes
     // are static snapshots of a flight parameter already set at update time

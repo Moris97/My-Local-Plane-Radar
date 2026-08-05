@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees, findNearestFarthest, destinationPoint, circleRing, rectangleRing, rectangleEdges, polygonRing, polygonCentroid, regularPolygonPoints } from './geo.js';
+import { distanceKm, bearingDegrees, findNearestFarthest, destinationPoint, circleRing, rectangleRing, rectangleEdges, polygonRing, polygonCentroid, regularPolygonPoints, deriveHeadingDegrees } from './geo.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(Math.abs(actual - expected) <= tolerance, `expected ${actual} to be within ${tolerance} of ${expected}`);
@@ -172,4 +172,44 @@ test('a regular polygon centroid lands back on the centre it was built around', 
   const centre = polygonCentroid(points);
   assertClose(centre.lat, ORIGIN.lat, 0.01);
   assertClose(centre.lon, ORIGIN.lon, 0.01);
+});
+
+test('deriveHeadingDegrees passes a real track straight through, ignoring position', () => {
+  assert.equal(deriveHeadingDegrees(275, ORIGIN.lat, ORIGIN.lon, ORIGIN.lat, ORIGIN.lon), 275);
+});
+
+test('deriveHeadingDegrees derives a heading from the last position to the new one when track is missing', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 80, 5); // moved 5 km on a course of 80 deg
+  const heading = deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, point.lat, point.lon);
+  assertClose(heading, 80, 0.5);
+});
+
+test('deriveHeadingDegrees returns undefined (not a guess) with no previous position to derive from', () => {
+  assert.equal(deriveHeadingDegrees(undefined, undefined, undefined, ORIGIN.lat, ORIGIN.lon), undefined);
+  assert.equal(deriveHeadingDegrees(null, undefined, undefined, ORIGIN.lat, ORIGIN.lon), undefined);
+});
+
+test('deriveHeadingDegrees trusts a small ADS-B hop with no distance floor at all', () => {
+  // A typical 1 Hz poll interval only covers tens of metres of real
+  // displacement at low speed -- the ADS-B path must not require the same
+  // 300 m floor MLAT needs, or the fix never fires for its main target (a
+  // single missing track field mid-flight).
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 80, 0.05); // 50 m
+  const heading = deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, point.lat, point.lon, false);
+  assertClose(heading, 80, 2);
+});
+
+test('deriveHeadingDegrees refuses a noise-scale MLAT hop, where the floor actually matters', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 80, 0.05); // 50 m -- below MLAT's reliable-derivation floor
+  assert.equal(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, point.lat, point.lon, true), undefined);
+});
+
+test('deriveHeadingDegrees derives an MLAT heading fine once the hop clears the floor', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 80, 5); // 5 km, well past the 0.3 km MLAT floor
+  const heading = deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, point.lat, point.lon, true);
+  assertClose(heading, 80, 0.5);
+});
+
+test('deriveHeadingDegrees returns undefined when the new position itself is missing', () => {
+  assert.equal(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, undefined, undefined), undefined);
 });
