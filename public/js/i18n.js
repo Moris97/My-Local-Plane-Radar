@@ -314,6 +314,7 @@ const DICTIONARIES = {
     coverageBand6: '30,000–35,000 ft',
     coverageBand7: '35,000–40,000 ft',
     coverageBand8: '40,000+ ft',
+    connectionLost: 'Connection lost — reconnecting…',
   },
   pl: {
     list: 'Lista',
@@ -628,6 +629,7 @@ const DICTIONARIES = {
     coverageBand6: '30 000–35 000 ft',
     coverageBand7: '35 000–40 000 ft',
     coverageBand8: '40 000+ ft',
+    connectionLost: 'Utracono połączenie — ponawiam próbę…',
   },
 };
 

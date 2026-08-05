@@ -17,6 +17,7 @@ import { formatDistance, formatAltitude, formatSpeed } from './units.js';
 import { findNearestFarthest } from './geo.js';
 import { rowsToCsv } from './csv.js';
 import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
+import { escapeHtml } from './html-escape.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TREND_TOP_N = 5;
@@ -106,10 +107,6 @@ async function getAirlinesMap() {
   const raw = await fetchJson('/api/airlines', {});
   airlinesCache = new Map(Object.entries(raw));
   return airlinesCache;
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
 function legendItemHtml(color, label, value) {

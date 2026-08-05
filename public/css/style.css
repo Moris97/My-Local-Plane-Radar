@@ -24,6 +24,31 @@ html, body {
   inset: 0;
 }
 
+/* A red pill rather than the app's usual green/blue -- deliberately the one
+   alarming color in this app's palette (see CLAUDE.md's dark theme note),
+   since "the data has stopped updating" is exactly the kind of thing that
+   otherwise goes unnoticed until someone wonders why nothing has moved. */
+#mlpr-connection-status {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  background: rgba(120, 20, 20, 0.85);
+  color: #ffd9d9;
+  font: 600 12.5px system-ui, sans-serif;
+  padding: 6px 14px;
+  border-radius: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+  max-width: calc(100vw - 24px);
+  text-align: center;
+}
+
+#mlpr-connection-status.hidden {
+  display: none;
+}
+
 .mlpr-home-marker {
   width: 40px;
   height: 40px;

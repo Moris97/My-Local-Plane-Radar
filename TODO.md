@@ -276,18 +276,15 @@ numbers. What's left:
 
 ### UX
 
-- **No connection-status indicator** (effort: small, impact: high) — when
-  the WebSocket drops, the data simply freezes and nothing says so. Hit
-  three times in one session while restarting the server during development
-  ("Add doesn't work", "the whole page died") — each time the real answer
-  was "the server isn't running". A small "disconnected / reconnecting"
-  strip would have answered it instantly. Pairs naturally with the next
-  item; do them together.
-- **WebSocket reconnect has no backoff** (effort: small, impact: medium) —
-  `app.js`'s `connect()` retries on a flat `setTimeout(connect, 1000)`
-  forever. With the server down that's one request a second indefinitely,
-  and the user is told nothing. Wants exponential backoff with a cap, and
-  to feed the status indicator above.
+- ~~**No connection-status indicator**~~ **Done, v2.1.14.** A red pill
+  (`#mlpr-connection-status`, top-center, `aria-live="polite"`) shown only
+  while the WebSocket is actually down — hidden the instant `connect()`'s
+  `open` event fires. Done together with the backoff item below, as
+  planned.
+- ~~**WebSocket reconnect has no backoff**~~ **Done, v2.1.14.** Exponential
+  backoff (`INITIAL_RECONNECT_DELAY_MS` 1s, doubling to a
+  `MAX_RECONNECT_DELAY_MS` 30s cap), reset back to the start on a successful
+  `open`. Feeds the status indicator above.
 - **Watch-list entries can't be edited** (effort: medium, impact: medium) —
   only `POST` and `DELETE` exist (`server.js`). Since an entry now carries a
   match type, an optional altitude condition *and* an optional trigger area
@@ -302,10 +299,10 @@ numbers. What's left:
   push or PR, so a regression only surfaces when someone happens to run
   `npm test` locally. A single workflow running `npm ci && npm test` on
   Node 22/24 would cover it.
-- **`escapeHtml` is duplicated three times** (effort: tiny, impact: small) —
-  identical implementations in `app.js`, `stats.js` and
-  `aircraft-panel.js`. Wants one shared module, in the same spirit as
-  `geo.js`/`debounce.js`/`pending-queue.js`.
+- ~~**`escapeHtml` is duplicated three times**~~ **Done, v2.1.14.** Moved to
+  `public/js/html-escape.js`, same spirit as `geo.js`/`debounce.js`/
+  `pending-queue.js`; `app.js`/`stats.js`/`aircraft-panel.js` all import it
+  now instead of each defining their own copy.
 - **`docs/README.md` is out of date** (effort: small, impact: medium) — it
   still describes Smart Home as its own Settings tab in two places, which
   stopped being true in v2.1.0 when it became a subview inside
@@ -339,16 +336,18 @@ deferred by the user in the same conversation.
   same as the redesign before this one — an established install loses its
   accumulated coverage history once, not silently corrupted going
   forward.
-- **Storage/write hygiene** (effort: small, impact: medium) — several small
-  things noticed in the same pass: no `PRAGMA journal_mode = WAL` /
-  `synchronous = NORMAL` (`.gitignore` already lists `*.db-wal`/`*.db-shm`,
-  so this looks like an intention that never landed — rollback-journal mode
-  means a journal file created, fsynced and deleted per transaction, and
-  there are six transactions per flush tick); `evaluateRangeRecordRule`
-  writes `allTimeMaxRangeKm` straight from the per-second poll loop on every
-  new record instead of going through a batched flush (a burst on a fresh
-  install, rare afterwards); the five flush calls in `flushDailyStats` could
-  share one transaction instead of five.
+- ~~**Storage/write hygiene**~~ **Done, v2.1.14.** All three: (1)
+  `db.js` now sets `PRAGMA journal_mode = WAL` / `synchronous = NORMAL` right
+  after opening the connection; (2) `evaluateRangeRecordRule` now only
+  updates an in-memory cache + dirty flag, persisted by the new
+  `flushAllTimeMaxRangeKmIfDirty()` from the same periodic tick as
+  `flushDailyStats` (and the graceful-shutdown path that also calls it) —
+  `getAllTimeMaxRangeKm()` reads the cache, so Stats/the notification still
+  see the record update immediately, only the SQLite write is deferred; (3)
+  `db.js`'s `runBatch` is now exported and reentrant via `SAVEPOINT` (node:
+  sqlite throws on a literal nested `BEGIN`), and `flushDailyStats` wraps its
+  whole body in one outer `runBatch` — five transactions per flush tick down
+  to one.
 - ~~**Nothing resets antenna statistics when the receiver moves**~~ **Done
   in v2.1.9.** `POST /api/stats/antenna/reset` plus a button on the Server
   tab, clearing the coverage cells, the all-time range record and the

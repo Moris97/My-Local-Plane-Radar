@@ -3,10 +3,7 @@ import { getInspectedHex, getAircraftByHex, onChange } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { buildAircraftDetailTiles, FLAG_VALUE_MARKER, GROUND_MARKER } from './aircraft-details.js';
 import { getCachedPhoto, setCachedPhoto } from './photo-cache.js';
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-}
+import { escapeHtml } from './html-escape.js';
 
 // A tile with a pairId is meant to sit side by side with its partner (e.g.
 // flight/registration). If the partner is missing for this aircraft, plain

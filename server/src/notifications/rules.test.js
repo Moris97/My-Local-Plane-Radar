@@ -11,7 +11,7 @@ const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
-const { setConfigJSON } = await import('../db.js');
+const { setConfigJSON, getConfig, setConfig } = await import('../db.js');
 const { hasSeenAircraft } = await import('../aircraft-tracked.js');
 const smartHome = await import('./smart-home.js');
 
@@ -201,6 +201,45 @@ test('rangeRecordEnabled=false still updates the record but sends nothing', () =
 
 test('getAllTimeMaxRangeKm reflects the record maintained by evaluateRangeRecordRule, regardless of notification toggle', () => {
   assert.equal(rules.getAllTimeMaxRangeKm(), 200);
+});
+
+test('the record is NOT written to SQLite until flushAllTimeMaxRangeKmIfDirty runs, even though getAllTimeMaxRangeKm already reflects it', () => {
+  // Deferred by design (moved off the per-second poll loop to avoid an SD
+  // write on every improved record) -- getAllTimeMaxRangeKm reads the
+  // in-memory cache, not SQLite, so it must already show 200 here.
+  assert.equal(rules.getAllTimeMaxRangeKm(), 200);
+  assert.notEqual(getConfig('allTimeMaxRangeKm'), '200');
+});
+
+test('flushAllTimeMaxRangeKmIfDirty persists the current record, then is a no-op until the record changes again', () => {
+  rules.flushAllTimeMaxRangeKmIfDirty();
+  assert.equal(getConfig('allTimeMaxRangeKm'), '200');
+
+  // Change the stored value out from under the cache to prove a second
+  // flush with nothing new really is a no-op -- a dirty flush would
+  // overwrite this back to 200.
+  setConfig('allTimeMaxRangeKm', '999');
+  rules.flushAllTimeMaxRangeKmIfDirty();
+  assert.equal(getConfig('allTimeMaxRangeKm'), '999');
+
+  // A genuinely new record dirties it again and the next flush persists it.
+  rules.evaluateRangeRecordRule(250);
+  rules.flushAllTimeMaxRangeKmIfDirty();
+  assert.equal(getConfig('allTimeMaxRangeKm'), '250');
+});
+
+test('resetAllTimeMaxRangeKm clears both SQLite and the in-memory cache', () => {
+  rules.evaluateRangeRecordRule(300);
+  assert.equal(rules.getAllTimeMaxRangeKm(), 300);
+
+  rules.resetAllTimeMaxRangeKm();
+  assert.equal(rules.getAllTimeMaxRangeKm(), 0);
+  assert.equal(getConfig('allTimeMaxRangeKm'), null);
+
+  // A record set right after a reset must be treated as a fresh record
+  // (beating 0), not compared against the pre-reset value.
+  rules.evaluateRangeRecordRule(10);
+  assert.equal(rules.getAllTimeMaxRangeKm(), 10);
 });
 
 function silentNotifications() {

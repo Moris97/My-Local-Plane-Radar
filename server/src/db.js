@@ -9,6 +9,27 @@ mkdirSync(dirname(dbPath), { recursive: true });
 
 const db = new DatabaseSync(dbPath);
 
+// WAL means a reader (any GET /api/* handler) never blocks a writer and
+// vice versa, and -- the actual SD-wear motivation -- each committed
+// transaction is an append to the WAL file rather than a rollback-journal
+// file being created, fsynced and deleted every single time. NORMAL
+// synchronous is the documented pairing for WAL (still fsyncs at every
+// checkpoint, just not after every single transaction) -- this app already
+// accepts losing a restart's worth of in-memory state as normal (hard rule
+// 6), so trading a little durability on the rare unclean-shutdown/power-cut
+// case for meaningfully less flash wear on every routine write fits the
+// same tradeoff already made everywhere else in this file.
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA synchronous = NORMAL');
+
+// Test-only: confirms the PRAGMA above actually took effect (SQLite ignores
+// journal_mode=WAL and silently stays on its default for some setups, e.g.
+// certain in-memory or exotic filesystem cases), rather than trusting that
+// setting it was the same as it being active.
+export function getJournalModeForTests() {
+  return db.prepare('PRAGMA journal_mode').get().journal_mode;
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS config (
     key TEXT PRIMARY KEY,
@@ -241,15 +262,32 @@ export function setConfigJSON(key, value) {
 
 // Runs fn() inside one transaction -- shared by the batched upsert
 // functions below (hard rule 5: no per-row writes scattered through the
-// poll loop, one commit per periodic flush instead).
-function runBatch(fn) {
-  db.exec('BEGIN');
+// poll loop, one commit per periodic flush instead). Exported and reentrant
+// via SAVEPOINT: node:sqlite's DatabaseSync throws on a nested BEGIN, but
+// index.js's flushDailyStats calls upsertDailyStats plus four flushDirtyX()
+// functions together as one periodic flush tick, each of which reaches one
+// of the upsert* functions below that call this on their own -- depth
+// tracks how many runBatch calls are currently nested, so only the
+// outermost caller opens/closes the real transaction (previously five
+// separate commits per flush tick) while every call still commits or rolls
+// back correctly on its own if used standalone, exactly as before.
+let transactionDepth = 0;
+
+export function runBatch(fn) {
+  const isOutermost = transactionDepth === 0;
+  transactionDepth += 1;
+  if (isOutermost) db.exec('BEGIN');
+  else db.exec(`SAVEPOINT sp${transactionDepth}`);
   try {
     fn();
-    db.exec('COMMIT');
+    if (isOutermost) db.exec('COMMIT');
+    else db.exec(`RELEASE sp${transactionDepth}`);
   } catch (err) {
-    db.exec('ROLLBACK');
+    if (isOutermost) db.exec('ROLLBACK');
+    else db.exec(`ROLLBACK TO sp${transactionDepth}`);
     throw err;
+  } finally {
+    transactionDepth -= 1;
   }
 }
 
@@ -324,16 +362,11 @@ export function upsertRegistration(registration, { typeCode, airlineIcao, firstS
 // inserts scattered through the poll loop).
 export function upsertRegistrations(entries) {
   if (entries.length === 0) return;
-  db.exec('BEGIN');
-  try {
+  runBatch(() => {
     for (const entry of entries) {
       upsertRegistration(entry.registration, entry);
     }
-    db.exec('COMMIT');
-  } catch (err) {
-    db.exec('ROLLBACK');
-    throw err;
-  }
+  });
 }
 
 export function getRegistration(registration) {

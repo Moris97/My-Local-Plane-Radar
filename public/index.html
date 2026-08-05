@@ -26,6 +26,11 @@
 </head>
 <body>
 <div id="map"></div>
+<!-- Hidden by default -- app.js's connect() only removes the "hidden" class
+     while the WebSocket is actually down, so a healthy connection never
+     shows this at all. aria-live so a reconnect is announced without moving
+     focus. -->
+<div id="mlpr-connection-status" class="hidden" role="status" aria-live="polite"></div>
 <div id="mlpr-corner-info">
   <button type="button" id="mlpr-credits-toggle" class="mlpr-info-icon" aria-expanded="false" aria-controls="mlpr-credits-panel">i</button>
   <div id="mlpr-credits-panel" class="mlpr-credits-panel hidden" role="dialog">

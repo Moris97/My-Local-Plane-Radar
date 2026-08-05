@@ -223,7 +223,31 @@ falls back to "first aircraft," deliberately out of scope for this fix.
 4. **SQLite gets events and daily aggregates only — never raw position
    history.** SD card cannot survive per-position writes.
 5. **Batch writes in transactions every 30–60 seconds.** No per-row INSERTs
-   in a loop.
+   in a loop. `server/src/db.js` sets `PRAGMA journal_mode = WAL` /
+   `synchronous = NORMAL` right after opening the connection (v2.1.14) — WAL
+   means a committed transaction appends to the WAL file instead of a
+   rollback-journal file being created/fsynced/deleted every time, and
+   NORMAL is WAL's documented synchronous pairing (still fsyncs at
+   checkpoints, not after every transaction). `runBatch` (exported, wraps a
+   function in one transaction) is **reentrant via `SAVEPOINT`**: node:
+   sqlite's `DatabaseSync` throws on a literal nested `BEGIN`, but
+   `index.js`'s `flushDailyStats` calls `upsertDailyStats` plus four
+   `flushDirtyX()` functions together, several of which reach one of
+   `db.js`'s own `upsertX` helpers that call `runBatch` on their own — a
+   depth counter means only the outermost call opens/closes the real
+   transaction (five commits per flush tick down to one) while every call
+   still commits-or-rolls-back correctly standalone. The all-time max-range
+   record (`notifications/rules.js`) used to write straight to SQLite from
+   the per-second poll loop on every improved record — a real burst on a
+   fresh install, since nearly every tick can beat a not-yet-established
+   record. Now an in-memory cache + dirty flag
+   (`flushAllTimeMaxRangeKmIfDirty()`, called from the same periodic tick as
+   `flushDailyStats`, and the shutdown path that already calls it too) —
+   `getAllTimeMaxRangeKm()` reads the cache directly, so Stats/the
+   notification still see an improved record immediately; only the SQLite
+   write itself is deferred, same "an in-flight value can be lost on an
+   untimely restart, same as everything else under hard rule 6" tradeoff
+   already accepted for the daily accumulator.
 6. Current state lives in RAM only. A service restart losing live state is
    acceptable and expected.
 7. **No Docker.** Install via systemd + a plain script.
@@ -312,6 +336,23 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   system commands**, in case this ends up reachable from outside.
 - Every response carries `X-Frame-Options: DENY` and `X-Content-Type-Options:
   nosniff` (one `onSend` hook in `server.js`, no dependency).
+- **WebSocket reconnect has exponential backoff, and a status pill tells the
+  user when it's down** (`app.js`'s `connect()`, v2.1.14). Before this, a
+  dropped connection retried on a flat `setTimeout(connect, 1000)` forever
+  (one request a second indefinitely against a downed server) with nothing
+  telling the user why the map had frozen — hit more than once during
+  development as "the whole page died" when the real cause was just the
+  server being restarted. `reconnectDelayMs` doubles on each consecutive
+  failed attempt up to `MAX_RECONNECT_DELAY_MS` (30s), reset back to
+  `INITIAL_RECONNECT_DELAY_MS` (1s) on the socket's own `'open'` event (not
+  the first message — `'open'` fires on the handshake itself, before the
+  server's first snapshot even arrives). `#mlpr-connection-status`
+  (`index.html`, hidden by default, `role="status" aria-live="polite"`) is a
+  red pill (the one alarming color in this app's palette — see the dark
+  theme note below) shown only while `setConnectionStatus(false)` has been
+  called more recently than `setConnectionStatus(true)`; reused for the very
+  first connection attempt too, so a server that's down when the tab loads
+  shows the same message rather than a silently frozen map.
 
 ## UI
 
@@ -433,6 +474,16 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   aircraft speeds, so the flat floor silently suppressed the derivation for
   its main target, a single missing track field mid-flight on an
   otherwise-good ADS-B update.
+  **When `deriveHeadingDegrees` itself can't derive or trust anything
+  (returns `undefined`), `app.js` falls back to the last confidently-known
+  heading** (`state.lastHeadingDegrees`, carried across ticks — only ever
+  overwritten with a real number, never with `undefined`, so it survives
+  however many ticks in a row have nothing usable) **before** falling
+  further back to `setPlaneHeading`'s own due-north default. Same
+  carry-forward idea as the altitude fix above, applied to heading instead
+  of color — a stale-but-plausible heading is a strictly better guess than
+  snapping to north, and north is only ever shown for an aircraft with no
+  confidently-known heading yet at all (e.g. its very first tick).
 - Click shows trail + basic info popup with a
   "show more details" button opening the full aircraft details panel
   (`PANELS.aircraft`, opened via `openPanel('aircraft')` after
@@ -449,7 +500,11 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   `_focusFirstElement` rather than re-guessing.
   `formatAircraftInfo()`'s output is **HTML-escaped** before `setHTML()` —
   `HttpSource` fetches over unauthenticated LAN HTTP, so an unescaped
-  callsign is a real stored-XSS path.
+  callsign is a real stored-XSS path. `escapeHtml` itself lives in
+  `public/js/html-escape.js` (v2.1.14) — one shared module in the same
+  spirit as `geo.js`/`debounce.js`/`pending-queue.js`, replacing three
+  identical copies that had accumulated in `app.js`, `stats.js` and
+  `aircraft-panel.js`.
   Popup content: bold callsign header, a `.mlpr-popup-chips` row reusing
   `aircraft-panel.js`'s chip markup, a `.mlpr-popup-badge` pill for "on
   ground". Styled via `.maplibregl-popup-content` directly (this app only
@@ -627,6 +682,40 @@ Planespotters photo fetch.
   altitude reading on both sides). An aircraft never yet plotted at all has
   `lastPositionAt === null` and is skipped by this check entirely — nothing
   to fade or remove.
+- **A repeated *stale* position must not refresh `lastPositionAt` either**
+  (`aircraft.seenPos`-gated, v2.1.14) — a second, distinct bug from the one
+  directly above, same symptom (reported live, with screenshots: long
+  orphaned trail segments with no marker anywhere near either end, clearing
+  only after a much longer delay than the usual ~20s). readsb keeps
+  reporting an aircraft's *last known* `lat`/`lon` for a while after it
+  actually stops decoding fresh fixes — its own aging-out window is commonly
+  much longer than `REMOVE_MS`. As long as some *other* field (altitude,
+  speed, track) keeps legitimately changing from ongoing Mode-S traffic,
+  `server/src/state.js`'s `hasChanged` still resends this aircraft every
+  tick (`lat`/`lon` are themselves in `CHANGE_FIELDS`, but comparing equal
+  doesn't block a resend some *other* tracked field triggers), each time
+  carrying the exact same frozen `lat`/`lon` — confirmed directly against
+  the live receiver (a WebSocket probe, no raw data persisted anywhere):
+  one aircraft's position stayed byte-identical for 3+ consecutive ticks
+  while `altBaro`/`messages` kept advancing, `seenPos` climbing the whole
+  time. Since `applyAircraftUpdate` only checked "is `lat`/`lon` present,"
+  not "is it fresh," this silently postponed `REMOVE_MS` for as long as the
+  repeats continued — potentially far longer than readsb's own retention
+  window plus 20s, matching the reported delayed clearing exactly.
+  `aircraft.seenPos` is readsb's own "seconds since this position was last
+  actually decoded" counter (already normalized, `server/src/normalize.js`):
+  `POSITION_STALE_THRESHOLD_S` (5s — comfortably above one normal ~1s poll
+  interval, comfortably below `REMOVE_MS`) gates whether a position update
+  is trusted for `lastPositionAt`/`goneAt` bookkeeping. Missing `seenPos` (an
+  older readsb build, a fixture without it) falls back to trusting the
+  position, the pre-existing behavior. If the aircraft is *already* marked
+  gone and a stale (not fresh) position arrives, `applyAircraftUpdate` bails
+  out early rather than resurrecting the marker — a stale repeat must not
+  revive a removed aircraft any more than it should postpone removing one in
+  the first place. The marker/trail recording itself is unaffected by this
+  gate (still plots whatever position is available, stale or not — it's the
+  best position on hand, and repeating the same coordinates is a visual
+  no-op anyway); only the freshness *bookkeeping* is gated.
 - **MLAT-derived trail points get anomaly-filtered and smoothed; ADS-B
   points never do** (`trail.js`'s `filterMlatAnomalies`/
   `smoothMlatPositions`, applied inside `trailFeaturesFor`, so both

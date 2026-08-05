@@ -16,11 +16,11 @@ import {
   snapshotForPersistence,
   restoreFromSnapshot,
 } from './stats-history.js';
-import { upsertDailyStats, getConfigJSON, setConfigJSON } from './db.js';
+import { upsertDailyStats, getConfigJSON, setConfigJSON, runBatch } from './db.js';
 import { noteFlightSeen, flushDirtySeenFlights } from './seen-flights.js';
 import { noteAircraftSeen, flushDirtyAircraftSeen } from './aircraft-seen.js';
 import { touchAircraftTracked, flushDirtyAircraftTracked } from './aircraft-tracked.js';
-import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen } from './notifications/rules.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, flushAllTimeMaxRangeKmIfDirty } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
@@ -225,36 +225,50 @@ function broadcastStats(broadcast) {
   });
 }
 
+// The five writes below used to be five separate SQLite transactions (one
+// implicit one for upsertDailyStats's bare .run(), four more from the
+// flushDirtyX() calls each reaching their own runBatch/upsert* internally)
+// on every single flush tick. Wrapping the whole function in one outer
+// runBatch collapses that to one commit -- runBatch is reentrant via
+// SAVEPOINT (see db.js), so each of these still commits/rolls back
+// correctly on its own if ever called outside this function too.
 function flushDailyStats() {
-  const accumulator = getDailyAccumulator();
-  // Today's max/top-avg range come from our own Haversine sampling
-  // (getRangeSummary), not accumulator.maxRangeKm -- that field only ever
-  // reflects readsb's own all-time running record's value as observed
-  // today, not a true daily max. See stats-history.js.
-  const rangeSummary = getRangeSummary();
-  const uniqueCounts = getDailyUniqueCounts();
-  const avgAircraft = accumulator.sampleCount ? accumulator.sumAircraft / accumulator.sampleCount : 0;
-  const avgWithPos = accumulator.sampleCount ? accumulator.sumWithPos / accumulator.sampleCount : 0;
-  const avgWithoutPos = accumulator.sampleCount ? accumulator.sumWithoutPos / accumulator.sampleCount : 0;
+  runBatch(() => {
+    const accumulator = getDailyAccumulator();
+    // Today's max/top-avg range come from our own Haversine sampling
+    // (getRangeSummary), not accumulator.maxRangeKm -- that field only ever
+    // reflects readsb's own all-time running record's value as observed
+    // today, not a true daily max. See stats-history.js.
+    const rangeSummary = getRangeSummary();
+    const uniqueCounts = getDailyUniqueCounts();
+    const avgAircraft = accumulator.sampleCount ? accumulator.sumAircraft / accumulator.sampleCount : 0;
+    const avgWithPos = accumulator.sampleCount ? accumulator.sumWithPos / accumulator.sampleCount : 0;
+    const avgWithoutPos = accumulator.sampleCount ? accumulator.sumWithoutPos / accumulator.sampleCount : 0;
 
-  upsertDailyStats(accumulator.date, {
-    maxAircraft: accumulator.maxAircraft,
-    totalMessages: accumulator.totalMessages,
-    maxRangeKm: rangeSummary.maxRangeKm,
-    avgAircraft,
-    avgWithPos,
-    maxWithPos: accumulator.maxWithPos,
-    avgWithoutPos,
-    maxWithoutPos: accumulator.maxWithoutPos,
-    rangeTopAvgKm: rangeSummary.rangeTopAvgKm,
-    uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
-    uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
+    upsertDailyStats(accumulator.date, {
+      maxAircraft: accumulator.maxAircraft,
+      totalMessages: accumulator.totalMessages,
+      maxRangeKm: rangeSummary.maxRangeKm,
+      avgAircraft,
+      avgWithPos,
+      maxWithPos: accumulator.maxWithPos,
+      avgWithoutPos,
+      maxWithoutPos: accumulator.maxWithoutPos,
+      rangeTopAvgKm: rangeSummary.rangeTopAvgKm,
+      uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
+      uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
+    });
+
+    flushDirtyRegistrations();
+    flushDirtySeenFlights();
+    flushDirtyAircraftSeen();
+    flushDirtyAircraftTracked();
+    // Same periodic tick (and the graceful-shutdown call to this same
+    // function) now also covers the all-time range record -- see
+    // evaluateRangeRecordRule in rules.js for why that write was moved off
+    // the per-second poll loop.
+    flushAllTimeMaxRangeKmIfDirty();
   });
-
-  flushDirtyRegistrations();
-  flushDirtySeenFlights();
-  flushDirtyAircraftSeen();
-  flushDirtyAircraftTracked();
 }
 
 function flushStatsHistorySnapshot() {

@@ -217,6 +217,74 @@ test('seen_flights: upsertSeenFlights with an empty array is a no-op', () => {
   assert.doesNotThrow(() => db.upsertSeenFlights([]));
 });
 
+test('WAL journal mode is actually active on this database', () => {
+  // The whole point of setting it is SD-wear on the Pi -- worth a
+  // regression test in case a future change (or a node:sqlite upgrade
+  // resetting connection state) silently drops back to the default
+  // rollback-journal mode.
+  assert.equal(String(db.getJournalModeForTests()).toLowerCase(), 'wal');
+});
+
+test('runBatch commits every write when used standalone', () => {
+  db.runBatch(() => {
+    db.setConfig('batchKey1', 'a');
+    db.setConfig('batchKey2', 'b');
+  });
+  assert.equal(db.getConfig('batchKey1'), 'a');
+  assert.equal(db.getConfig('batchKey2'), 'b');
+});
+
+test('runBatch rolls back every write in the batch if one throws', () => {
+  db.setConfig('rollbackKey', 'before');
+  assert.throws(() => {
+    db.runBatch(() => {
+      db.setConfig('rollbackKey', 'after');
+      throw new Error('boom');
+    });
+  }, /boom/);
+  assert.equal(db.getConfig('rollbackKey'), 'before');
+});
+
+test('runBatch nests via SAVEPOINT: a nested call\'s writes still land when the outer call commits', () => {
+  // Mirrors index.js's flushDailyStats calling upsertRegistrations (which
+  // calls runBatch on its own) from inside its own outer runBatch --
+  // node:sqlite throws on a literal nested BEGIN, so this is the regression
+  // test for that reentrancy.
+  db.runBatch(() => {
+    db.setConfig('outerKey', 'outer');
+    db.runBatch(() => {
+      db.setConfig('innerKey', 'inner');
+    });
+  });
+  assert.equal(db.getConfig('outerKey'), 'outer');
+  assert.equal(db.getConfig('innerKey'), 'inner');
+});
+
+test('runBatch nests via SAVEPOINT: an inner failure rolls back only the inner writes, not the outer ones', () => {
+  db.setConfig('nestedRollback', 'before');
+  assert.throws(() => {
+    db.runBatch(() => {
+      db.setConfig('outerSurvives', 'yes');
+      try {
+        db.runBatch(() => {
+          db.setConfig('nestedRollback', 'after');
+          throw new Error('inner boom');
+        });
+      } catch {
+        // Swallowed here deliberately, to isolate that the inner SAVEPOINT
+        // itself rolled back correctly regardless of what the outer caller
+        // does with the error -- a separate throw below is what actually
+        // exercises the outer rollback path.
+      }
+      throw new Error('outer boom too');
+    });
+  }, /outer boom too/);
+  // The whole outer transaction rolled back (it threw), so even the write
+  // that survived the *inner* rollback must not have persisted either.
+  assert.equal(db.getConfig('outerSurvives'), null);
+  assert.equal(db.getConfig('nestedRollback'), 'before');
+});
+
 test('getAllAirlinesSummary groups registrations by airline, excluding unmatched ones', () => {
   db.upsertRegistration('SP-AIR1', { typeCode: 'B738', airlineIcao: 'TESTAIR', firstSeenAt: 100, lastSeenAt: 500, timesSeen: 3 });
   db.upsertRegistration('SP-AIR2', { typeCode: 'A320', airlineIcao: 'TESTAIR', firstSeenAt: 200, lastSeenAt: 900, timesSeen: 2 });

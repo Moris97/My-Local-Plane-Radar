@@ -22,6 +22,7 @@ import { queuePendingMessage } from './pending-queue.js';
 import { openPanel } from './panels.js';
 import { formatAltitude, formatSpeed } from './units.js';
 import { deriveHeadingDegrees } from './geo.js';
+import { escapeHtml } from './html-escape.js';
 
 // aircraft.flight/typeCode ultimately come from readsb's aircraft.json --
 // trusted when read from the local file, but HttpSource fetches the same
@@ -31,9 +32,6 @@ import { deriveHeadingDegrees } from './geo.js';
 // fields for MapLibre's Popup.setHTML() (= innerHTML), so they need the
 // same escaping aircraft-panel.js/stats.js already apply to aircraft data
 // everywhere else.
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
-}
 
 // [0, 0]/zoom 2 is a deliberately neutral placeholder -- shown only for the
 // brief moment before the map's real starting view is picked (home location
@@ -52,6 +50,24 @@ const FADE_END_MS = 10000;
 const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
+// readsb keeps reporting an aircraft's *last known* lat/lon for a while
+// after it actually stops decoding fresh fixes -- its own aging-out window
+// is commonly much longer than REMOVE_MS below. As long as some other
+// field (altitude, speed, track) keeps legitimately updating from ongoing
+// Mode-S traffic, state.js's change-detection still resends this aircraft
+// every tick, each time carrying the *same frozen* lat/lon -- treating
+// that as "a fresh position" kept resetting lastPositionAt forever and
+// silently postponed the fade/removal/trail-gap timer far past when the
+// aircraft's position actually went stale (reported live: a marker and its
+// trail stuck in place for a long time before finally clearing, well past
+// the usual ~20s). aircraft.seenPos is readsb's own "seconds since this
+// position was last actually decoded" counter -- only treated as a fresh
+// position for lastPositionAt bookkeeping below that threshold; an older
+// lat/lon still gets plotted (it's the best position available) but no
+// longer resets the clock governing when the marker/trail eventually
+// clear. Comfortably above one normal ~1s poll interval so a single missed
+// decode doesn't false-positive as stale, comfortably below REMOVE_MS.
+const POSITION_STALE_THRESHOLD_S = 5;
 const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
 // The coverage layer only re-fetches when the setting itself changes (see
 // onSettingsChange below) -- with nothing else driving it, a tab left open
@@ -913,7 +929,7 @@ function applyAircraftUpdate(aircraft) {
   let state = aircraftState.get(aircraft.hex);
 
   if (!state) {
-    state = { marker: null, lastUpdateAt: now, lastPositionAt: null, lastLngLat: null, goneAt: null };
+    state = { marker: null, lastUpdateAt: now, lastPositionAt: null, lastLngLat: null, lastHeadingDegrees: null, goneAt: null };
     aircraftState.set(aircraft.hex, state);
   }
 
@@ -943,9 +959,25 @@ function applyAircraftUpdate(aircraft) {
     return;
   }
 
+  // aircraft.seenPos (readsb's own "seconds since this position was last
+  // actually decoded" counter) tells a genuinely fresh fix apart from
+  // readsb simply re-reporting an old one, which it keeps doing for a
+  // while after real position updates stop -- see POSITION_STALE_THRESHOLD_S
+  // above. Missing seenPos (an older readsb build, or a fixture without it)
+  // falls back to trusting the position, the pre-existing behavior.
+  const isFreshPosition = typeof aircraft.seenPos !== 'number' || aircraft.seenPos < POSITION_STALE_THRESHOLD_S;
+
+  if (state.goneAt !== null && !isFreshPosition) {
+    // Already marked gone, and this is just readsb repeating an old fix,
+    // not a genuine reappearance -- must not resurrect the marker on a
+    // stale repeat, or removal never sticks for as long as some other
+    // field (altitude, speed, track) keeps legitimately changing.
+    return;
+  }
+
   const wasGone = state.goneAt !== null;
   state.goneAt = null;
-  state.lastPositionAt = now;
+  if (isFreshPosition) state.lastPositionAt = now;
 
   const lngLat = [aircraft.lon, aircraft.lat];
 
@@ -981,7 +1013,17 @@ function applyAircraftUpdate(aircraft) {
   // update's lngLat.
   const [prevLon, prevLat] = state.lastLngLat ?? [];
   const isMlat = aircraft.sourceType === 'mlat';
-  setPlaneHeading(state.marker.getElement(), deriveHeadingDegrees(aircraft.track, prevLat, prevLon, aircraft.lat, aircraft.lon, isMlat));
+  // Falls back to the last confidently-known heading (carried across ticks
+  // in state.lastHeadingDegrees, same idea as trail.js's altitude carry-
+  // forward) rather than straight to setPlaneHeading's own due-north
+  // default -- a stale-but-plausible heading beats snapping to north
+  // whenever deriveHeadingDegrees can't derive or trust anything new (no
+  // previous position yet, or too-short an MLAT hop). Only overwritten with
+  // a real number, never with undefined, so it keeps the last good value
+  // across however many ticks in a row have nothing usable.
+  const headingDegrees = deriveHeadingDegrees(aircraft.track, prevLat, prevLon, aircraft.lat, aircraft.lon, isMlat) ?? state.lastHeadingDegrees;
+  if (typeof headingDegrees === 'number') state.lastHeadingDegrees = headingDegrees;
+  setPlaneHeading(state.marker.getElement(), headingDegrees);
   setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
   setPlaneLabel(state.marker.getElement(), buildAircraftLabel(aircraft, aircraftLabelFields, units));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
@@ -1093,9 +1135,38 @@ setInterval(() => {
   if (anyRemoved) notifyAircraftChanged();
 }, TICK_INTERVAL_MS);
 
+// A flat 1s retry meant the server being down for any length of time was
+// one request a second forever, with nothing telling the user why the map
+// had frozen -- doubles on each consecutive failed attempt up to
+// MAX_RECONNECT_DELAY_MS, reset back to the start the moment a connection
+// actually succeeds (the 'open' event, not the first message -- 'open'
+// fires on the handshake itself, so the status pill clears even before the
+// server's first snapshot arrives).
+const INITIAL_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30000;
+let reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+
+// Hidden by default (see index.html) -- only ever un-hidden here, while the
+// socket is actually down, so a healthy connection never shows it. Reused
+// for the very first connection attempt too: if the server isn't running
+// when the tab loads, that's just as much "not connected" as a later drop
+// (this was reported live more than once as "the whole page died" when the
+// real cause was simply the server not being up).
+function setConnectionStatus(connected) {
+  const el = document.getElementById('mlpr-connection-status');
+  if (!el) return;
+  el.classList.toggle('hidden', connected);
+  if (!connected) el.textContent = t('connectionLost');
+}
+
 function connect() {
   const protocol = location.protocol === 'https:' ? 'wss' : 'ws';
   const ws = new WebSocket(`${protocol}://${location.host}/ws`);
+
+  ws.addEventListener('open', () => {
+    reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+    setConnectionStatus(true);
+  });
 
   ws.addEventListener('message', (event) => {
     const snapshot = JSON.parse(event.data);
@@ -1107,7 +1178,10 @@ function connect() {
   });
 
   ws.addEventListener('close', () => {
-    setTimeout(connect, 1000);
+    setConnectionStatus(false);
+    const delay = reconnectDelayMs;
+    reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+    setTimeout(connect, delay);
   });
 
   ws.addEventListener('error', () => ws.close());

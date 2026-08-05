@@ -247,11 +247,27 @@ export function prunePendingFirstSeen(maxAgeMs = 10 * 60 * 1000) {
   }
 }
 
+// In-memory cache of the all-time record, read from SQLite at most once
+// (lazily, on first use) rather than on every poll tick -- see
+// evaluateRangeRecordRule below for why the *write* side of this is also
+// deferred rather than hitting SQLite the instant a new record is set.
+// null means "not loaded from SQLite yet", distinct from 0 (a genuine,
+// loaded record of zero -- a fresh install with no range sample yet).
+let cachedRecordKm = null;
+let recordDirty = false;
+
+function loadRecordKm() {
+  if (cachedRecordKm === null) cachedRecordKm = Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
+  return cachedRecordKm;
+}
+
 // Reads the same all-time record evaluateRangeRecordRule below maintains --
 // used by Stats' "Od początku" section, which wants a single all-time max
-// range number without reimplementing this tracking a second time.
+// range number without reimplementing this tracking a second time. Reads
+// the in-memory cache (always current, even before the next periodic
+// flush persists it) rather than SQLite directly.
 export function getAllTimeMaxRangeKm() {
-  return Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
+  return loadRecordKm();
 }
 
 // The all-time record is a distance from the home location it was measured
@@ -261,6 +277,18 @@ export function getAllTimeMaxRangeKm() {
 // permanently silent.
 export function resetAllTimeMaxRangeKm() {
   deleteConfig(ALL_TIME_MAX_RANGE_KEY);
+  cachedRecordKm = 0;
+  recordDirty = false;
+}
+
+// Called from the same periodic flush tick as flushDailyStats (and the
+// graceful-shutdown path that also calls it) -- see evaluateRangeRecordRule
+// for why the write itself is deferred to here instead of happening inline
+// on every improved record.
+export function flushAllTimeMaxRangeKmIfDirty() {
+  if (!recordDirty) return;
+  setConfig(ALL_TIME_MAX_RANGE_KEY, String(cachedRecordKm));
+  recordDirty = false;
 }
 
 // A completely different kind of rule from everything above: those all fire
@@ -334,14 +362,23 @@ export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
   });
 }
 
+// The write side of the all-time record is deferred to
+// flushAllTimeMaxRangeKmIfDirty (called from the same periodic flush tick
+// as flushDailyStats) rather than hitting SQLite here, inline, every time
+// -- this runs from the per-second poll loop (index.js's
+// recordRangeAndRegistrationSightings), and a fresh install can beat its
+// own record on nearly every tick as new, farther contacts appear, which
+// was a real SD-write burst before this. The notification itself still
+// fires immediately either way -- only the persistence is batched.
 export function evaluateRangeRecordRule(maxRangeKm) {
   if (typeof maxRangeKm !== 'number') return;
 
   const settings = getNotificationSettings();
-  const record = Number(getConfig(ALL_TIME_MAX_RANGE_KEY) ?? 0);
+  const record = loadRecordKm();
   if (maxRangeKm <= record) return;
 
-  setConfig(ALL_TIME_MAX_RANGE_KEY, String(maxRangeKm));
+  cachedRecordKm = maxRangeKm;
+  recordDirty = true;
   if (settings.rangeRecordEnabled) {
     notify({
       title: 'New range record',
