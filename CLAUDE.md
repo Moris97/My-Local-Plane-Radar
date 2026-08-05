@@ -1335,22 +1335,38 @@ turns each (bearing, range) into a real lat/lon. **Gated by
 bearing ± distance`, exactly as revealing of the receiver's location as the
 home marker.
 
-**Sectors with nothing recorded are skipped, not drawn at distance 0**
-(`coverageRing`). They used to emit a vertex at the home coordinate, on the
-reasoning that this was an honest "no data" shape — that reasoning was
-wrong, twice over. An empty sector is a *sampling* gap, not a reception
-gap: it means no aircraft has flown through that 2° slice yet, not that the
-antenna is deaf there, so drawing zero range is a claim the data doesn't
-support. And visually it drags the boundary back to the receiver and out
-again, so every unsampled sector becomes a spike. Invisible on a
-long-established install where every sector has eventually been hit,
-ruinous on a fresh one — reported live right after v2.1.10 reset the stored
-coverage: 113 of 180 sectors were empty, and 113 of the polygon's 181
-vertices sat exactly on the home coordinate. Skipping them lets the ring
-join its neighbouring real measurements (same data, 68 points, no spikes).
-Below `MIN_COVERAGE_SECTORS` (8) sampled sectors nothing is drawn at all —
-joining three or four scattered bearings would claim coverage across every
-direction between them.
+**A sector with nothing recorded resolves to distance 0** (`coverageRing`)
+— the polygon pinches to the home coordinate there. This has been tried
+both ways; the current state (as of v2.1.12) is back to distance-0, and
+the reasoning for *why* matters more than the current setting, since it's
+liable to be revisited again as data accumulates:
+
+- **Visually**, distance-0 drags the boundary back to the receiver and out
+  again for every unsampled sector, which on a sparse install (reported
+  live right after v2.1.10 reset the stored coverage: 113 of 180 sectors
+  empty) reads as a spiky "sea urchin."
+- **A v2.1.11 fix skipped empty sectors instead**, joining each pair of
+  real neighbours with a straight chord across the gap — calmer-looking,
+  same underlying data. **Reverted the same day**, after checking the
+  actual enclosed area with the shoelace formula rather than trusting how
+  it looked: a spike-and-return (distance 0) degenerates to *exactly* 0
+  km² of enclosed area across any gap, however wide, because it enters and
+  leaves the same point — genuinely a "no data" shape, not just an ugly
+  one. A chord between two real points across that same gap enclosed a
+  real, measured ~3,245 km² for one representative 18° gap in a quick
+  check — area that was never actually sampled, rendered as if it were.
+  Trading a confirmed-zero-claim for a confirmed-nonzero-claim on
+  unmeasured ground is a worse kind of wrong than looking spiky,
+  especially on a sparsely-populated install, which is exactly when the
+  chord version's fabricated area is largest (bigger gaps between whatever
+  few real points exist).
+- **Open question, not yet answered**: does the spiky look actually fade
+  as sectors fill in over real days/weeks (the receiver's own hypothesis,
+  2026-08-05), or does it stay visually rough at whatever level of
+  sparsity a typical install settles at long-term? Re-evaluate against
+  real accumulated data before changing this again — don't re-derive the
+  chord-vs-spike area tradeoff from scratch, the math above already
+  settled that part.
 
 **Client**: `showCoverage` (default off) and `coverageBand` (`'all'`,
 `'stacked'`, or an `ALTITUDE_BANDS` index) in `settings-state.js`. Color
@@ -1369,25 +1385,25 @@ become mud? Reasoning it's testing rather than shipping as a finished
 feature: the polygon is a *historical* envelope (best-ever/best-recent
 recorded contacts), not a live reception prediction, so a live aircraft
 sitting outside every layer is expected, not a bug — reported live right
-after the "skip empty sectors" fix below, and worth remembering if this
-gets revisited. `GET /api/stats/antenna/coverage?band=stacked` answers
-`{ bands: [{ band, fillPolygon }, ...] }` for all nine `ALTITUDE_BANDS` in
-one request (`band` in ascending index order, `fillPolygon` null for a
-band under `MIN_COVERAGE_SECTORS`) — its own response shape, no
-`maxPolygon`, rather than the client looping the single-band request nine
-times, same "one round trip, not a fan-out" discipline as everywhere else
-in this app. `app.js`'s `stackedCoverageFeatures` sorts the response
-**descending by band index** before building GeoJSON features — highest
-altitude (band 8, the farthest-reaching, largest shape) first, so it
-paints as the back layer, with each progressively lower/shorter-reaching
-band layered on top of it. This is load-bearing, not cosmetic: GeoJSON
-feature order is render order for one MapLibre fill layer, alpha-blended
-"draw over" compositing is not order-independent, and the reverse order
-would let the biggest shape paint over every smaller one last. Skips a
-`null` band's entry (not yet `MIN_COVERAGE_SECTORS` sampled) rather than
-drawing nothing-shaped-as-something. Deliberately **fill-only, no `max`
-outline features** — nine dashed outlines over nine overlapping fills
-would fight the one thing this experiment exists to judge.
+after the empty-sector-handling change above, and worth remembering if
+this gets revisited. `GET /api/stats/antenna/coverage?band=stacked`
+answers `{ bands: [{ band, fillPolygon }, ...] }` for all nine
+`ALTITUDE_BANDS` in one request (`band` in ascending index order,
+`fillPolygon` null only if no home is configured at all — a band with zero
+recorded samples still gets a ring, degenerated to the home coordinate,
+same as the non-stacked path) — its own response shape, no `maxPolygon`,
+rather than the client looping the single-band request nine times, same
+"one round trip, not a fan-out" discipline as everywhere else in this app.
+`app.js`'s `stackedCoverageFeatures` sorts the response **descending by
+band index** before building GeoJSON features — highest altitude (band 8,
+the farthest-reaching, largest shape) first, so it paints as the back
+layer, with each progressively lower/shorter-reaching band layered on top
+of it. This is load-bearing, not cosmetic: GeoJSON feature order is render
+order for one MapLibre fill layer, alpha-blended "draw over" compositing
+is not order-independent, and the reverse order would let the biggest
+shape paint over every smaller one last. Deliberately **fill-only, no
+`max` outline features** — nine dashed outlines over nine overlapping
+fills would fight the one thing this experiment exists to judge.
 
 **A note on verifying anything in this section**: this sandbox has no
 WebGL, and `new maplibregl.Map(...)` throws *synchronously* inside its

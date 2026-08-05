@@ -378,6 +378,20 @@ deferred by the user in the same conversation.
   If it turns out to be the latter, `coverageBand: 'stacked'`, the
   `?band=stacked` endpoint branch, and `stackedCoverageFeatures` can all be
   removed cleanly — nothing else depends on them.
+- **Coverage polygon: revisit spikes vs. skip-empty-sectors once real data
+  has accumulated** (effort: none until then, impact: visual) — v2.1.11
+  briefly shipped skipping unsampled sectors and joining real neighbours
+  with a straight chord instead of drawing a spike to the home coordinate;
+  reverted the same day (v2.1.12) after checking with the shoelace formula
+  that a chord fills a real, non-zero wedge of *never-measured* area across
+  a gap (~3,245 km² for one representative 18° gap), while a spike
+  encloses exactly 0 km² across any gap, however wide — the chord version
+  looked calmer but was the more dishonest of the two. Currently back to
+  spikes (see CLAUDE.md's antenna-stats section for the full reasoning).
+  Open question: does the spiky look actually fade as sectors fill in over
+  real days/weeks, as suspected, or does a typical install settle at a
+  sparsity where it stays rough long-term? Check against real accumulated
+  data before changing this again.
 
 ### Measured and deliberately NOT done
 

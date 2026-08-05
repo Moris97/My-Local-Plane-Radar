@@ -415,28 +415,26 @@ export async function buildServer({ logger = true } = {}) {
     return ring;
   }
 
-  // Below this many *sampled* sectors there is no shape worth drawing:
-  // joining three or four scattered bearings into a polygon would claim
-  // coverage across every direction in between, which is the opposite of
-  // what a coverage map is for. Nothing is drawn instead, and it fills in
-  // as traffic arrives.
-  const MIN_COVERAGE_SECTORS = 8;
-
-  // A sector with nothing recorded is a *sampling* gap, not a reception
-  // gap: it means no aircraft has flown through that 2° slice yet, not
-  // that the antenna is deaf in that direction. Emitting a vertex at
-  // distance 0 for it -- which is what this did until now -- drags the
-  // polygon boundary all the way back to the receiver and out again, so
-  // every unsampled sector becomes a spike. Harmless on a long-established
-  // install where every sector has eventually been hit, ruinous on a fresh
-  // one: reported live right after v2.1.10 reset the stored coverage,
-  // when 113 of 180 sectors were empty and the map drew 113 spikes.
-  // Skipping them lets the ring join its neighbouring real measurements.
+  // A sector with nothing recorded resolves to distance 0 (the polygon
+  // pinches to the home coordinate there) -- an honest "no data" shape at
+  // the level of area (a spike-and-return degenerates to zero enclosed
+  // area, provably, not just visually), even though on a sparse install it
+  // reads as a spiky "sea urchin". Deliberately reverted 2026-08-05 from a
+  // version that skipped empty sectors and joined real neighbours with a
+  // straight chord instead: that looked calmer, but a chord between two
+  // real points encloses a real, non-zero wedge of area across a gap that
+  // was never actually measured -- checked with the shoelace formula, a
+  // measured ~3,245 km^2 of fabricated fill across one 18-degree gap
+  // versus the spike version's exact 0 km^2 across the same gap. Trading a
+  // confirmed-zero-claim for a confirmed-nonzero-claim on unmeasured
+  // ground is a worse kind of wrong than looking spiky, especially on a
+  // sparsely-populated install. Revisit once real accumulated data (not a
+  // synthetic gap) shows whether the spikes actually fade as sectors fill
+  // in, per the user's own hypothesis -- don't re-derive this tradeoff
+  // from scratch if this comes up again, the numbers above already
+  // settled it once.
   function coverageRing(sectors, home, distanceOf) {
-    const points = sectors
-      .filter((sector) => distanceOf(sector) > 0)
-      .map((sector) => destinationPoint(home.lat, home.lon, sector.bearingDeg, distanceOf(sector)));
-    return points.length >= MIN_COVERAGE_SECTORS ? closedRing(points) : null;
+    return closedRing(sectors.map((sector) => destinationPoint(home.lat, home.lon, sector.bearingDeg, distanceOf(sector))));
   }
 
   // Gated the same as /api/settings: the polygon this returns is derived
