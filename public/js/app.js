@@ -148,6 +148,12 @@ let effectiveBasemapMode = null;
 // with, so the settings-change listener only reacts when either changes.
 let lastRequestedBasemapMode = null;
 let lastRequestedMapTheme = null;
+// Same idea for the two settings that change what trail *data* the client
+// needs to hold, so the settings-change listener can tell "refetch every
+// trail from the server" apart from "just redraw what we already have" --
+// see its call to refreshTrailForSettings().
+let lastRequestedTrailMode = null;
+let lastRequestedShorterTrails = null;
 
 function ensureTrailLayer() {
   if (!map.getSource(TRAIL_SOURCE_ID)) {
@@ -536,7 +542,10 @@ map.on('load', async () => {
   for (const snapshot of pendingMessages.splice(0)) {
     handleSnapshot(snapshot);
   }
-  refreshTrailForSettings();
+  // Seeds the two trackers as a side effect, so the *next* unrelated
+  // settings change is correctly seen as "nothing to refetch" rather than
+  // comparing against a null nobody has set yet.
+  refreshTrailForSettingsChange();
   refreshCoverage(true); // first-ever load -- no cached revision to compare against yet
 });
 
@@ -638,7 +647,7 @@ onSettingsChange(() => {
       refreshMarkerSize(state.marker.getElement());
     }
   }
-  refreshTrailForSettings();
+  refreshTrailForSettingsChange();
   if (selectedHex) showInfoPopup(selectedHex);
 });
 
@@ -649,9 +658,7 @@ map.on('click', () => {
 document.addEventListener('click', (event) => {
   if (event.target?.id === 'mlpr-more-details') {
     const hex = selectedHex;
-    activePopup?.remove();
-    activePopup = null;
-    activePopupHex = null;
+    closeInfoPopup();
     if (hex) {
       setInspectedHex(hex);
       openPanel('aircraft');
@@ -679,6 +686,20 @@ function isCurrentlyTracked(hex) {
   return state !== undefined && state.goneAt === null && state.marker !== null;
 }
 
+// One predicate for "is there an icon on the map this trail belongs to",
+// which is the only question renderTrail actually needs answered. The
+// altitude filter is part of it: it hides a marker via `display: none`
+// rather than removing it, so isCurrentlyTracked() alone still said yes and
+// the trail of a filtered-out aircraft kept being drawn -- the reported
+// "trail with no aircraft", reachable straight from Settings -> Aircraft
+// and, in trailMode 'all' with a filter set, for every aircraft outside the
+// band at once.
+function isTrailVisible(hex) {
+  if (!isCurrentlyTracked(hex)) return false;
+  const aircraft = aircraftState.get(hex).lastAircraft;
+  return aircraft === undefined || passesAltitudeFilter(aircraft);
+}
+
 function renderTrail() {
   const source = map.getSource(TRAIL_SOURCE_ID);
   if (!source) return;
@@ -688,10 +709,10 @@ function renderTrail() {
 
   if (trailMode === 'all') {
     for (const hex of aircraftState.keys()) {
-      if (!isCurrentlyTracked(hex)) continue;
+      if (!isTrailVisible(hex)) continue;
       features = features.concat(trailFeaturesFor(hex));
     }
-  } else if (selectedHex && isCurrentlyTracked(selectedHex)) {
+  } else if (selectedHex && isTrailVisible(selectedHex)) {
     features = trailFeaturesFor(selectedHex);
   }
 
@@ -729,6 +750,33 @@ async function refreshTrailForSettings() {
     await loadTrailForHex(selectedHex);
   }
   renderTrail();
+}
+
+// Called from the settings-change listener, which fires for *every* setting.
+// Re-seeding trail history from the server is only warranted when what the
+// client needs to hold actually changed -- switching trailMode 'click' ->
+// 'all' means it now needs every aircraft's history rather than one, and
+// turning shorterTrails off means the history it already has was truncated
+// on the way in (trail.js's maxHistoryPoints) and only a refetch can restore
+// the full length. Everything else -- icon size, colors, labels, the
+// altitude filter -- only changes how the trails already in memory are
+// drawn, so it needs a redraw and nothing more.
+//
+// This matters because in trailMode 'all' the refetch is GET /api/trails,
+// i.e. every tracked aircraft's entire history (up to 1000 points each) in
+// one response, and the icon-size slider is wired to 'input' rather than
+// 'change' -- so a single drag across its range used to fire ~21 of them
+// back to back, megabytes at a time, off a Raspberry Pi 3.
+function refreshTrailForSettingsChange() {
+  const { trailMode, shorterTrails } = getSettings();
+  const needsRefetch = trailMode !== lastRequestedTrailMode || shorterTrails !== lastRequestedShorterTrails;
+  lastRequestedTrailMode = trailMode;
+  lastRequestedShorterTrails = shorterTrails;
+  if (needsRefetch) {
+    refreshTrailForSettings();
+  } else {
+    renderTrail();
+  }
 }
 
 // Settings -> Aircraft's per-field checkboxes (aircraftLabelFields) build
@@ -887,14 +935,22 @@ setHoverRequestHandler((hex) => {
   }
 });
 
+// Closing the popup without touching the selection: used both by
+// deselectAircraft (where the selection goes too) and by the REMOVE_MS
+// branch of the periodic tick, where the aircraft stays selected but has no
+// marker left for the popup to point at.
+function closeInfoPopup() {
+  activePopup?.remove();
+  activePopup = null;
+  activePopupHex = null;
+}
+
 function deselectAircraft() {
   setSelectionHighlight(null);
   selectedHex = null;
   setSelectedHex(null);
   renderTrail();
-  activePopup?.remove();
-  activePopup = null;
-  activePopupHex = null;
+  closeInfoPopup();
 }
 
 // Three mutually-exclusive plane color modes (Settings -> Aircraft):
@@ -1029,6 +1085,19 @@ function applyAircraftUpdate(aircraft) {
       el.classList.remove('mlpr-plane-hover');
       setHoveredHex(null);
     });
+    // Selection/hover live as classes on the marker's own element, but this
+    // is a brand-new element -- createPlaneElement() knows nothing about
+    // either. Both setSelectionHighlight() and the setHoverRequestHandler
+    // below only ever touch a marker that already exists, so without
+    // re-applying here the highlight is silently lost every time a marker is
+    // (re)created: an aircraft selected from the List before it has a marker
+    // at all, and -- more visibly -- a selected aircraft coming back from a
+    // signal gap long enough for REMOVE_MS to have retired its marker. Its
+    // trail redraws (renderTrail keys off selectedHex, which never changed)
+    // while the icon itself no longer reads as selected, i.e. the map
+    // contradicts itself.
+    if (aircraft.hex === selectedHex) el.classList.add('mlpr-plane-selected');
+    if (aircraft.hex === lastHoverRequestHex) el.classList.add('mlpr-plane-hover');
   } else {
     state.marker.setLngLat(lngLat);
   }
@@ -1151,6 +1220,15 @@ setInterval(() => {
       // whenever some other aircraft's update happens to next trigger a
       // redraw (see isCurrentlyTracked() in renderTrail()).
       trailNeedsRefresh = true;
+      // ...and so must the popup, for exactly the same reason. The selection
+      // itself deliberately survives (a reappearance within FORGET_MS picks
+      // the same aircraft straight back up, trail, highlight and popup
+      // included, via applyAircraftUpdate) -- it's only the popup, which is
+      // anchored to a marker that no longer exists, that has to go. It used
+      // to hang over an empty map until the FORGET_MS deletion below finally
+      // called deselectAircraft, i.e. for up to five minutes after the
+      // aircraft it describes had vanished.
+      if (hex === selectedHex) closeInfoPopup();
       continue;
     }
 

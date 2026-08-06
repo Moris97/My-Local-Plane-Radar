@@ -752,6 +752,48 @@ Planespotters photo fetch.
   source still holds the *previous* set's `FeatureCollection`, so a
   reconnect landing on an empty sky would otherwise leave those trails
   painted with no aircraft anywhere.
+- **`renderTrail` asks `isTrailVisible`, which is `isCurrentlyTracked` plus
+  the altitude filter** (v2.1.16) — the third and last route to "a trail with
+  no aircraft," and the only one reachable straight from the UI. The
+  altitude filter hides a marker with `display: none` rather than removing
+  it, so `state.marker` stays non-null and the trail kept being drawn; with
+  `trailMode: 'all'` and a filter set, that means every aircraft outside the
+  band at once. Anything gating whether an icon is *visible* (not just
+  whether it exists) has to be part of this predicate — that is the rule the
+  filter broke.
+- **The info popup is closed when its marker is retired, but the selection
+  is not** (v2.1.16) — `closeInfoPopup()` is called from the `REMOVE_MS`
+  branch of the periodic tick alongside the marker removal and the trail
+  refresh, because a popup anchored to a marker that no longer exists is the
+  same bug in a different shape: it used to hang over an empty map until the
+  `FORGET_MS` deletion finally reached `deselectAircraft()`, i.e. for up to
+  five minutes. `selectedHex` deliberately survives, so a reappearance inside
+  `FORGET_MS` picks the aircraft straight back up — trail, highlight and
+  popup together.
+- **Selection/hover classes are re-applied when a marker is created, not
+  only when the selection changes** (v2.1.16) — they live as classes on the
+  marker's own element, and `createPlaneElement()` knows nothing about
+  either, while `setSelectionHighlight`/`setHoverRequestHandler` only ever
+  touch a marker that already exists. So the highlight was silently lost
+  whenever a marker was (re)created: an aircraft selected from the List
+  before it had a marker at all, or — more visibly — a selected aircraft
+  returning from a gap long enough for `REMOVE_MS` to have retired its
+  marker, whose trail redrew (keyed off the unchanged `selectedHex`) while
+  the icon no longer read as selected. Any future per-marker visual state
+  needs the same treatment in `applyAircraftUpdate`'s `if (!state.marker)`
+  branch.
+- **The settings-change listener only re-seeds trail history when
+  `trailMode` or `shorterTrails` changed** (`refreshTrailForSettingsChange`,
+  v2.1.16); everything else gets a plain `renderTrail()`. `onSettingsChange`
+  fires for *every* setting, and in `trailMode: 'all'` the re-seed is `GET
+  /api/trails` — every tracked aircraft's whole history (up to 1000 points
+  each, ~107 B/point) in one response. The icon-size slider is wired to
+  `input`, not `change`, so one drag across its range fired ~21 of them back
+  to back: on the order of 1 MB per request at 10 aircraft in range, ~4 MB
+  at 40, off a Raspberry Pi 3. Those two settings are the only ones that
+  change what history the client needs to *hold* (one aircraft's vs. every
+  aircraft's; truncated on the way in vs. not) — everything else only
+  changes how what's already in memory is drawn.
 - **MLAT-derived trail points get anomaly-filtered and smoothed; ADS-B
   points never do** (`trail.js`'s `filterMlatAnomalies`/
   `smoothMlatPositions`, applied inside `trailFeaturesFor`, so both
