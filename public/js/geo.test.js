@@ -210,6 +210,21 @@ test('deriveHeadingDegrees derives an MLAT heading fine once the hop clears the 
   assertClose(heading, 80, 0.5);
 });
 
+test('deriveHeadingDegrees returns undefined, never due north, for a frozen position', () => {
+  // The signal-loss case: readsb re-reports the last known lat/lon while
+  // its own `track` field has already aged out of the JSON. bearingDegrees
+  // answers a point-to-itself query with 0, which is indistinguishable
+  // from a genuine northbound heading -- and, being a number, would be
+  // accepted and cached by app.js's carry-forward fallback.
+  assert.equal(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, ORIGIN.lat, ORIGIN.lon), undefined);
+  assert.equal(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, ORIGIN.lat, ORIGIN.lon, true), undefined);
+});
+
+test('deriveHeadingDegrees still reports a genuine northbound course as 0', () => {
+  const point = destinationPoint(ORIGIN.lat, ORIGIN.lon, 0, 5);
+  assertClose(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, point.lat, point.lon), 0, 0.5);
+});
+
 test('deriveHeadingDegrees returns undefined when the new position itself is missing', () => {
   assert.equal(deriveHeadingDegrees(undefined, ORIGIN.lat, ORIGIN.lon, undefined, undefined), undefined);
 });

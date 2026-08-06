@@ -168,6 +168,24 @@ export function deriveHeadingDegrees(trackDegrees, prevLat, prevLon, lat, lon, i
   if (typeof trackDegrees === 'number') return trackDegrees;
   if (typeof prevLat !== 'number' || typeof prevLon !== 'number') return undefined;
   if (typeof lat !== 'number' || typeof lon !== 'number') return undefined;
+  // There is no bearing from a point to itself, and bearingDegrees answers
+  // that degenerate case with a perfectly plausible-looking 0 -- i.e. due
+  // north. This is not a hypothetical: readsb keeps re-reporting an
+  // aircraft's *last known* lat/lon after it stops decoding fresh fixes
+  // (see app.js's seenPos-based position ageing), and its own `track` field
+  // ages out of the JSON before the position does -- so an aircraft losing
+  // signal reliably ends up here with a frozen position and no track, which
+  // is exactly the "planes point north the moment they lose signal" symptom
+  // reported live. Worse, 0 is a number, so app.js's carry-forward fallback
+  // accepted it and *overwrote* the last confidently-known heading with
+  // north, making it stick for good. Returning undefined instead hands the
+  // decision back to that fallback, which is the right answer here: nothing
+  // new can be learned about heading from a position that has not moved.
+  // Note this is deliberately an exact-equality check, not a minimum
+  // distance -- a distance floor for ADS-B was tried and was wrong (see the
+  // MLAT note above); positions are rounded to 5 decimals server-side, so a
+  // genuinely repeated fix compares exactly equal.
+  if (prevLat === lat && prevLon === lon) return undefined;
   if (isMlat && distanceKm(prevLat, prevLon, lat, lon) < MLAT_MIN_HEADING_DERIVATION_DISTANCE_KM) return undefined;
   return bearingDegrees(prevLat, prevLon, lat, lon);
 }

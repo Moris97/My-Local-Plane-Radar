@@ -484,6 +484,18 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   of color — a stale-but-plausible heading is a strictly better guess than
   snapping to north, and north is only ever shown for an aircraft with no
   confidently-known heading yet at all (e.g. its very first tick).
+  **A zero-displacement hop returns `undefined`, not a bearing** (v2.1.15) —
+  `bearingDegrees` answers a point-to-itself query with `0`, which is
+  indistinguishable from a genuine northbound course, and this is the exact
+  case a signal loss produces: readsb re-reports the last known `lat`/`lon`
+  while its own `track` field ages out of the JSON first, so a fading
+  aircraft reliably arrives here with a frozen position and no track. That
+  `0` also defeated the carry-forward above — being a number, it was
+  accepted *and cached* into `state.lastHeadingDegrees`, so once an aircraft
+  snapped north it stayed north for good. Deliberately an exact-equality
+  check, **not** a minimum distance: an ADS-B distance floor was already
+  tried and was wrong (see above), and lat/lon are rounded to 5 decimals
+  server-side, so a genuinely repeated fix compares exactly equal.
 - Click shows trail + basic info popup with a
   "show more details" button opening the full aircraft details panel
   (`PANELS.aircraft`, opened via `openPanel('aircraft')` after
@@ -703,19 +715,43 @@ Planespotters photo fetch.
   repeats continued — potentially far longer than readsb's own retention
   window plus 20s, matching the reported delayed clearing exactly.
   `aircraft.seenPos` is readsb's own "seconds since this position was last
-  actually decoded" counter (already normalized, `server/src/normalize.js`):
-  `POSITION_STALE_THRESHOLD_S` (5s — comfortably above one normal ~1s poll
-  interval, comfortably below `REMOVE_MS`) gates whether a position update
-  is trusted for `lastPositionAt`/`goneAt` bookkeeping. Missing `seenPos` (an
-  older readsb build, a fixture without it) falls back to trusting the
-  position, the pre-existing behavior. If the aircraft is *already* marked
-  gone and a stale (not fresh) position arrives, `applyAircraftUpdate` bails
-  out early rather than resurrecting the marker — a stale repeat must not
-  revive a removed aircraft any more than it should postpone removing one in
-  the first place. The marker/trail recording itself is unaffected by this
-  gate (still plots whatever position is available, stale or not — it's the
-  best position on hand, and repeating the same coordinates is a visual
-  no-op anyway); only the freshness *bookkeeping* is gated.
+  actually decoded" counter (already normalized, `server/src/normalize.js`).
+  **Every position is *aged* by it rather than tested against a
+  fresh/stale threshold** (v2.1.15 — v2.1.14 shipped a
+  `POSITION_STALE_THRESHOLD_S` boolean, since removed):
+  `lastPositionAt = now - seenPos*1000`, and it only ever moves **forward**.
+  A repeated stale fix carries a *growing* `seenPos`, so it keeps resolving
+  to the same original decode instant and postpones nothing — the same
+  protection the boolean gave. What the boolean got wrong was the other end:
+  it left `lastPositionAt` at `null` whenever the *first* position ever seen
+  for an aircraft was already stale (a tab opened, or a WebSocket
+  reconnect's full snapshot arriving, while that aircraft was
+  mid-signal-gap), and the periodic tick's removal check skips a `null`
+  `lastPositionAt` as "never plotted, nothing to retire" — so **that marker
+  and its trail stayed on the map forever**, which is the v2.1.14 regression
+  reported live (an aircraft whose own details panel read "last position
+  60 s" still sitting on the map, three times past `REMOVE_MS`). A position
+  already older than `REMOVE_MS` is now never plotted at all, and never
+  resurrects an already-retired marker. Missing `seenPos` (an older readsb
+  build, a fixture without it) reads as age zero — the pre-existing
+  behavior of trusting whatever is on offer. A position *inside* the window
+  is still plotted stale or not (it's the best on hand, and repeating the
+  same coordinates is a visual no-op anyway); only the clock is aged.
+- **`isCurrentlyTracked` requires a live marker, not just `goneAt === null`**
+  (v2.1.15) — the other half of "trails left on the map with no aircraft."
+  A state can exist with no marker at all: an aircraft the receiver still
+  hears over Mode-S but can no longer place, or one whose only reported
+  position was already too stale to plot. Its trail history is not
+  necessarily empty, because `loadAllTrails()` seeds it straight from the
+  server (`GET /api/trails`) the moment the tab opens — so a freshly-opened
+  tab drew a full server-side trail with nothing at the end of it, and,
+  since the removal tick had no marker to retire and so never set `goneAt`,
+  nothing could ever clear it. Relatedly, a **full** snapshot now always
+  calls `renderTrail()`, not only when it recorded a trail point of its own:
+  `resetAll()` has just dropped every `aircraftState` entry while the trail
+  source still holds the *previous* set's `FeatureCollection`, so a
+  reconnect landing on an empty sky would otherwise leave those trails
+  painted with no aircraft anywhere.
 - **MLAT-derived trail points get anomaly-filtered and smoothed; ADS-B
   points never do** (`trail.js`'s `filterMlatAnomalies`/
   `smoothMlatPositions`, applied inside `trailFeaturesFor`, so both

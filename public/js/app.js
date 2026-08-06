@@ -61,13 +61,13 @@ const TICK_INTERVAL_MS = 300;
 // aircraft's position actually went stale (reported live: a marker and its
 // trail stuck in place for a long time before finally clearing, well past
 // the usual ~20s). aircraft.seenPos is readsb's own "seconds since this
-// position was last actually decoded" counter -- only treated as a fresh
-// position for lastPositionAt bookkeeping below that threshold; an older
-// lat/lon still gets plotted (it's the best position available) but no
-// longer resets the clock governing when the marker/trail eventually
-// clear. Comfortably above one normal ~1s poll interval so a single missed
-// decode doesn't false-positive as stale, comfortably below REMOVE_MS.
-const POSITION_STALE_THRESHOLD_S = 5;
+// position was last actually decoded" counter, so applyAircraftUpdate ages
+// every position by it: `now - seenPos` is when the fix was really made,
+// and lastPositionAt only ever moves forward. A repeated stale fix carries
+// a growing seenPos and so resolves to the same instant every time,
+// postponing nothing; an already-too-old fix is never plotted at all. An
+// older lat/lon inside the window still gets plotted -- it's the best
+// position available -- it just doesn't reset the clock.
 const DAYLIGHT_POLL_INTERVAL_MS = 10 * 60 * 1000;
 // The coverage layer only re-fetches when the setting itself changes (see
 // onSettingsChange below) -- with nothing else driving it, a tab left open
@@ -665,8 +665,18 @@ document.addEventListener('click', (event) => {
 // gap segment. Its trail must not keep rendering on the map for that whole
 // window, though -- previously it stayed visible for up to 5 minutes after
 // the plane icon itself had already vanished.
+// A missing marker counts as "not tracked" too, not just an explicitly
+// gone one: a state can exist with no marker at all -- an aircraft the
+// receiver still hears over Mode-S but can no longer place, or one whose
+// only reported position was already too stale to plot. Trail history for
+// such a hex is not necessarily empty, because loadAllTrails() seeds it
+// straight from the server (GET /api/trails) the moment the tab opens,
+// which is how this surfaced live: a full trail drawn on the map with
+// nothing at the end of it, and -- since the removal tick has no marker to
+// retire and so never sets goneAt -- no way for it to ever clear.
 function isCurrentlyTracked(hex) {
-  return aircraftState.get(hex)?.goneAt === null;
+  const state = aircraftState.get(hex);
+  return state !== undefined && state.goneAt === null && state.marker !== null;
 }
 
 function renderTrail() {
@@ -960,24 +970,42 @@ function applyAircraftUpdate(aircraft) {
   }
 
   // aircraft.seenPos (readsb's own "seconds since this position was last
-  // actually decoded" counter) tells a genuinely fresh fix apart from
-  // readsb simply re-reporting an old one, which it keeps doing for a
-  // while after real position updates stop -- see POSITION_STALE_THRESHOLD_S
-  // above. Missing seenPos (an older readsb build, or a fixture without it)
-  // falls back to trusting the position, the pre-existing behavior.
-  const isFreshPosition = typeof aircraft.seenPos !== 'number' || aircraft.seenPos < POSITION_STALE_THRESHOLD_S;
+  // actually decoded" counter) dates the *fix* rather than the message
+  // carrying it -- see the note on REMOVE_MS above. Turning it into a
+  // real timestamp, rather than the fresh/stale boolean this used to be,
+  // is what lets a position that arrives already stale be aged correctly
+  // instead of being treated as having no known age at all. Missing
+  // seenPos (an older readsb build, or a fixture without it) reads as age
+  // zero -- the pre-existing behavior of trusting whatever is on offer.
+  const positionAgeMs = typeof aircraft.seenPos === 'number' ? Math.max(0, aircraft.seenPos * 1000) : 0;
+  const positionAt = now - positionAgeMs;
+  const isNewerPosition = state.lastPositionAt === null || positionAt > state.lastPositionAt;
 
-  if (state.goneAt !== null && !isFreshPosition) {
-    // Already marked gone, and this is just readsb repeating an old fix,
-    // not a genuine reappearance -- must not resurrect the marker on a
-    // stale repeat, or removal never sticks for as long as some other
-    // field (altitude, speed, track) keeps legitimately changing.
+  // Never moves backwards: a repeated stale fix carries a *growing*
+  // seenPos, so it keeps resolving to the same original decode time and
+  // cannot postpone the fade/removal clock -- the same protection the old
+  // boolean gave. What the boolean got wrong is the other end: it left
+  // lastPositionAt at null whenever the *first* position ever seen for an
+  // aircraft was already stale (a tab opened, or a WebSocket reconnect's
+  // full snapshot arriving, while that aircraft was mid-signal-gap), and
+  // the removal check in the periodic tick skips a null lastPositionAt as
+  // "never plotted, nothing to retire" -- so that marker, and its trail,
+  // stayed on the map forever. Reported live with a screenshot: an
+  // aircraft whose own details panel read "last position 60 s" still sat
+  // on the map, three times past REMOVE_MS.
+  if (isNewerPosition) state.lastPositionAt = positionAt;
+
+  if (positionAgeMs >= REMOVE_MS || (state.goneAt !== null && !isNewerPosition)) {
+    // Either the only position on offer was decoded longer ago than the
+    // removal threshold, or the marker is already retired and this is just
+    // readsb repeating the very fix that retired it. Don't plot it and
+    // don't resurrect anything -- the periodic tick retires whatever is
+    // still on screen off the lastPositionAt set just above.
     return;
   }
 
   const wasGone = state.goneAt !== null;
   state.goneAt = null;
-  if (isFreshPosition) state.lastPositionAt = now;
 
   const lngLat = [aircraft.lon, aircraft.lat];
 
@@ -1063,11 +1091,17 @@ function applyAircraftUpdate(aircraft) {
 function handleSnapshot(snapshot) {
   if (snapshot.type === 'full') {
     resetAll();
-    let trailChanged = false;
     for (const aircraft of snapshot.aircraft) {
-      if (applyAircraftUpdate(aircraft)) trailChanged = true;
+      applyAircraftUpdate(aircraft);
     }
-    if (trailChanged) renderTrail();
+    // Unconditionally, unlike the delta branch below: resetAll() has just
+    // dropped every aircraftState entry, but the trail source still holds
+    // the FeatureCollection built from the *previous* set of aircraft. If
+    // this snapshot happens to record no trail points of its own (nothing
+    // selected in the default 'click' mode, or a reconnect landing on an
+    // empty sky), skipping the redraw would leave those stale trails
+    // painted on the map with no aircraft anywhere near them.
+    renderTrail();
     notifyAircraftChanged();
   } else if (snapshot.type === 'delta') {
     let trailChanged = false;
