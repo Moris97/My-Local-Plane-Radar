@@ -379,6 +379,45 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   List/Stats/counts) vs. marker-placement (still gated on having a real
   position). A position lost mid-flight leaves the existing marker in place;
   regular fade/forget timers retire it if position never returns.
+  **"Has a position" here means "the map is drawing it right now", not "the
+  object carries lat/lon numbers"** (v2.1.17) — those diverge, and asking the
+  second question was the bug. `list.js`'s `hasPosition` also consults
+  `radar-state.js`'s `isPositionStale(hex)`, which `app.js` publishes from
+  the *same* `REMOVE_MS` decision the map plots by: set wherever
+  `applyAircraftUpdate` declines to plot (position aged past `REMOVE_MS`, or
+  a repeat of the fix that already retired the marker) and in the periodic
+  tick's own `REMOVE_MS` branch, cleared on every successful plot. readsb
+  keeps re-reporting a last known `lat`/`lon` long after it stops decoding
+  fresh fixes, so a marker `app.js` had deliberately retired kept reading as
+  a fully-positioned row — reported live as an aircraft present in the List
+  with no icon anywhere. Publishing the fact rather than letting `list.js`
+  re-derive it is deliberate: this threshold has already moved twice, and a
+  second copy of the rule is what would drift. The tooltip distinguishes
+  `noPositionData` (never had one, Mode-S only) from `stalePositionData`
+  (had one, it aged out) — same icon, different situations to the reader.
+  Anything else that answers "is this aircraft positioned" needs the same
+  treatment; `stats.js`'s nearest/farthest tiles still read raw `lat`/`lon`
+  and are the remaining known instance.
+  **A contact readsb has dropped entirely leaves the List at once**, rather
+  than lingering for `FORGET_MS` (v2.1.17). This is a server-pushed fact, not
+  a client-side timeout, because **the browser cannot work it out**: a delta
+  only carries aircraft whose `CHANGE_FIELDS` changed, so "no update for a
+  while" client-side means either "dead" or "alive and simply not changing"
+  (`index.js`'s `recordRangeAndRegistrationSightings` already documents the
+  latter). `state.js`'s `applyRawSnapshot` now returns `{updated, removed}` —
+  `removed` being hexes absent from the raw snapshot, i.e. readsb's own
+  aging-out decision, announced **once** (`present` flag) and re-announced on
+  return; a returning aircraft is force-resent even when every tracked field
+  compares equal, since "nothing changed" is exactly the case that would
+  otherwise leave a dropped hex invisible forever. `tracked` entries still
+  live the full `EVICTION_MS` (`getTrackedAircraft()` feeds range/antenna/
+  registration sampling and trail eviction — untouched by this). The
+  presence sweep keys off a **tick counter, not `Date.now()`**: two polls in
+  one millisecond would share a timestamp and make an absent aircraft look
+  freshly polled. Client-side, `retireContact` drops the row and the marker
+  but deliberately keeps `aircraftState`/trail history/selection until the
+  normal `FORGET_MS` sweep, so a reappearance still links up with a dashed
+  grey gap segment.
 - **List columns and sort order are user-configurable**: "Configure" button
   swaps the table view for an in-place config view. **Every edit
   auto-saves** — no Save/Cancel step. Column and sort-level rows both have
@@ -386,8 +425,14 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   Persisted per-browser in `settings-state.js`: `listColumns` (ordered
   `list-fields.js` keys), `listSortLevels` (ordered `{key, asc}`, VRS's
   fixed 3-line sort generalized to any number of levels), `listPositionFirst`
-  (known-position aircraft sort first). Defaults match the old fixed
-  4-column layout (`flight`/`typeCode`/`altBaro`/`gs`) exactly.
+  (known-position aircraft sort first — **on by default since v2.1.17**, per
+  request: a row the map can't draw is the one kind that can't be
+  cross-checked against the map, so it belongs at the bottom rather than
+  interleaved). Column defaults still match the old fixed 4-column layout
+  (`flight`/`typeCode`/`altBaro`/`gs`) exactly. Note `save()` persists the
+  *whole* settings object, so any install that has ever changed a setting
+  has `listPositionFirst: false` already stored and keeps it — a changed
+  default only reaches browsers with no saved settings yet.
   Desktop layout has three presentations depending on context
   (`list.js`'s `currentMode()`): `'floating'` (normal desktop — Configure
   renders into a separate sibling element, `#list-config-window`, glued to

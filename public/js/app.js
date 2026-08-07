@@ -16,6 +16,7 @@ import {
   setHoveredHex,
   setHoverRequestHandler,
   setMapView,
+  setPositionStale,
 } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { queuePendingMessage } from './pending-queue.js';
@@ -1022,6 +1023,11 @@ function applyAircraftUpdate(aircraft) {
     // real position has become. Reported live: a marker appeared to freeze
     // in place then jump to a new spot joined by a plain colored trail
     // line, never a dashed gap, after a long position-less patch.
+    //
+    // The List already reads this case correctly off the absent lat/lon,
+    // but publish it anyway so the flag never disagrees with the map for a
+    // hex that had a plottable position a moment ago.
+    setPositionStale(aircraft.hex, true);
     return;
   }
 
@@ -1057,8 +1063,16 @@ function applyAircraftUpdate(aircraft) {
     // readsb repeating the very fix that retired it. Don't plot it and
     // don't resurrect anything -- the periodic tick retires whatever is
     // still on screen off the lastPositionAt set just above.
+    //
+    // This is the case the List used to get wrong: the update genuinely
+    // carries lat/lon, so a plain "typeof lat === 'number'" test called it
+    // positioned, while the map deliberately refuses to draw it. Reported
+    // live as an aircraft sitting in the List with no icon anywhere.
+    setPositionStale(aircraft.hex, true);
     return;
   }
+
+  setPositionStale(aircraft.hex, false);
 
   const wasGone = state.goneAt !== null;
   state.goneAt = null;
@@ -1149,6 +1163,37 @@ function applyAircraftUpdate(aircraft) {
   return trailChanged;
 }
 
+// Handles the server's `removed` list (see state.js's applyRawSnapshot):
+// readsb has aged this aircraft out of aircraft.json entirely, so it is not
+// merely un-plottable, it is not being heard at all. It leaves the List
+// immediately -- the row was the last thing still claiming this contact
+// exists, and up to now it stayed for FORGET_MS (five minutes) after the
+// marker had gone, which is what "it's on the list but not on the map" was
+// most of the time.
+//
+// Everything the trail needs deliberately survives: aircraftState and the
+// recorded history stay until the regular FORGET_MS sweep, so an aircraft
+// coming back from a gap still links up with a dashed grey segment rather
+// than starting a fresh trail. The selection survives for the same reason
+// the REMOVE_MS branch keeps it. Returns whether the trail needs redrawing.
+function retireContact(hex) {
+  removeAircraft(hex);
+
+  const state = aircraftState.get(hex);
+  if (!state) return false;
+
+  const hadMarker = state.marker !== null;
+  state.marker?.remove();
+  state.marker = null;
+  // Only start the forget clock if it isn't already running -- a contact
+  // whose position aged out first (the REMOVE_MS branch) is already counting
+  // down, and restarting it here would extend its life by up to REMOVE_MS.
+  if (state.goneAt === null) state.goneAt = Date.now();
+  if (hex === selectedHex) closeInfoPopup();
+
+  return hadMarker;
+}
+
 // applyAircraftUpdate() only *records* a trail point per aircraft (cheap);
 // renderTrail() re-runs the MLAT filter/smoothing pass and rebuilds the
 // entire shared GeoJSON source across every tracked aircraft (in
@@ -1177,6 +1222,9 @@ function handleSnapshot(snapshot) {
     for (const aircraft of snapshot.updated) {
       if (applyAircraftUpdate(aircraft)) trailChanged = true;
     }
+    for (const hex of snapshot.removed ?? []) {
+      if (retireContact(hex)) trailChanged = true;
+    }
     if (trailChanged) renderTrail();
     notifyAircraftChanged();
   } else if (snapshot.type === 'stats') {
@@ -1190,7 +1238,7 @@ function handleSnapshot(snapshot) {
 setInterval(() => {
   const now = Date.now();
   let trailNeedsRefresh = false;
-  let anyRemoved = false;
+  let listNeedsRefresh = false;
   const { planeColorMode } = getSettings();
 
   for (const [hex, state] of aircraftState) {
@@ -1199,7 +1247,7 @@ setInterval(() => {
         aircraftState.delete(hex);
         clearHistory(hex);
         removeAircraft(hex);
-        anyRemoved = true;
+        listNeedsRefresh = true;
         if (hex === selectedHex) deselectAircraft();
       }
       continue;
@@ -1229,6 +1277,14 @@ setInterval(() => {
       // called deselectAircraft, i.e. for up to five minutes after the
       // aircraft it describes had vanished.
       if (hex === selectedHex) closeInfoPopup();
+      // ...and so must the List's idea of this aircraft being positioned.
+      // Nothing new arrives from the server in this branch (the position
+      // aged out where it stood, no update required), so the flag has to be
+      // set here rather than waiting for an applyAircraftUpdate that may
+      // never come -- and the List has to be told to redraw, which up to
+      // now only happened when a row was actually removed.
+      setPositionStale(hex, true);
+      listNeedsRefresh = true;
       continue;
     }
 
@@ -1244,7 +1300,7 @@ setInterval(() => {
   }
 
   if (trailNeedsRefresh) renderTrail();
-  if (anyRemoved) notifyAircraftChanged();
+  if (listNeedsRefresh) notifyAircraftChanged();
 }, TICK_INTERVAL_MS);
 
 // A flat 1s retry meant the server being down for any length of time was

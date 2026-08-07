@@ -22,10 +22,36 @@ export function noteAircraft(hex, aircraft) {
 
 export function removeAircraft(hex) {
   liveAircraft.delete(hex);
+  positionStaleHexes.delete(hex);
 }
 
 export function clearAircraft() {
   liveAircraft.clear();
+  positionStaleHexes.clear();
+}
+
+// A position ages out of usefulness long before an aircraft stops being
+// heard: readsb keeps re-reporting a last known lat/lon while its own
+// seen_pos climbs, and app.js stops plotting -- and retires the marker --
+// once that fix is older than REMOVE_MS. The aircraft object still carries
+// those (now stale) coordinates, so a consumer asking "typeof lat ===
+// 'number'" gets a confident yes for an aircraft the map is deliberately
+// not drawing. That is exactly what list.js used to ask, which is why a row
+// could read as fully positioned with nothing on the map to match it.
+//
+// app.js is the one place that knows the answer, because it owns the same
+// threshold the map plots by -- so it publishes the fact here instead of
+// every consumer re-deriving it (and drifting from the map's own rule the
+// first time that rule changes, as it already has twice).
+const positionStaleHexes = new Set();
+
+export function setPositionStale(hex, stale) {
+  if (stale) positionStaleHexes.add(hex);
+  else positionStaleHexes.delete(hex);
+}
+
+export function isPositionStale(hex) {
+  return positionStaleHexes.has(hex);
 }
 
 export function notifyAircraftChanged() {

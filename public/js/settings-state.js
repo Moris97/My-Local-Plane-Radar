@@ -60,7 +60,11 @@ const defaults = {
   // existing installs see no visible change until they open Configure.
   listColumns: ['flight', 'typeCode', 'altBaro', 'gs'],
   listSortLevels: [{ key: 'flight', asc: true }],
-  listPositionFirst: false,
+  // On by default: a row whose position the map can't draw (Mode-S-only, or
+  // a fix too old to plot -- see radar-state.js's positionStaleHexes) is the
+  // one kind of row that can't be cross-checked against the map, so it
+  // belongs at the bottom rather than interleaved with rows that can.
+  listPositionFirst: true,
   // Side panel width in px (desktop/tablet layout only, >=900px -- see
   // panels.js's drag-to-resize handle). Matches the old fixed CSS value, so
   // nobody who hasn't dragged the handle sees any visual change.

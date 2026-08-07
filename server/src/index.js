@@ -73,7 +73,7 @@ async function pollOnce(broadcast) {
 
   if (raw === null) return;
 
-  const updated = applyRawSnapshot(raw);
+  const { updated, removed } = applyRawSnapshot(raw);
 
   for (const aircraft of updated) {
     evaluateAircraftRules(aircraft);
@@ -100,6 +100,11 @@ async function pollOnce(broadcast) {
     type: 'delta',
     now: Date.now() / 1000,
     updated: toWireAircraftList(updated),
+    // Omitted entirely on the overwhelmingly common tick where nothing was
+    // dropped, rather than sent as an empty array every second to every
+    // client -- hard rule 1's "send only what changed" applies to this the
+    // same as to the aircraft themselves.
+    ...(removed.length > 0 ? { removed } : {}),
   });
 }
 

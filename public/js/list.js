@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { getLiveAircraft, requestSelect, onChange, getSelectedHex, requestHover, onHoverChange, getHoveredHex } from './radar-state.js';
+import { getLiveAircraft, requestSelect, onChange, getSelectedHex, requestHover, onHoverChange, getHoveredHex, isPositionStale } from './radar-state.js';
 import { getSettings, onSettingsChange, updateSettings } from './settings-state.js';
 import { getListField, sortedFieldOptions } from './list-fields.js';
 import { openFullscreenModal, openPanel, isSidePanelLayout } from './panels.js';
@@ -34,8 +34,26 @@ const NO_POSITION_ICON = (title) => `
     <line x1="4" y1="4" x2="20" y2="20"/>
   </svg>`;
 
+// "Has a position" means "the map is drawing this aircraft right now", not
+// "the object carries lat/lon numbers" -- those are not the same question,
+// and asking the second one was a real bug: readsb keeps re-reporting a
+// last known position for a while after it stops decoding fresh fixes, so
+// an aircraft whose marker app.js had already retired kept showing here as
+// a fully positioned row. Reported live as an aircraft present in the List
+// with no icon anywhere on the map. See radar-state.js's positionStaleHexes
+// for why app.js publishes the answer rather than this file re-deriving it.
 function hasPosition(aircraft) {
-  return typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
+  return typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number'
+    && !isPositionStale(aircraft.hex);
+}
+
+// Distinguishes the two reasons a row gets the crossed-out pin, purely for
+// the tooltip -- "never had a position" (Mode-S only) and "had one, it went
+// stale" are the same thing to the map but read as different situations to
+// someone looking at the row and then at an empty patch of map.
+function noPositionTitle(aircraft) {
+  const carriesCoordinates = typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
+  return carriesCoordinates ? t('stalePositionData') : t('noPositionData');
 }
 
 function formatCell(field, aircraft, units, ctx) {
@@ -232,7 +250,7 @@ export function renderListPanel(container, { fullscreen = false } = {}) {
       for (const field of columns) {
         const td = document.createElement('td');
         if (field.key === 'flight' && !rowHasPosition) {
-          td.innerHTML = NO_POSITION_ICON(t('noPositionData'));
+          td.innerHTML = NO_POSITION_ICON(noPositionTitle(aircraft));
           td.append(document.createTextNode(' ' + formatCell(field, aircraft, units, ctx)));
         } else {
           td.textContent = formatCell(field, aircraft, units, ctx);
