@@ -49,6 +49,178 @@ html, body {
   display: none;
 }
 
+/* On-map toast notifications (notifications-ui.js, v2.1.20) -- the visual
+   twin of the ntfy/MQTT notification engine. Positioning is almost
+   entirely JS-driven (notifications-ui.js's updatePlacement): top-right on
+   desktop, but shifted left of #panel whenever it's open (the explicit
+   request -- the hardest of the placement options considered, but the
+   only one that never covers the map or the panel), overlaying
+   #fullscreen-modal instead of shifting for it (Stats has no "beside",
+   it's always full-width -- see panels.js's PANELS/FULLSCREEN_MODALS
+   split). z-index 60 -- above the trigger-area editor's 50, which is
+   already above everything else in the app -- because a squawk emergency
+   firing while mid-edit of an unrelated watch-list area should still be
+   seen, not silently suppressed by whatever else happens to be open. */
+#mlpr-toast-stack {
+  position: fixed;
+  top: max(10px, env(safe-area-inset-top));
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+  max-height: calc(100vh - 20px);
+}
+
+#mlpr-toast-stack.mlpr-toast-stack-desktop {
+  /* `right` itself is set inline by updatePlacement (has to react live to
+     #panel's width/visibility) -- this is just the fixed card width and
+     the fallback for the one frame before JS has run. */
+  right: 6px;
+  width: 320px;
+  align-items: flex-end;
+}
+
+#mlpr-toast-stack.mlpr-toast-stack-mobile {
+  /* Full-width banner from the top on narrow screens (requested
+     explicitly) -- left/right insets rather than a fixed width, and a
+     larger top offset to clear the (rare, but real when it coincides)
+     connection-status pill, which is centered at this same top edge. */
+  left: 8px;
+  right: 8px;
+  top: calc(max(10px, env(safe-area-inset-top)) + 34px);
+}
+
+.mlpr-toast {
+  pointer-events: auto;
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  border-left: 3px solid #3d8bdc;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 9px 30px 9px 11px;
+  position: relative;
+  color: #d8f3e6;
+  font: 400 12.5px/1.4 system-ui, sans-serif;
+  max-width: 100%;
+  opacity: 0;
+  /* Base transition target for the leave animation (scale) -- entrance
+     direction is set per breakpoint below and overridden the instant
+     .mlpr-toast-visible is added. */
+  transform: scale(0.94);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+/* Entrance direction: slides in from the edge it's anchored to on desktop
+   (the classic corner-toast motion), drops in from above on the mobile
+   banner -- two different starting transforms collapsing to the same
+   `translate(0)` resting state below, so only one visible-state rule is
+   needed regardless of which one applied. */
+.mlpr-toast-stack-desktop .mlpr-toast {
+  transform: translateX(28px);
+}
+
+.mlpr-toast-stack-mobile .mlpr-toast {
+  transform: translateY(-18px);
+}
+
+.mlpr-toast.mlpr-toast-visible {
+  opacity: 1;
+  transform: translate(0, 0);
+}
+
+.mlpr-toast.mlpr-toast-leaving {
+  opacity: 0;
+  transform: scale(0.92);
+}
+
+.mlpr-toast-clickable {
+  cursor: pointer;
+}
+
+.mlpr-toast-clickable:hover {
+  border-color: #2a3f4d;
+  background: #131b22;
+}
+
+.mlpr-toast-title {
+  margin: 0 0 2px;
+  font-weight: 600;
+  color: #f2f7f4;
+}
+
+.mlpr-toast-summary {
+  margin: 0;
+  color: #9fc9b3;
+}
+
+.mlpr-toast-detail {
+  margin: 4px 0 0;
+  color: #7fa896;
+}
+
+.mlpr-toast-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  color: #6f93ab;
+  font: 400 16px/1 system-ui, sans-serif;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.mlpr-toast-close:hover {
+  color: #d8f3e6;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Accent per kind (the left border) -- squawk is the one genuinely urgent
+   case and is the only toast (alongside #mlpr-connection-status) to use
+   this app's reserved "alarm" red; the other four each get a distinct,
+   non-red color so squawk still reads as the odd one out at a glance. */
+.mlpr-toast-squawk {
+  border-left-color: #e02a2a;
+}
+
+.mlpr-toast-watched {
+  border-left-color: #f2b807;
+}
+
+.mlpr-toast-first-seen {
+  border-left-color: #3d8bdc;
+}
+
+.mlpr-toast-range-record {
+  border-left-color: #3ddc84;
+}
+
+.mlpr-toast-receiver-silence {
+  border-left-color: #e07f7f;
+}
+
+.mlpr-toast-overflow {
+  pointer-events: none;
+  align-self: center;
+  color: #7fa896;
+  font: 500 11.5px system-ui, sans-serif;
+  background: rgba(14, 22, 28, 0.85);
+  border: 1px solid #1c2e3a;
+  border-radius: 12px;
+  padding: 3px 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mlpr-toast {
+    transition: opacity 0.25s ease;
+    transform: none !important;
+  }
+}
+
 .mlpr-home-marker {
   width: 40px;
   height: 40px;
@@ -200,6 +372,51 @@ html, body {
 
 #map.mlpr-map-theme-light .mlpr-plane-glow {
   background: radial-gradient(circle, rgba(0, 0, 0, 0.45) 0%, rgba(0, 0, 0, 0) 72%);
+}
+
+/* Alert indicator (v2.1.20): a third per-marker background glow, same
+   technique as .mlpr-plane-glow above (a sibling div painted behind the
+   svg via plain DOM order, not an SVG filter) but red and pulsing faster
+   -- deliberately still a different color/animation from both selection
+   (achromatic, 2s breathe) and hover (amber, static ring on the svg's own
+   silhouette), so a marker that's simultaneously selected/hovered/alerting
+   still reads as three distinct, independently toggleable facts rather
+   than blending into one. Two trigger classes share this element on
+   purpose: .mlpr-plane-alert is the *live* state (app.js keeps it in sync
+   with the aircraft's own wire alertKinds field every tick -- squawk still
+   emergency, still inside a watched trigger area -- so it turns itself off
+   the instant the condition does, not on a timer); .mlpr-plane-alert-timed
+   is the *one-shot* state (first-seen/range-record), applied for a fixed
+   window by app.js and cleared by its own setTimeout, tied to how long the
+   matching toast stays up rather than to any ongoing condition. Not a
+   theme-aware color split like the selection glow's white/black -- red
+   reads clearly against both basemap themes without one. Placed *after*
+   .mlpr-plane-glow in the markup (aircraft-icon-live.js's iconSvg) so an
+   aircraft that's both selected and alerting paints the more urgent alert
+   glow on top, not the other way around. */
+.mlpr-plane-alert-glow {
+  position: absolute;
+  inset: -35%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(circle, rgba(224, 42, 42, 0.8) 0%, rgba(224, 42, 42, 0) 72%);
+}
+
+.mlpr-plane-alert .mlpr-plane-alert-glow,
+.mlpr-plane-alert-timed .mlpr-plane-alert-glow {
+  animation: mlpr-alert-pulse 1s ease-in-out infinite;
+}
+
+@keyframes mlpr-alert-pulse {
+  0%, 100% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
 }
 
 /* Hover indicator: a crisp, solid-ish amber ring traced on the icon's own
@@ -2393,5 +2610,14 @@ a:focus-visible,
   .mlpr-plane-selected .mlpr-plane-glow {
     animation: none;
     opacity: 0.75;
+  }
+
+  /* Same reasoning as the selection glow just above -- .mlpr-plane-alert-
+     glow's own base opacity is 0, so turning its animation off alone would
+     silently delete the alert indicator instead of just freezing it. */
+  .mlpr-plane-alert .mlpr-plane-alert-glow,
+  .mlpr-plane-alert-timed .mlpr-plane-alert-glow {
+    animation: none;
+    opacity: 0.85;
   }
 }

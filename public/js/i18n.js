@@ -123,6 +123,24 @@ const DICTIONARIES = {
     overheadAlertHint:
       "Notifies whenever any aircraft comes within the radius below of the receiver's location, with direction (azimuth/elevation) and, when its course/speed say something useful, an ETA to its closest approach. Off by default: unlike the other rules above, this fires on plain proximity with no filter narrowing it down, so an install near a flight path or an airport could see it fire often -- pick a radius that suits where you are before turning it on.",
     overheadRadius: 'Radius',
+    // On-map toast notifications (notifications-ui.js), v2.1.20. Titles are
+    // deliberately plain nouns/short phrases, not full sentences -- the
+    // aircraft summary line underneath already carries the specifics, same
+    // "title carries the reason, body doesn't repeat it" split rules.js's
+    // own ntfy messages already use server-side.
+    toastSquawkTitle: 'Squawk {code}',
+    squawkMeaningHijack: 'Hijack',
+    squawkMeaningRadioFailure: 'Radio failure',
+    squawkMeaningEmergency: 'Emergency',
+    toastFirstSeenTitle: 'First time seen',
+    toastWatchedTitle: 'Watched aircraft',
+    toastWatchedMatch: 'Matched {field}: {value}',
+    toastRangeRecordTitle: 'New range record',
+    toastRangeRecordBody: '{km} (previous: {previous})',
+    toastReceiverSilenceTitle: 'Receiver silent',
+    toastReceiverSilenceBody: 'No aircraft seen for over {hours}h',
+    toastDismiss: 'Dismiss',
+    toastMoreCount: '+{count} more',
     ntfyInstructions: 'To receive push notifications, install the ntfy app and enter this code as the topic:',
     regenerateTopic: 'Generate new code',
     watchlist: 'Watched aircraft',
@@ -443,6 +461,19 @@ const DICTIONARIES = {
     overheadAlertHint:
       'Powiadamia, gdy jakikolwiek samolot znajdzie się w podanym promieniu od lokalizacji odbiornika, wraz z kierunkiem (azymut/kąt elewacji) oraz -- gdy kurs i prędkość na to pozwalają -- przewidywanym czasem do najbliższego przelotu. Domyślnie wyłączone: w odróżnieniu od powyższych reguł, ta reaguje na samą bliskość, bez żadnego filtra -- instalacja blisko trasy przelotów lub lotniska może dostawać powiadomienia bardzo często. Dobierz promień odpowiedni dla swojej lokalizacji przed włączeniem.',
     overheadRadius: 'Promień',
+    toastSquawkTitle: 'Squawk {code}',
+    squawkMeaningHijack: 'Porwanie',
+    squawkMeaningRadioFailure: 'Awaria radia',
+    squawkMeaningEmergency: 'Stan zagrożenia',
+    toastFirstSeenTitle: 'Pierwszy raz widziany',
+    toastWatchedTitle: 'Obserwowany samolot',
+    toastWatchedMatch: 'Dopasowanie ({field}): {value}',
+    toastRangeRecordTitle: 'Nowy rekord zasięgu',
+    toastRangeRecordBody: '{km} (poprzedni: {previous})',
+    toastReceiverSilenceTitle: 'Cisza odbiornika',
+    toastReceiverSilenceBody: 'Brak samolotów od ponad {hours}h',
+    toastDismiss: 'Zamknij',
+    toastMoreCount: '+{count} więcej',
     ntfyInstructions: 'Aby otrzymywać powiadomienia push, zainstaluj aplikację ntfy i wpisz ten kod jako temat:',
     regenerateTopic: 'Wygeneruj nowy kod',
     watchlist: 'Lista obserwowanych',

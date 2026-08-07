@@ -4,7 +4,7 @@ import { getNotificationSettings, getNtfyTopic } from './settings.js';
 import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
 import { getWatchList } from './watchlist.js';
-import { publishSmartHomeEvent } from './smart-home.js';
+import { publishSmartHomeEvent, aircraftFields } from './smart-home.js';
 import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm } from '../range.js';
 import { getEffectiveHome } from '../home.js';
 
@@ -47,6 +47,34 @@ export function setNotifySender(fn) {
 
 function notify(payload) {
   return notifySender(getNtfyTopic(), payload);
+}
+
+// A FOURTH, independent delivery channel alongside ntfy/MQTT/(future)
+// history: pushes the exact same "something just fired" fact to any
+// connected browser tab over the existing WebSocket, for the on-map toast/
+// glow feature. Same injectable-dependency shape as setNotifySender above
+// (default no-op -- rules.js itself has no idea what a WebSocket is; the
+// real sender is server.js's `broadcast`, wired in from index.js's main()
+// once buildServer() returns it). A no-op default also means every existing
+// test in this file that never calls setUiEventSender is unaffected.
+let uiEventSender = () => {};
+
+export function setUiEventSender(fn) {
+  uiEventSender = fn;
+}
+
+// `kind` doubles as the discriminant the client switches on to build the
+// right toast text/icon, and as the notification-settings key prefix
+// (`${kind}Enabled`) at each call site below -- so a UI event can only ever
+// be emitted for a rule the user has actually turned on, exactly the same
+// gate ntfy's own notify() already sits behind at every call site. Deliberately
+// self-contained (no lat/lon, no live aircraft reference) via
+// smart-home.js's aircraftFields() -- same reasoning as that module's own
+// payload: the browser already has this aircraft's live position from the
+// ordinary WS delta stream, and a toast never needs to draw anything new on
+// the map, only select something already there.
+function emitUiEvent(kind, detail) {
+  uiEventSender({ kind, now: Date.now() / 1000, ...detail });
 }
 
 const WATCH_FIELD_BY_MATCH_TYPE = {
@@ -231,10 +259,26 @@ function overheadDetail(aircraft, overheadInfo) {
 // `now` is injectable (defaults to the real clock) purely so tests can
 // exercise FIRST_SEEN_DELAY_MS deterministically without real waits or
 // fake timers -- index.js's only call site never passes it.
+// Returns the set of alert kinds -- currently just 'squawk'/'watched' --
+// that are TRUE for this aircraft right now, independent of cooldown. This
+// is what drives the on-map red glow (app.js): unlike a notification, which
+// is deliberately a one-shot event throttled by cooldown.js, the glow is a
+// live, continuously-reappraised fact ("is this aircraft still squawking an
+// emergency code / still inside its watched area right now") and must be
+// free to turn itself off the instant the underlying condition does --
+// gating it by the same cooldown that throttles the *notification* would
+// leave a plane glowing red for up to 30 minutes after its squawk cleared.
+// first-seen/range-record/receiver-silence are deliberately NOT included
+// here -- each is a one-shot event (an aircraft is only ever "first seen"
+// for one tick, a range record is a moment in time), not a standing
+// condition an aircraft can currently satisfy, so they get a client-side
+// timed glow tied to their own toast's lifetime instead (see app.js).
 export function evaluateAircraftRules(aircraft, now = Date.now()) {
   const settings = getNotificationSettings();
+  const alertKinds = [];
 
   if (settings.squawkEnabled && aircraft.squawk && settings.squawkCodes[aircraft.squawk]) {
+    alertKinds.push('squawk');
     if (!isOnCooldown('squawk', aircraft.hex)) {
       markNotified('squawk', aircraft.hex);
       const squawkMeaning = squawkMeaningFor(aircraft.squawk);
@@ -249,6 +293,12 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
       // explicitly-deferred case from that decision (TODO.md) -- added
       // 2026-08-01, same one-more-call-site change anticipated there.
       publishSmartHomeEvent({ reason: 'squawk', aircraft, squawkMeaning });
+      // Fourth channel, see emitUiEvent's own doc comment. squawk is the
+      // one alert kind with no separate "should this actually notify"
+      // question distinct from "is the condition true" (unlike watchlist
+      // below, cooldown is the only gate) -- so this sits right where the
+      // ntfy/MQTT sends already are, not up by the alertKinds.push above.
+      emitUiEvent('squawk', { hex: aircraft.hex, aircraft: aircraftFields(aircraft), squawk: aircraft.squawk, squawkMeaning });
     }
   }
 
@@ -271,21 +321,38 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
         // above); range-record is still deliberately out of scope. No-ops
         // on its own if smart-home isn't enabled/configured.
         publishSmartHomeEvent({ reason: 'first_seen', aircraft });
+        emitUiEvent('first_seen', { hex: aircraft.hex, aircraft: aircraftFields(aircraft) });
       }
     }
   }
 
-  if (settings.watchedEnabled && !isOnCooldown('watched', aircraft.hex)) {
+  // Restructured (v2.1.20) so the watch list is always scanned when the
+  // rule is on, cooldown or not -- previously the cooldown check short-
+  // circuited *before* getWatchList().find(...) ever ran, which was a fine
+  // micro-optimisation when all that mattered was "should I notify now" but
+  // silently meant "is this aircraft currently watched" had no answer while
+  // on cooldown, which the glow above needs an honest answer to on every
+  // tick regardless.
+  if (settings.watchedEnabled) {
     const matchedEntry = getWatchList().find((entry) => matchesWatchEntry(aircraft, entry));
     if (matchedEntry) {
-      markNotified('watched', aircraft.hex);
-      notify({
-        title: 'Watched aircraft',
-        message: aircraftLabel(aircraft),
-        priority: 4,
-        tags: ['eyes'],
-      });
-      publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
+      alertKinds.push('watched');
+      if (!isOnCooldown('watched', aircraft.hex)) {
+        markNotified('watched', aircraft.hex);
+        notify({
+          title: 'Watched aircraft',
+          message: aircraftLabel(aircraft),
+          priority: 4,
+          tags: ['eyes'],
+        });
+        publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
+        emitUiEvent('watchlist', {
+          hex: aircraft.hex,
+          aircraft: aircraftFields(aircraft),
+          matchedType: matchedEntry.matchType,
+          matchedValue: matchedEntry.matchValue,
+        });
+      }
     }
   }
 
@@ -314,9 +381,18 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           tags: ['airplane'],
         });
         publishSmartHomeEvent({ reason: 'overhead', aircraft, overheadInfo });
+        // Deliberately NOT emitUiEvent('overhead', ...) -- the on-map
+        // toast/glow feature (v2.1.20) covers the five rules the user
+        // actually asked for (squawk, first-seen, watchlist, range-record,
+        // receiver-silence); overhead-proximity was shipped one release
+        // earlier and wasn't in that list. Nothing structural stops adding
+        // it later -- the kind registry on the client is a plain lookup
+        // table -- this is scope, not a limitation.
       }
     }
   }
+
+  return alertKinds;
 }
 
 // Evicts pending hexes that never resolved within maxAgeMs (a one-off
@@ -443,6 +519,10 @@ export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
     priority: 4,
     tags: ['warning'],
   });
+  // No hex/aircraft -- this is the one alert kind that isn't about a
+  // specific aircraft at all (see app.js's kind registry: no click-to-
+  // select, no glow, since there's nothing on the map to point at).
+  emitUiEvent('receiver_silence', { hours });
 }
 
 // The write side of the all-time record is deferred to
@@ -453,7 +533,15 @@ export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
 // own record on nearly every tick as new, farther contacts appear, which
 // was a real SD-write burst before this. The notification itself still
 // fires immediately either way -- only the persistence is batched.
-export function evaluateRangeRecordRule(maxRangeKm) {
+// `aircraft` (optional) is whichever tracked aircraft happened to set the
+// new record on this tick (index.js's recordRangeAndRegistrationSightings
+// tracks it alongside the bare distance) -- used only for the UI event's
+// click-to-select-on-the-map affordance, not for the ntfy message (which
+// stays a bare distance, unchanged, since ntfy already has no way to link
+// a click back into a specific browser tab's map). `undefined` (no known
+// aircraft, e.g. a future caller that only has the number) still records
+// and notifies exactly as before, just without a UI event to emit.
+export function evaluateRangeRecordRule(maxRangeKm, aircraft) {
   if (typeof maxRangeKm !== 'number') return;
 
   const settings = getNotificationSettings();
@@ -469,5 +557,13 @@ export function evaluateRangeRecordRule(maxRangeKm) {
       priority: 4,
       tags: ['dash'],
     });
+    if (aircraft) {
+      emitUiEvent('range_record', {
+        hex: aircraft.hex,
+        aircraft: aircraftFields(aircraft),
+        rangeKm: maxRangeKm,
+        previousRangeKm: record,
+      });
+    }
   }
 }

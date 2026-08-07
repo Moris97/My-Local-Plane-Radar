@@ -24,6 +24,7 @@ import { openPanel } from './panels.js';
 import { formatAltitude, formatSpeed } from './units.js';
 import { deriveHeadingDegrees } from './geo.js';
 import { escapeHtml } from './html-escape.js';
+import { handleNotificationEvent, initNotificationsUi } from './notifications-ui.js';
 
 // aircraft.flight/typeCode ultimately come from readsb's aircraft.json --
 // trusted when read from the local file, but HttpSource fetches the same
@@ -51,6 +52,14 @@ const FADE_END_MS = 10000;
 const REMOVE_MS = 20000;
 const FORGET_MS = 5 * 60 * 1000;
 const TICK_INTERVAL_MS = 300;
+// How long a one-shot alert (first-seen, range-record) keeps its red glow
+// -- matches notifications-ui.js's own TOAST_LIFETIME_MS so the glow and
+// the toast that explains it disappear together. Squawk/watchlist don't
+// use this at all: their glow is the live .mlpr-plane-alert class, kept in
+// sync every tick with the aircraft's own wire alertKinds field (see
+// applyAircraftUpdate) and cleared the instant the underlying condition
+// is, not on a timer.
+const TIMED_ALERT_MS = 30000;
 // readsb keeps reporting an aircraft's *last known* lat/lon for a while
 // after it actually stops decoding fresh fixes -- its own aging-out window
 // is commonly much longer than REMOVE_MS below. As long as some other
@@ -121,6 +130,31 @@ map.dragRotate.disable();
 map.touchZoomRotate.disableRotation();
 
 const aircraftState = new Map();
+
+// One-shot alert glow (first-seen/range-record -- see TIMED_ALERT_MS).
+// hex -> expiry timestamp, kept independent of aircraftState itself so a
+// hex whose marker gets removed (REMOVE_MS) and later recreated within
+// FORGET_MS still knows to re-apply the glow if the window hasn't lapsed
+// yet -- same "external state consulted at marker-creation time" shape as
+// selectedHex/lastHoverRequestHex below, because unlike the live
+// alertKinds field this isn't something a fresh wire update carries.
+const timedAlertExpiry = new Map();
+
+function applyTimedAlert(hex) {
+  const expiresAt = Date.now() + TIMED_ALERT_MS;
+  timedAlertExpiry.set(hex, expiresAt);
+  aircraftState.get(hex)?.marker?.getElement().classList.add('mlpr-plane-alert-timed');
+  setTimeout(() => {
+    // A second event of the same kind for the same hex within the window
+    // (e.g. two range records in quick succession) overwrites
+    // timedAlertExpiry with a later timestamp -- this timer's own callback
+    // must not clear a glow a *newer* window is still relying on.
+    if (Date.now() < (timedAlertExpiry.get(hex) ?? 0)) return;
+    timedAlertExpiry.delete(hex);
+    aircraftState.get(hex)?.marker?.getElement().classList.remove('mlpr-plane-alert-timed');
+  }, TIMED_ALERT_MS);
+}
+
 let hasCentered = false;
 let mapReady = false;
 let selectedHex = null;
@@ -1112,6 +1146,11 @@ function applyAircraftUpdate(aircraft) {
     // contradicts itself.
     if (aircraft.hex === selectedHex) el.classList.add('mlpr-plane-selected');
     if (aircraft.hex === lastHoverRequestHex) el.classList.add('mlpr-plane-hover');
+    // Same idea, for the one-shot alert glow -- see timedAlertExpiry's own
+    // doc comment above for why this needs re-applying here too, unlike
+    // the live .mlpr-plane-alert class set unconditionally further down.
+    const timedExpiry = timedAlertExpiry.get(aircraft.hex);
+    if (timedExpiry !== undefined && Date.now() < timedExpiry) el.classList.add('mlpr-plane-alert-timed');
   } else {
     state.marker.setLngLat(lngLat);
   }
@@ -1138,6 +1177,14 @@ function applyAircraftUpdate(aircraft) {
   setPlaneColor(state.marker.getElement(), colorForAircraft(aircraft, 0));
   setPlaneLabel(state.marker.getElement(), buildAircraftLabel(aircraft, aircraftLabelFields, units));
   state.marker.getElement().style.display = passesAltitudeFilter(aircraft) ? '' : 'none';
+  // Live, cooldown-independent alert state (squawk still emergency, still
+  // inside a watched trigger area -- see rules.js's own doc comment on
+  // evaluateAircraftRules) -- unlike selectedHex/lastHoverRequestHex below,
+  // this needs no separate "re-apply on marker (re)creation" handling: it's
+  // a property already sitting on *this* update's own aircraft object, not
+  // external state read from elsewhere, so it's already correct here
+  // whether state.marker was just created above or already existed.
+  state.marker.getElement().classList.toggle('mlpr-plane-alert', (aircraft.alertKinds?.length ?? 0) > 0);
   state.lastLngLat = lngLat;
 
   let trailChanged = false;
@@ -1232,6 +1279,19 @@ function handleSnapshot(snapshot) {
       messagesPerSec: snapshot.messagesPerSec,
       maxRangeLastHourKm: snapshot.maxRangeLastHourKm,
     });
+  } else if (snapshot.type === 'notification') {
+    // Forwarded to notifications-ui.js for the toast itself (rendering/
+    // lifecycle/title badge -- that module has no map knowledge at all);
+    // the *map*-side half of this feature (the one-shot red glow) is
+    // handled right here, since it needs aircraftState. Only first-seen
+    // and range-record use it -- squawk/watchlist already get a live glow
+    // from their own alertKinds wire field (see applyAircraftUpdate),
+    // driven by the underlying condition rather than a timer, and
+    // receiver-silence has no aircraft to glow at all.
+    handleNotificationEvent(snapshot);
+    if ((snapshot.kind === 'first_seen' || snapshot.kind === 'range_record') && snapshot.hex) {
+      applyTimedAlert(snapshot.hex);
+    }
   }
 }
 
@@ -1355,4 +1415,5 @@ function connect() {
   ws.addEventListener('error', () => ws.close());
 }
 
+initNotificationsUi();
 connect();

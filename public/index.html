@@ -31,6 +31,14 @@
      shows this at all. aria-live so a reconnect is announced without moving
      focus. -->
 <div id="mlpr-connection-status" class="hidden" role="status" aria-live="polite"></div>
+<!-- notifications-ui.js's toast stack. role="log" (not "status"/"alert"):
+     this is a running feed of discrete items that accumulate and get
+     dismissed individually, closer semantically to a chat/notification log
+     than a single replaceable status message. Position is set entirely by
+     notifications-ui.js itself (JS-driven: it has to react live to the side
+     panel opening/closing/resizing on desktop -- see panels.js's
+     onPanelLayoutChange), not by style.css, so no positioning classes here. -->
+<div id="mlpr-toast-stack" role="log" aria-live="polite"></div>
 <div id="mlpr-corner-info">
   <button type="button" id="mlpr-credits-toggle" class="mlpr-info-icon" aria-expanded="false" aria-controls="mlpr-credits-panel">i</button>
   <div id="mlpr-credits-panel" class="mlpr-credits-panel hidden" role="dialog">

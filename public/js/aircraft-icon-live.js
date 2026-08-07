@@ -47,6 +47,7 @@ function iconSvg(kind) {
     : `<path d="${getIconPath(kind)}"/>`;
   return `
 <div class="mlpr-plane-glow"></div>
+<div class="mlpr-plane-alert-glow"></div>
 <svg viewBox="${VIEW_BOX}" fill="none" xmlns="http://www.w3.org/2000/svg">
   <g fill="#3ddc84" stroke="#05070a" stroke-width="0.5">
     ${body}

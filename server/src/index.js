@@ -20,7 +20,7 @@ import { upsertDailyStats, getConfigJSON, setConfigJSON, runBatch } from './db.j
 import { noteFlightSeen, flushDirtySeenFlights } from './seen-flights.js';
 import { noteAircraftSeen, flushDirtyAircraftSeen } from './aircraft-seen.js';
 import { touchAircraftTracked, flushDirtyAircraftTracked } from './aircraft-tracked.js';
-import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, flushAllTimeMaxRangeKmIfDirty } from './notifications/rules.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, flushAllTimeMaxRangeKmIfDirty, setUiEventSender } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
@@ -76,7 +76,19 @@ async function pollOnce(broadcast) {
   const { updated, removed } = applyRawSnapshot(raw);
 
   for (const aircraft of updated) {
-    evaluateAircraftRules(aircraft);
+    // Attached directly onto the (already-mutable, freshly-normalized)
+    // aircraft object before toWireAircraftList below -- wire.js spreads
+    // the whole object rather than picking a fixed field list, so this
+    // rides along on the existing delta for free, no new WS message needed.
+    // See rules.js's own doc comment on evaluateAircraftRules for why this
+    // is a live, cooldown-independent fact rather than the same throttled
+    // signal the notification itself uses. Only set when non-empty --
+    // almost every aircraft on almost every tick has no active alert, and
+    // `"alertKinds":[]` on every one of them would be pure overhead (same
+    // "omit rather than send an empty array every tick" discipline the
+    // delta's own `removed` field already follows below).
+    const alertKinds = evaluateAircraftRules(aircraft);
+    if (alertKinds.length > 0) aircraft.alertKinds = alertKinds;
     if (typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
       recordPosition(aircraft.hex, {
         lat: aircraft.lat,
@@ -120,6 +132,11 @@ function recordRangeAndRegistrationSightings() {
   const home = getEffectiveHome();
   const airlines = getAirlines();
   let bestRangeKm = null;
+  // Which aircraft actually achieved bestRangeKm -- purely for the range-
+  // record UI event's click-to-select-on-the-map affordance (rules.js's
+  // evaluateRangeRecordRule); the ntfy notification itself has never needed
+  // this, it's always been a bare distance.
+  let bestRangeAircraft = null;
   let withPos = 0;
   let withoutPos = 0;
 
@@ -136,7 +153,10 @@ function recordRangeAndRegistrationSightings() {
     // contacts this receiver never actually heard that far out.
     if (home && hasPosition && isRangeEligible(aircraft.sourceType)) {
       const km = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
-      if (bestRangeKm === null || km > bestRangeKm) bestRangeKm = km;
+      if (bestRangeKm === null || km > bestRangeKm) {
+        bestRangeKm = km;
+        bestRangeAircraft = aircraft;
+      }
 
       recordAntennaSample({
         homeLat: home.lat,
@@ -197,7 +217,7 @@ function recordRangeAndRegistrationSightings() {
     // impossible "all time < today" reading on the Stats panel. Feeding
     // both the daily and all-time record from this one source keeps them
     // consistent by construction.
-    evaluateRangeRecordRule(bestRangeKm);
+    evaluateRangeRecordRule(bestRangeKm, bestRangeAircraft);
   }
 }
 
@@ -282,6 +302,16 @@ function flushStatsHistorySnapshot() {
 
 async function main() {
   const { app, broadcast, closeWebSockets } = await buildServer();
+
+  // The on-map toast/glow feature's fourth delivery channel (alongside
+  // ntfy/MQTT) -- rules.js has no idea what a WebSocket is, so this hands
+  // it the one function it needs. `type: 'notification'` is its own top-
+  // level WS message type, sibling to 'delta'/'stats'/'full', not folded
+  // into the aircraft delta -- unlike alertKinds (which rides along on an
+  // aircraft's own wire object because it's a per-aircraft *state*), this
+  // is a discrete *event* with no natural aircraft-object home, and
+  // receiver_silence has no aircraft at all.
+  setUiEventSender((event) => broadcast({ type: 'notification', ...event }));
 
   // Bridges the exact gap reported live: the 24h charts (aircraft
   // seen/with-position/range) read from in-memory state that's otherwise

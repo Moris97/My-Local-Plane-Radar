@@ -74,7 +74,11 @@ export function reconfigureSmartHome() {
   });
 }
 
-function aircraftFields(aircraft) {
+// Exported so rules.js's UI-event broadcaster (the on-map toast/glow
+// feature) can reuse the exact same compact shape for its own WS payload,
+// rather than a third near-identical hand-rolled aircraft-summary function
+// alongside this one and ntfy's own aircraftLabel().
+export function aircraftFields(aircraft) {
   return {
     hex: aircraft.hex,
     flight: aircraft.flight ?? null,

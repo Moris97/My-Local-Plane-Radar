@@ -1158,6 +1158,197 @@ watch list) is deferred — see `TODO.md`.
 **Known rough edge**: on a fresh install (empty `seen_aircraft`), every
 aircraft currently in range fires a "first seen" notification. Not fixed —
 mention it if the user is surprised by a notification burst after setup.
+(v2.1.20's on-map toast stack caps simultaneous cards at 5 and queues the
+rest specifically because of this — see below.)
+
+### On-map toast notifications and marker glow (v2.1.20)
+
+A **fourth**, independent delivery channel alongside ntfy/MQTT — every rule
+that already sends a push notification (squawk, first-seen, watch-list,
+range-record, receiver-silence) now also raises a dismissible card in the
+browser and, where it names an aircraft, a red glow on that aircraft's own
+marker. Explicitly generalized past the original "just squawk" proposal
+(`TODO.md`) by the user when it was picked up — every rule that already
+notifies gets the same treatment, not just the emergency case.
+
+**Wire protocol**: `rules.js` exports `setUiEventSender(fn)`, the exact same
+injectable-dependency shape as `setNotifySender` (default a no-op — rules.js
+itself has no idea what a WebSocket is). `index.js`'s `main()` wires it to
+`(event) => broadcast({ type: 'notification', ...event })` once
+`buildServer()` returns `broadcast`. `emitUiEvent(kind, detail)` is called
+right alongside each existing `notify(...)` — same enabled-setting gate, same
+cooldown gate — so a UI event can only ever fire for exactly the same
+occurrences the ntfy/MQTT sends already cover; there is no second,
+independently-re-evaluated copy of squawk/watchlist matching anywhere. Each
+event is self-contained (`smart-home.js`'s `aircraftFields()`, exported and
+reused here too — a third near-identical aircraft-summary shape was
+deliberately avoided) rather than relying on the browser's own live aircraft
+list: no lat/lon is needed (a toast never draws anything new on the map,
+only selects something already there), and self-containment sidesteps any
+ordering question between this message and the aircraft's own delta.
+`range_record`'s event needs to know *which* aircraft set the record, which
+`evaluateRangeRecordRule` didn't track before this — `index.js`'s
+`recordRangeAndRegistrationSightings` now also tracks `bestRangeAircraft`
+alongside `bestRangeKm`, passed through as the rule's second (optional)
+argument; omitting it (an old/hypothetical caller) still notifies exactly as
+before, just with no UI event. `receiver_silence` carries no hex/aircraft at
+all — the one alert kind not about a specific aircraft. **Overhead-proximity
+(v2.1.19) deliberately does not participate** — shipped one release earlier,
+wasn't in the user's explicit list when this was scoped; nothing structural
+blocks adding it later (the client's kind registry is a plain lookup table).
+
+**Live marker glow vs. one-shot marker glow — two different mechanisms,
+because the underlying facts have two different shapes.** Squawk and
+watch-list are *standing conditions* an aircraft can currently satisfy or
+not (still squawking an emergency code, still inside a watched trigger
+area); first-seen and range-record are *one-shot events* (an aircraft is
+only ever "first seen" for one tick). Gating the glow by the same 30-minute
+cooldown that throttles the *notification* would leave a plane glowing red
+for up to half an hour after its squawk cleared — wrong for a live radar.
+- **`evaluateAircraftRules` now returns `alertKinds`** (`['squawk']`,
+  `['watched']`, both, or `[]`) — the live, cooldown-independent truth,
+  computed unconditionally alongside (but separately from) the
+  cooldown-gated notify calls. **Watch-list matching had to be restructured**
+  (v2.1.20): it used to check `!isOnCooldown('watched', hex)` *before* ever
+  scanning `getWatchList()`, a fine micro-optimisation when all that
+  mattered was "should I notify now" but it meant "is this aircraft
+  currently watched" had no answer at all while on cooldown — silently
+  wrong for the glow, which needs an honest answer every tick regardless.
+  Now the match is always evaluated when `watchedEnabled`; only the
+  *notification* is still cooldown-gated.
+- `index.js`'s `pollOnce` attaches `alertKinds` directly onto each aircraft
+  in `updated` before `toWireAircraftList` — `wire.js` spreads the whole
+  object rather than picking a fixed field list, so this rides the existing
+  delta for free, no new WS message needed. **Only attached when non-empty**
+  (omitted, not sent as `[]`) — almost every aircraft on almost every tick
+  has no active alert, and `alertKinds` is a full array on every wire
+  object would be pure overhead, same "omit rather than send empty every
+  tick" discipline the delta's own `removed` field already follows. Every
+  input `alertKinds` depends on (squawk, lat, lon, altBaro, onGround) is
+  already in `state.js`'s `CHANGE_FIELDS`, so anything that could actually
+  change the answer already forces a resend on its own — the one narrow gap
+  is the watch-list *configuration itself* changing while the affected
+  aircraft's own fields happen to stay frozen that exact tick, which goes
+  stale until its next real update. Accepted, consistent with this app's
+  existing eventual-consistency tolerance elsewhere.
+- `app.js`'s `applyAircraftUpdate` toggles `.mlpr-plane-alert` unconditionally
+  every tick from `aircraft.alertKinds` — and, unlike `selectedHex`/
+  `lastHoverRequestHex`, needs **no separate "re-apply on marker
+  (re)creation" handling**: `alertKinds` is a property already sitting on
+  *this update's own* aircraft object, not external state read from
+  elsewhere, so it's already correct whether the marker was just created a
+  line above or already existed.
+- The one-shot glow (`.mlpr-plane-alert-timed`) is `app.js`'s own
+  `applyTimedAlert(hex)`, called from `handleSnapshot`'s `'notification'`
+  branch only for `kind === 'first_seen' || 'range_record'`. `TIMED_ALERT_MS`
+  (30000) matches `notifications-ui.js`'s own toast lifetime so the glow and
+  the card explaining it disappear together. `timedAlertExpiry` (hex ->
+  expiry timestamp) is tracked independently of `aircraftState`, the same
+  "external state consulted at marker-creation time" shape
+  `selectedHex`/`lastHoverRequestHex` already use — needed because unlike
+  `alertKinds`, a fresh wire update carries nothing about this; a hex whose
+  marker gets removed (`REMOVE_MS`) and recreated within `FORGET_MS` still
+  needs to know to re-apply the glow if the window hasn't lapsed. A second
+  event for the same hex within an active window extends it (overwrites
+  `timedAlertExpiry` with a later timestamp) — the *first* timer's own
+  callback checks the current map value before clearing, so it can't
+  prematurely end a *newer* window.
+- CSS: `.mlpr-plane-alert-glow`, a **third** per-marker background glow
+  div (`aircraft-icon-live.js`'s `iconSvg`, alongside the existing
+  `.mlpr-plane-glow`), same technique as the achromatic selection halo
+  (a sibling div painted behind the svg via plain DOM order, not an SVG
+  filter) but red and pulsing faster (1s vs. selection's 2s breathe) —
+  deliberately still a different color/animation from both selection
+  (achromatic) and hover (amber, static ring on the svg's own silhouette),
+  so a marker that's simultaneously selected/hovered/alerting reads as
+  three independently toggleable facts, not one blended effect. Not
+  theme-split like the selection glow's white/black — red reads clearly
+  against either basemap theme without one. Placed *after*
+  `.mlpr-plane-glow` in the markup so a selected-and-alerting aircraft
+  paints the more urgent glow on top. Both `.mlpr-plane-alert` and
+  `.mlpr-plane-alert-timed` share the exact same `.mlpr-plane-alert-glow`
+  element/animation — two independent *triggers* for one visual, not two
+  visuals.
+
+**Toast rendering/lifecycle (`public/js/notifications-ui.js`)** — zero
+knowledge of the map or marker DOM by design (the glow above is entirely
+`app.js`'s own job); owns only the card stack, auto-dismiss, and the tab
+title badge.
+- **Auto-dismiss (30s) pauses while the tab is hidden**, not just visually
+  frozen but a genuine `clearTimeout` — verified end-to-end (Playwright,
+  backgrounding the tab, waiting well past 30s while hidden, confirming the
+  card is still up, then resuming and confirming it survives immediately
+  after too). A toast created while *already* hidden is born pre-paused
+  (no timer starts at all until the tab is actually looked at) rather than
+  starting a countdown nobody can see — the whole point of the unread badge
+  below. `remainingMs`/`resumedAt` per toast track cumulative pause time
+  across however many hide/show cycles happen before it's finally dismissed.
+- **`document.title` gets a `(N)` unread prefix** while the tab is hidden,
+  cleared the instant it regains visibility (standard tab-badge UX,
+  independent of whether each toast has since been individually dismissed
+  or is still queued) — this is *why* pausing matters: without it, a burst
+  that arrives entirely while backgrounded would silently expire before
+  anyone ever saw the badge or the cards.
+- **Capped at `MAX_VISIBLE_TOASTS` (5) simultaneously visible**, the rest
+  queued (`pending`) and rendered — with a *fresh* full 30s lifetime, not
+  whatever aged out while waiting — as a slot frees up; a `"+N more"` chip
+  reflects the queue depth live. Directly answers the documented
+  fresh-install first-seen burst above: without this, a new install could
+  see dozens of cards stacked at once.
+- **A dismissed-before-its-entrance-animation-ever-ran toast needed a
+  fallback timer**, found while writing the Playwright coverage for this,
+  not by inspection: dismissing a card within the same tick it was created
+  (`.mlpr-toast-close` clicked before the entrance `requestAnimationFrame`
+  ever added `.mlpr-toast-visible`) leaves it at `opacity: 0` already: the
+  exit animation also targets `opacity: 0`, so the transition never
+  actually changes anything and `transitionend` — the event `dismiss()`
+  relies on to remove the element from the DOM — never fires, permanently
+  stranding an invisible node. A `setTimeout(() => el.remove(), 400)`
+  fallback alongside the `transitionend` listener fixes it; `remove()` on
+  an already-detached node is a harmless no-op, so both firing is fine.
+- **Placement is almost entirely JS-driven** (`updatePlacement`), per
+  explicit request and analysis: top-right on desktop, **shifting left of
+  `#panel`** (List/Settings/aircraft-details) whenever it's open rather than
+  being covered by it — the option judged hardest to build of those
+  considered, picked anyway as the one that never covers the map or the
+  panel. Reacts to `panels.js`'s new `onPanelLayoutChange(fn)` listener set
+  (called from every point that changes `#panel`'s or `#fullscreen-modal`'s
+  visibility or width: `openPanel`/`closePanel`/`openFullscreenModal`/
+  `closeFullscreenModal`/the resize-handle's live drag/`window`'s own
+  `resize`) — a plain listener-set, not a `ResizeObserver` on `#panel`,
+  because relying on a size-change event firing reliably across browsers on
+  a `display:none` transition is exactly the kind of thing this codebase
+  has been burned by guessing about before (the popup-focus saga:
+  "verify... don't re-guess"). **`#fullscreen-modal` (Stats) gets no
+  "beside" treatment at all** — it's always full-width even on desktop (see
+  the PANELS/FULLSCREEN_MODALS split), so the stack simply floats above it
+  instead (`z-index: 60`, above the trigger-area editor's 50, which is
+  already above everything else — a squawk emergency firing mid-edit of an
+  unrelated watch-list area should still be seen). **Below
+  `isSidePanelLayout()`'s breakpoint (900px, reused rather than a second
+  breakpoint) the stack becomes a full-width banner from the top** instead
+  — requested explicitly, `#panel` is a bottom sheet there so there's
+  nothing to shift beside in the first place.
+- **Click selects and centers, not just selects** — `radar-state.js`'s
+  `requestSelect(hex)`, the exact request/handler pair `list.js`'s own row
+  clicks already use (→ `app.js`'s `selectAndCenter`, `map.flyTo` + the same
+  `selectAircraft` a direct marker click calls). Deliberately the List-row
+  precedent, not the bare marker-click one (which never pans): a
+  toast-referenced aircraft is routinely off-screen (a first-seen contact
+  at the edge of range, a watch-list match inside a trigger area far from
+  home) in a way a marker you could physically click never is, so
+  "clicking it does what clicking the aircraft does" only means something
+  once it's actually in view. Clicking dismisses the card too (interacting
+  with a notification consumes it, standard toast UX). The close button
+  (`✕`) stops the click from reaching this handler.
+- Content is built entirely client-side from the event's own fields — squawk
+  meaning and the watch-list matched-field label are translated via a small
+  code → i18n-key lookup (`SQUAWK_MEANING_KEYS`/`WATCH_FIELD_KEYS`,
+  reusing the watch-list tab's own `watchType`/`watchRegistration`/
+  `watchFlight` strings), not sent as server-formatted English text — ntfy's
+  messages are English-only by design, this is a real localized UI surface.
+  `escapeHtml`'d before insertion (same stored-XSS reasoning as the map
+  popup/List/Stats — `HttpSource` is plain unauthenticated LAN HTTP).
 
 ## Smart home / MQTT integration
 

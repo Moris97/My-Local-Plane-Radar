@@ -59,6 +59,30 @@ export function isSidePanelLayout() {
   return window.matchMedia(SIDE_PANEL_LAYOUT_QUERY).matches;
 }
 
+// notifications-ui.js's own toast stack needs to know whenever #panel's
+// on-screen footprint changes -- its own explicit request is that the
+// stack "shift beside" the side panel on desktop rather than being covered
+// by it, which #fullscreen-modal (Stats, always full-width -- see the
+// PANELS/FULLSCREEN_MODALS split above) can't offer a "beside" for at all.
+// A plain listener-set, same shape as radar-state.js's onChange/
+// onHoverChange/settings-state.js's onSettingsChange -- not a ResizeObserver
+// on #panel, because relying on a size-change event firing reliably on a
+// display:none <-> visible transition across browsers is exactly the kind
+// of thing this codebase has been burned by guessing about before (see
+// CLAUDE.md's popup-focus saga: "verify this kind of interaction... don't
+// re-guess"). Called from every point below that actually changes #panel's
+// or #fullscreen-modal's visibility or width.
+const panelLayoutListeners = new Set();
+
+export function onPanelLayoutChange(fn) {
+  panelLayoutListeners.add(fn);
+  return () => panelLayoutListeners.delete(fn);
+}
+
+function notifyPanelLayoutChange() {
+  for (const fn of panelLayoutListeners) fn();
+}
+
 // Applies the persisted width (drag-to-resize, see below) as an inline
 // style -- only in the >=900px side-panel layout, where #panel has an
 // actual "width" to speak of; below that it's a full-width bottom sheet, and
@@ -81,7 +105,13 @@ function applySidePanelWidth() {
   panelEl.style.width = `${Math.min(maxWidth, getSettings().sidePanelWidth)}px`;
 }
 
-window.addEventListener('resize', applySidePanelWidth);
+// Also covers crossing the SIDE_PANEL_LAYOUT_QUERY breakpoint itself (a
+// desktop window resize, a tablet rotation) -- the toast stack's placement
+// depends on that breakpoint too, not just #panel's width within it.
+window.addEventListener('resize', () => {
+  applySidePanelWidth();
+  notifyPanelLayoutChange();
+});
 
 resizeHandleEl.addEventListener('pointerdown', (event) => {
   if (!isSidePanelLayout()) return;
@@ -105,6 +135,7 @@ resizeHandleEl.addEventListener('pointerdown', (event) => {
 
   function onMove(moveEvent) {
     panelEl.style.width = `${widthFor(moveEvent)}px`;
+    notifyPanelLayoutChange();
   }
 
   function onUp(upEvent) {
@@ -291,6 +322,7 @@ export async function openPanel(name) {
   applySidePanelWidth();
   overlayEl.classList.remove('hidden');
   setActiveBarButton(name);
+  notifyPanelLayoutChange();
   // Moves focus into the dialog immediately (not gated on the render below,
   // which can be async) -- standard modal-open behavior, and means a
   // keyboard/screen-reader user always lands somewhere inside it rather
@@ -319,6 +351,7 @@ function closePanel({ fromPopstate = false } = {}) {
   hidePanelUI();
   setActiveBarButton(null);
   restoreFocus();
+  notifyPanelLayoutChange();
 
   if (historyPushed) {
     historyPushed = false;
@@ -351,6 +384,7 @@ export async function openFullscreenModal(name) {
   modalEl.classList.toggle('mlpr-panel-fill', !!entry.fill);
   modalEl.setAttribute('aria-hidden', 'false');
   setActiveBarButton(name);
+  notifyPanelLayoutChange();
   modalCloseBtn.focus();
 
   if (!historyPushed) {
@@ -375,6 +409,7 @@ function closeFullscreenModal({ fromPopstate = false } = {}) {
   hideModalUI();
   setActiveBarButton(null);
   restoreFocus();
+  notifyPanelLayoutChange();
 
   if (historyPushed) {
     historyPushed = false;

@@ -55,8 +55,14 @@ rules.setNotifySender((topic, payload) => {
   return Promise.resolve();
 });
 
+let uiEvents;
+rules.setUiEventSender((event) => {
+  uiEvents.push(event);
+});
+
 beforeEach(async () => {
   sent = [];
+  uiEvents = [];
   resetCooldowns();
   rules.resetReceiverSilenceState();
   updateNotificationSettings({
@@ -733,4 +739,123 @@ test('overheadEnabled=false suppresses the smart-home event too, not just ntfy',
   setManualHome(HOME.lat, HOME.lon);
   rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
   assert.equal(fakeSmartHomeClient.published.length, 0);
+});
+
+// On-map toast/glow feature (v2.1.20). Two independent things to verify:
+// alertKinds (evaluateAircraftRules' return value, a live cooldown-
+// independent condition) and the UI events themselves (cooldown-gated,
+// same as the ntfy sends they sit next to).
+
+test('evaluateAircraftRules returns squawk in alertKinds regardless of cooldown', () => {
+  const aircraft = aircraftFixture({ squawk: '7700' });
+  const first = rules.evaluateAircraftRules(aircraft);
+  const second = rules.evaluateAircraftRules(aircraft); // on cooldown now
+  assert.deepEqual(first, ['squawk']);
+  assert.deepEqual(second, ['squawk']);
+});
+
+test('alertKinds is empty when the squawk condition is false', () => {
+  assert.deepEqual(rules.evaluateAircraftRules(aircraftFixture({ squawk: '1200' })), []);
+});
+
+test('alertKinds includes watched even while the notification itself is on cooldown', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  const aircraft = aircraftFixture({ typeCode: 'B738' });
+  const first = rules.evaluateAircraftRules(aircraft);
+  const second = rules.evaluateAircraftRules(aircraft);
+  assert.deepEqual(first, ['watched']);
+  assert.deepEqual(second, ['watched']);
+  // The underlying restructuring point: only one notification fired even
+  // though the match was evaluated (and reported via alertKinds) both times.
+  assert.equal(watchedNotifications().length, 1);
+});
+
+test('watchedEnabled=false means never in alertKinds, even for a matching aircraft', () => {
+  updateNotificationSettings({ watchedEnabled: false });
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  assert.deepEqual(rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738' })), []);
+});
+
+test('alertKinds can report both squawk and watched at once', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  const kinds = rules.evaluateAircraftRules(aircraftFixture({ typeCode: 'B738', squawk: '7700' }));
+  assert.deepEqual([...kinds].sort(), ['squawk', 'watched']);
+});
+
+test('squawk emits a UI event alongside the ntfy notification, not on the next (cooled-down) tick', () => {
+  const aircraft = aircraftFixture({ squawk: '7700', registration: 'SP-TEST' });
+  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft);
+  const events = uiEvents.filter((e) => e.kind === 'squawk');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, aircraft.hex);
+  assert.equal(events[0].aircraft.registration, 'SP-TEST');
+  assert.equal(events[0].squawk, '7700');
+  assert.equal(events[0].squawkMeaning, 'Emergency');
+});
+
+test('squawkEnabled=false suppresses the UI event too', () => {
+  updateNotificationSettings({ squawkEnabled: false });
+  rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700' }));
+  assert.equal(uiEvents.filter((e) => e.kind === 'squawk').length, 0);
+});
+
+test('first-seen emits a UI event once the delay elapses', () => {
+  const aircraft = aircraftFixture();
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 3000);
+  const events = uiEvents.filter((e) => e.kind === 'first_seen');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, aircraft.hex);
+});
+
+test('watchlist emits a UI event only when the notification actually fires, not every tick it matches', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  const aircraft = aircraftFixture({ typeCode: 'B738' });
+  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft); // on cooldown -- still in alertKinds, but no new event
+  const events = uiEvents.filter((e) => e.kind === 'watchlist');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].matchedType, 'type');
+  assert.equal(events[0].matchedValue, 'B738');
+});
+
+test('a range record with a known aircraft emits a UI event carrying it', () => {
+  // The in-memory record cache is module-level and not reset between tests
+  // in this file (see the 'resetAllTimeMaxRangeKm' test above for the
+  // mechanism) -- earlier tests have already pushed it well past any small
+  // number, so this resets to a known baseline first.
+  rules.resetAllTimeMaxRangeKm();
+  const aircraft = aircraftFixture({ hex: 'rangeholder', registration: 'SP-FAR' });
+  rules.evaluateRangeRecordRule(500, aircraft);
+  const events = uiEvents.filter((e) => e.kind === 'range_record');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, 'rangeholder');
+  assert.equal(events[0].aircraft.registration, 'SP-FAR');
+  assert.equal(events[0].rangeKm, 500);
+});
+
+test('a range record with no known aircraft (legacy call shape) still notifies but emits no UI event', () => {
+  rules.resetAllTimeMaxRangeKm();
+  rules.evaluateRangeRecordRule(500);
+  assert.equal(sent.some((n) => n.payload.title === 'New range record'), true);
+  assert.equal(uiEvents.filter((e) => e.kind === 'range_record').length, 0);
+});
+
+test('receiver silence emits a UI event with no hex/aircraft', () => {
+  const start = Date.now();
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  const events = uiEvents.filter((e) => e.kind === 'receiver_silence');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, undefined);
+  assert.equal(events[0].aircraft, undefined);
+  assert.equal(typeof events[0].hours, 'number');
+});
+
+test('overhead does not emit a UI event, even though it publishes to ntfy/smart-home', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
+  assert.equal(uiEvents.filter((e) => e.kind === 'overhead').length, 0);
 });

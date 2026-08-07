@@ -128,16 +128,30 @@ Added to as they come up; picked up in a later stage when relevant.
   existing 45s `daily_stats` flush rather than adding a new SD-writing path.
   Would want a retention cap (e.g. 90 days) and a simple timeline view
   somewhere in the UI. Proposed 2026-08-02.
-- **Emergency squawk banner/marker on the live map** (effort: small, impact:
-  medium, priority: low) — squawk 7500/7600/7700 today only reaches ntfy/
-  MQTT; the map itself looks completely normal, which is an odd gap for a
-  radar display specifically built to be watched. A banner across the top
-  of the map, a distinct marker treatment (the existing selection-glow
-  mechanism reused with a red/pulsing variant rather than a new technique),
-  and optionally a WebAudio-generated tone (no audio file, no dependency,
-  consistent with the rest of this app's "hand-write it, it's a few dozen
-  lines" bias) would all be cheap given the existing squawk-detection code
-  in `rules.js` already fires per aircraft per tick. Proposed 2026-08-02.
+- ~~**Emergency squawk banner/marker on the live map**~~ **Done, 2026-08-08
+  (v2.1.20) — and generalized well past the original ask.** Proposed
+  2026-08-02 as squawk-only; when picked up, the user explicitly widened it
+  to *every* rule that already sends a push notification (squawk,
+  first-seen, watchlist, range-record, receiver-silence), not just the
+  emergency case. Shipped as two coordinated pieces: on-map toast
+  notifications (`public/js/notifications-ui.js`, a dismissible card stack,
+  auto-dismissing after 30s but pausing while the tab is backgrounded, with
+  a `(N)` unread badge in the tab title) and a red marker glow reusing the
+  existing selection-glow *technique* in a new element/class (persistent
+  for squawk/watchlist, tied to the live condition; timed to the toast's
+  own 30s for first-seen/range-record) — see CLAUDE.md's Notification
+  engine section for the full design. **Not done**: the WebAudio-generated
+  tone from the original proposal — still open, see below.
+- **Audio alert tone for on-map notifications** (effort: small, impact:
+  low, priority: low) — the WebAudio-generated-tone half of the toast
+  notification idea above, deliberately left out of the 2026-08-08 build
+  (not requested when the toast feature was scoped). No audio file, no
+  dependency, consistent with this app's "hand-write it, it's a few dozen
+  lines" bias -- would need its own enabled/disabled setting (a home radar
+  app making unexpected sounds is exactly the kind of thing that should
+  default off or at least be easy to mute) and almost certainly a
+  same-tab-only guard (a browser tab left open in the background is a very
+  different situation from "recover attention right now").
 - **Major airports shown on the offline basemap** (effort: small, impact:
   medium, priority: low) — offline mode's Natural Earth layer
   (`scripts/fetch-mapdata.sh`, coastlines/borders/rivers/major cities) has
