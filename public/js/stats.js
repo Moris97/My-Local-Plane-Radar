@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { getLiveStats, getLiveAircraft, onChange } from './radar-state.js';
+import { getLiveStats, getLiveAircraft, onChange, isPositionStale } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import {
   renderLineChartSvg,
@@ -63,6 +63,20 @@ function persistRange(range) {
 }
 
 let currentRange = loadPersistedRange();
+
+// Bumped every time currentRange changes. Every range-scoped async draw
+// below captures it up front and abandons its own results if it changed
+// while a fetch was in flight -- otherwise a slow response for the range
+// you just left paints over the fast one for the range you just picked,
+// leaving the charts showing data that doesn't match the highlighted
+// selector button and nothing on screen saying so. Measured: with the 31d
+// response artificially delayed, clicking 31d then 7d ended with the
+// selector on "7d" and the 31d data drawn. Not theoretical on a Pi 3 --
+// the "all" range genuinely takes seconds on an established install, and
+// the 20s refresh timer fires independently of any click. Same guard the
+// registrations table already uses for its own search/sort/page requests;
+// the charts simply never got one.
+let rangeGeneration = 0;
 
 // Which view (doughnut or line-over-time) each of the two "most common"
 // charts is currently showing. Deliberately module-scoped like currentRange
@@ -168,11 +182,25 @@ function wireTooltipDismiss(wrapEl, hide) {
 // wrapper always tears down its previous wiring first.
 // Runs before each early return too, not just on the path that rewires --
 // a chart whose data drops to empty must still shed its previous listeners.
-const chartTooltipTeardowns = new WeakMap();
+//
+// A plain Map rather than a WeakMap specifically so it can be *enumerated*:
+// wireTooltipDismiss registers a listener on `document`, which unlike the
+// per-wrapper ones does not go away when the Stats view's DOM is thrown
+// out, so closing the panel has to actively tear every wiring down (see
+// teardownAllChartTooltips, called from renderStatsPanel's dispose).
+// Without that, each open leaked a document listener per chart, holding its
+// detached wrapper and tooltip alive with it -- measured growing by 2 on
+// every open/close cycle, unbounded over a long-lived tab.
+const chartTooltipTeardowns = new Map();
 
 function clearTooltipWiring(wrapEl) {
   chartTooltipTeardowns.get(wrapEl)?.();
   chartTooltipTeardowns.delete(wrapEl);
+}
+
+function teardownAllChartTooltips() {
+  for (const teardown of chartTooltipTeardowns.values()) teardown();
+  chartTooltipTeardowns.clear();
 }
 
 // Hover tooltip shared by every bucketed chart (line/area/bar): shows
@@ -601,7 +629,15 @@ export function renderStatsPanel(container) {
     // these tiles change shape as well as value (a different aircraft, a
     // different set of available chips, or the "no receiver location"
     // fallback), so there is no stable structure to write into.
-    const { nearest, farthest } = findNearestFarthest(aircraft, homeLocation);
+    // Stale positions excluded, the same way list.js's hasPosition does it:
+    // these tiles name a specific aircraft and give its distance, so an
+    // aircraft the map is no longer drawing (readsb still repeating a fix it
+    // stopped decoding) would be pointed at as "farthest right now" with
+    // nothing on the map at that spot. The filter is here rather than inside
+    // findNearestFarthest because geo.js is deliberately DOM/state-free and
+    // unit-tested as a pure module.
+    const positioned = aircraft.filter((a) => !isPositionStale(a.hex));
+    const { nearest, farthest } = findNearestFarthest(positioned, homeLocation);
     const emptyMessage = homeLocation ? t('noAircraftWithPosition') : t('homeNotConfiguredShort');
     const aircraftTilesHtml =
       aircraftTileHtml(t('tileNearest'), nearest, units, emptyMessage) +
@@ -620,6 +656,7 @@ export function renderStatsPanel(container) {
       btn.addEventListener('click', () => {
         if (currentRange === btn.dataset.range) return;
         currentRange = btn.dataset.range;
+        rangeGeneration += 1;
         persistRange(currentRange);
         drawRangeSelector();
         drawSummarySection();
@@ -730,7 +767,9 @@ export function renderStatsPanel(container) {
   }
 
   async function drawTopChart(kind, elId, legendId, countsUrl, labelFor, extractKey, forceRefresh = true) {
+    const generation = rangeGeneration;
     const counts = await fetchTopChartCounts(kind, countsUrl, currentRange, forceRefresh);
+    if (generation !== rangeGeneration) return;
     const view = chartView[kind];
 
     if (view === 'doughnut') {
@@ -747,6 +786,7 @@ export function renderStatsPanel(container) {
       `/api/stats/registrations-trend?range=${currentRange}&field=${field}&keys=${topKeys.map(encodeURIComponent).join(',')}`,
       [],
     );
+    if (generation !== rangeGeneration) return;
     drawLineTrend(elId, legendId, buckets, topKeys, labelFor);
   }
 
@@ -788,6 +828,7 @@ export function renderStatsPanel(container) {
   }
 
   async function drawCharts() {
+    const generation = rangeGeneration;
     for (const el of container.querySelectorAll('[id^="mlpr-chart-"]')) {
       loadingChartMessage(el);
     }
@@ -796,13 +837,16 @@ export function renderStatsPanel(container) {
     }
 
     const history = await fetchJson(`/api/stats/history?range=${currentRange}`, []);
+    if (generation !== rangeGeneration) return;
     drawAircraftCountChart(history);
     drawPositionChart(history);
 
     const newRegistrations = await fetchJson(`/api/stats/new-registrations?range=${currentRange}`, []);
+    if (generation !== rangeGeneration) return;
     drawNewRegistrationsChart(newRegistrations);
 
     await drawTypeChart();
+    if (generation !== rangeGeneration) return;
     await drawAirlineChart();
   }
 
@@ -813,11 +857,13 @@ export function renderStatsPanel(container) {
   // at all. Server endpoint takes the exact same range values as every
   // other stats fetch (see /api/stats/summary in server.js).
   async function drawSummarySection() {
+    const generation = rangeGeneration;
     const titleEl = container.querySelector('#mlpr-summary-title');
     if (titleEl) titleEl.textContent = t(RANGE_LABEL_KEYS[currentRange]);
 
     const { units } = getSettings();
     const summary = await fetchJson(`/api/stats/summary?range=${currentRange}`, null);
+    if (generation !== rangeGeneration) return;
     const tilesEl = container.querySelector('#mlpr-summary-tiles');
     if (!summary) {
       tilesEl.innerHTML = '';
@@ -1184,6 +1230,10 @@ export function renderStatsPanel(container) {
     unsubscribeAircraft();
     unsubscribeSettings();
     clearInterval(refreshTimer);
+    // The chart tooltips' own per-wrapper listeners die with the DOM, but
+    // their outside-tap listener lives on `document` and would not -- see
+    // chartTooltipTeardowns.
+    teardownAllChartTooltips();
     // Must be removed with the rest -- renderStatsPanel runs again on every
     // panel open, so a listener left behind would keep a closed panel's
     // stale closure alive and refetching on every future tab focus.

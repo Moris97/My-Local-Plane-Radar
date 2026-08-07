@@ -1425,7 +1425,25 @@ while the tooltip element they closed over was thrown away — measured
 growing 1 → 5 per wrapper over six range switches, each stale set still
 toggling `.active` on the live wrapper. Teardown must run *before* the
 empty-data early return too, or a chart whose data drops to empty keeps
-its old wiring.
+its old wiring. **Closing the Stats panel must tear every wiring down**
+(`teardownAllChartTooltips`, called from `renderStatsPanel`'s returned
+dispose; `chartTooltipTeardowns` is a plain `Map`, not a `WeakMap`, purely
+so it can be enumerated for this): the per-wrapper listeners die with the
+DOM, but the outside-tap one lives on `document` and does not, so each open
+otherwise leaked one per chart along with the detached wrapper/tooltip it
+held — measured growing by 2 per open/close cycle. Any future listener this
+code puts anywhere other than `wrapEl` needs the same treatment.
+
+**Every range-scoped async draw is guarded by `rangeGeneration`**
+(`drawCharts`, `drawSummarySection`, `drawTopChart`), bumped whenever
+`currentRange` changes: each captures it up front and abandons its results
+if it changed mid-fetch. Without it a slow response for the range you just
+left painted over the fast one for the range you just picked — measured with
+the 31d response delayed, clicking 31d then 7d ended with the selector on
+"7d" and 31d's data drawn, with nothing on screen saying so. Reachable for
+real (the `all` range takes seconds on an established install, and the 20s
+refresh timer fires independently of any click), and the same guard the
+registrations table already had for its own requests.
 `series` arrays gained a `label` field purely for tooltip row text — the
 separately-built legend HTML is untouched. Tooltip reuses whatever
 `formatValue`/`formatBucket` the chart itself used. Positioned from the
