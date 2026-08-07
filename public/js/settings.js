@@ -3,7 +3,7 @@ import { getSettings, updateSettings, ICON_SIZE_MIN, ICON_SIZE_MAX } from './set
 import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
-import { formatDistance } from './units.js';
+import { formatDistance, distanceUnitLabel, kmToDisplayDistance, displayDistanceToKm } from './units.js';
 import { openAreaEditor } from './area-editor.js';
 
 // Mirrors server/src/antenna-stats.js's ALTITUDE_BANDS, index for index --
@@ -222,6 +222,16 @@ function renderSettingsForm(container) {
           <label><input type="checkbox" id="mlpr-notif-watched"> ${t('watchlist')}</label>
           <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
           <label><input type="checkbox" id="mlpr-notif-receiversilence"> ${t('receiverSilenceAlert')}</label>
+          <div class="mlpr-checkbox-row">
+            <label><input type="checkbox" id="mlpr-notif-overhead"> ${t('overheadAlert')}</label>
+            <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('overheadAlertHint')}</span></button>
+          </div>
+          <div class="mlpr-notif-squawk-codes">
+            <label>${t('overheadRadius')}
+              <input type="number" id="mlpr-notif-overhead-radius" min="0" step="any">
+              <span id="mlpr-notif-overhead-radius-unit"></span>
+            </label>
+          </div>
         </fieldset>
 
         <!-- Directly under the "Watched aircraft" toggle it configures,
@@ -860,6 +870,9 @@ function wireNotificationToggles(container) {
   const notifWatchedEl = container.querySelector('#mlpr-notif-watched');
   const notifRangeRecordEl = container.querySelector('#mlpr-notif-rangerecord');
   const notifReceiverSilenceEl = container.querySelector('#mlpr-notif-receiversilence');
+  const notifOverheadEl = container.querySelector('#mlpr-notif-overhead');
+  const notifOverheadRadiusEl = container.querySelector('#mlpr-notif-overhead-radius');
+  container.querySelector('#mlpr-notif-overhead-radius-unit').textContent = distanceUnitLabel(getSettings().units);
 
   async function loadNotificationSettings() {
     const response = await fetch('/api/notifications/settings');
@@ -873,6 +886,14 @@ function wireNotificationToggles(container) {
     notifWatchedEl.checked = data.watchedEnabled;
     notifRangeRecordEl.checked = data.rangeRecordEnabled;
     notifReceiverSilenceEl.checked = data.receiverSilenceEnabled;
+    notifOverheadEl.checked = data.overheadEnabled;
+    // Stored/sent as canonical km (rules.js compares it directly against a
+    // Haversine result); displayed and edited in the user's own unit, same
+    // split as the trigger-area editor's own radius field. Not re-rendered
+    // on every keystroke -- only set here, on load -- so mid-typing input
+    // isn't fought over by a value the server hasn't confirmed yet.
+    const displayRadius = kmToDisplayDistance(data.overheadRadiusKm, getSettings().units);
+    notifOverheadRadiusEl.value = String(Math.round(displayRadius * 100) / 100);
   }
 
   async function putNotificationSettings(patch) {
@@ -899,6 +920,19 @@ function wireNotificationToggles(container) {
   notifReceiverSilenceEl.addEventListener('change', (event) =>
     putNotificationSettings({ receiverSilenceEnabled: event.target.checked }),
   );
+  notifOverheadEl.addEventListener('change', (event) =>
+    putNotificationSettings({ overheadEnabled: event.target.checked }),
+  );
+  // change, not input -- a radius typed digit-by-digit would otherwise PUT
+  // an incomplete value on every keystroke (the icon-size slider's own
+  // input-vs-change lesson, see CLAUDE.md's trail refetch note). Invalid/
+  // empty input is simply not sent rather than PUTting NaN/0 -- the last
+  // saved radius stays in effect until a valid one is entered.
+  notifOverheadRadiusEl.addEventListener('change', (event) => {
+    const typed = Number(event.target.value);
+    if (!Number.isFinite(typed) || typed <= 0) return;
+    putNotificationSettings({ overheadRadiusKm: displayDistanceToKm(typed, getSettings().units) });
+  });
 
   loadNotificationSettings();
 }

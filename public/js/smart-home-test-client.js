@@ -96,6 +96,13 @@ function currentFormValues() {
   // the server derives it (squawkMeaningFor) so this page can't disagree
   // with what the real rule would say.
   if (reason === 'squawk') aircraft.squawk = document.getElementById('f-squawk').value;
+  // Track is only ever meaningful for 'overhead' (azimuth/elevation come
+  // from lat/lon/altitude alone; only the ETA needs a course) -- omitted
+  // for every other reason so it doesn't show up as a stray field on an
+  // event type that never carries one.
+  if (reason === 'overhead' && document.getElementById('f-track').value) {
+    aircraft.track = Number(document.getElementById('f-track').value);
+  }
 
   const matchedEntry = reason === 'watchlist'
     ? { matchType: document.getElementById('f-matched-type').value, matchValue: document.getElementById('f-matched-value').value.trim() }
@@ -113,6 +120,14 @@ function updatePreview(topicPrefix) {
     // code->meaning table here; the server is what actually sets this field.
     const option = document.getElementById('f-squawk').selectedOptions[0];
     payload.squawkMeaning = option ? option.textContent.replace(/^\d+\s*\(|\)$/g, '') : null;
+  }
+  if (reason === 'overhead') {
+    // The real numbers (distanceKm/azimuthDeg/elevationDeg/etaSeconds/
+    // cpaDistanceKm) are computed server-side from the configured home
+    // location -- this page has no home location of its own to compute a
+    // preview from, so it shows a placeholder rather than a second,
+    // possibly-disagreeing implementation of the same geometry.
+    payload.overheadInfo = '(computed server-side from the configured home location)';
   }
   document.getElementById('payload-preview').textContent = JSON.stringify(payload, null, 2);
 }
@@ -133,6 +148,7 @@ function applyPreset(name) {
   document.getElementById('f-lon').value = preset.lon;
   document.getElementById('watchlist-fields').style.display = preset.reason === 'watchlist' ? '' : 'none';
   document.getElementById('squawk-fields').style.display = preset.reason === 'squawk' ? '' : 'none';
+  document.getElementById('overhead-fields').style.display = 'none'; // no preset targets 'overhead' yet
 }
 
 async function main() {
@@ -184,9 +200,10 @@ async function main() {
   document.getElementById('f-reason').addEventListener('change', (event) => {
     document.getElementById('watchlist-fields').style.display = event.target.value === 'watchlist' ? '' : 'none';
     document.getElementById('squawk-fields').style.display = event.target.value === 'squawk' ? '' : 'none';
+    document.getElementById('overhead-fields').style.display = event.target.value === 'overhead' ? '' : 'none';
     updatePreview(status.topicPrefix);
   });
-  for (const id of ['f-hex', 'f-flight', 'f-registration', 'f-typecode', 'f-altitude', 'f-speed', 'f-onground', 'f-lat', 'f-lon', 'f-matched-type', 'f-matched-value']) {
+  for (const id of ['f-hex', 'f-flight', 'f-registration', 'f-typecode', 'f-altitude', 'f-speed', 'f-onground', 'f-lat', 'f-lon', 'f-matched-type', 'f-matched-value', 'f-track']) {
     document.getElementById(id).addEventListener('input', () => updatePreview(status.topicPrefix));
   }
 

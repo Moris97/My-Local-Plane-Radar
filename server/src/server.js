@@ -34,7 +34,7 @@ import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
 import { getAllAirlinesSummary } from './db.js';
-import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor } from './notifications/rules.js';
+import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor, buildOverheadInfo } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats, getAntennaStatsRevision } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
 import { clearRangeSamples } from './stats-history.js';
@@ -545,13 +545,20 @@ export async function buildServer({ logger = true } = {}) {
     // toggle was added (2026-08-01), but every value silently never reached
     // updateNotificationSettings, so the checkbox had no effect. Found
     // 2026-08-02 while adding receiverSilenceEnabled to this same list.
-    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled', 'watchedEnabled', 'receiverSilenceEnabled']) {
+    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled', 'watchedEnabled', 'receiverSilenceEnabled', 'overheadEnabled']) {
       if (key in body) {
         if (typeof body[key] !== 'boolean') {
           return reply.code(400).send({ error: `${key} must be a boolean` });
         }
         patch[key] = body[key];
       }
+    }
+
+    if ('overheadRadiusKm' in body) {
+      if (typeof body.overheadRadiusKm !== 'number' || !Number.isFinite(body.overheadRadiusKm) || body.overheadRadiusKm <= 0) {
+        return reply.code(400).send({ error: 'overheadRadiusKm must be a positive number' });
+      }
+      patch.overheadRadiusKm = body.overheadRadiusKm;
     }
 
     if ('squawkCodes' in body) {
@@ -663,11 +670,11 @@ export async function buildServer({ logger = true } = {}) {
   // type left out becomes the one nobody can test -- which is exactly what
   // happened to 'squawk' when it was added as a third smart-home event
   // (2026-08-01) and this set wasn't updated with it.
-  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist', 'squawk']);
+  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist', 'squawk', 'overhead']);
   app.post('/api/notifications/smart-home/send-test-event', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     if (!VALID_TEST_EVENT_REASONS.has(body.reason)) {
-      return reply.code(400).send({ error: 'reason must be "first_seen", "watchlist" or "squawk"' });
+      return reply.code(400).send({ error: 'reason must be "first_seen", "watchlist", "squawk" or "overhead"' });
     }
     const aircraft = body.aircraft ?? {};
     if (!aircraft.hex) {
@@ -678,7 +685,21 @@ export async function buildServer({ logger = true } = {}) {
     // the same meaning the real rule would send for that code, and that
     // mapping belongs to rules.js.
     const squawkMeaning = body.reason === 'squawk' ? squawkMeaningFor(aircraft.squawk) : undefined;
-    const sent = publishSmartHomeEvent({ reason: body.reason, aircraft, matchedEntry: body.matchedEntry, squawkMeaning });
+    // Same reasoning as squawkMeaning above: az/el/ETA are real geometry
+    // computed from home + the aircraft's own position/track/speed, not
+    // something a test form should get to assert on its own. Needs a real
+    // home location and a real aircraft position -- if either is missing,
+    // send the event without it rather than failing the whole test (every
+    // other field still round-trips, which is enough to confirm the broker
+    // connection and topic are working).
+    let overheadInfo;
+    if (body.reason === 'overhead') {
+      const home = getEffectiveHome();
+      if (home && typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+        overheadInfo = buildOverheadInfo(home, aircraft);
+      }
+    }
+    const sent = publishSmartHomeEvent({ reason: body.reason, aircraft, matchedEntry: body.matchedEntry, squawkMeaning, overheadInfo });
     return { sent, enabled: getSmartHomeSettings().enabled, connected: isSmartHomeConnected() };
   });
 

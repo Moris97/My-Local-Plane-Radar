@@ -24,6 +24,20 @@ const DEFAULT_SETTINGS = {
   // defaults true like every other rule here, so an install that's never
   // touched this setting still gets the safety net.
   receiverSilenceEnabled: true,
+  // Overhead-proximity alert (rules.js's evaluateOverheadRule) -- unlike
+  // every rule above, this defaults to FALSE. Squawk/first-seen/watchlist/
+  // silence all fire on something rare (an emergency, a genuinely new
+  // aircraft, an explicit watch, an outage); this fires on plain proximity
+  // to a fixed point, with no watch-list-style filter narrowing it down --
+  // an install near a flight path, a GA circuit, or an approach corridor
+  // could see this fire many times a day. An install upgrading to the
+  // version that adds this should not suddenly get a burst of new
+  // notifications it never asked for; the radius is also this install's own
+  // call to make (an airport-adjacent receiver needs a smaller radius than
+  // one in open countryside), so there is no sane default distance to
+  // silently start firing at either.
+  overheadEnabled: false,
+  overheadRadiusKm: 2,
 };
 
 export function getNotificationSettings() {

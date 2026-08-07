@@ -119,6 +119,10 @@ const DICTIONARIES = {
     firstSeen: 'First time seen aircraft',
     rangeRecord: 'New range record',
     receiverSilenceAlert: 'Receiver silent for 1h+',
+    overheadAlert: 'Nearby aircraft alert',
+    overheadAlertHint:
+      "Notifies whenever any aircraft comes within the radius below of the receiver's location, with direction (azimuth/elevation) and, when its course/speed say something useful, an ETA to its closest approach. Off by default: unlike the other rules above, this fires on plain proximity with no filter narrowing it down, so an install near a flight path or an airport could see it fire often -- pick a radius that suits where you are before turning it on.",
+    overheadRadius: 'Radius',
     ntfyInstructions: 'To receive push notifications, install the ntfy app and enter this code as the topic:',
     regenerateTopic: 'Generate new code',
     watchlist: 'Watched aircraft',
@@ -435,6 +439,10 @@ const DICTIONARIES = {
     firstSeen: 'Pierwszy raz widziany samolot',
     rangeRecord: 'Nowy rekord zasięgu',
     receiverSilenceAlert: 'Cisza odbiornika przez ponad 1h',
+    overheadAlert: 'Alert o pobliskim samolocie',
+    overheadAlertHint:
+      'Powiadamia, gdy jakikolwiek samolot znajdzie się w podanym promieniu od lokalizacji odbiornika, wraz z kierunkiem (azymut/kąt elewacji) oraz -- gdy kurs i prędkość na to pozwalają -- przewidywanym czasem do najbliższego przelotu. Domyślnie wyłączone: w odróżnieniu od powyższych reguł, ta reaguje na samą bliskość, bez żadnego filtra -- instalacja blisko trasy przelotów lub lotniska może dostawać powiadomienia bardzo często. Dobierz promień odpowiedni dla swojej lokalizacji przed włączeniem.',
+    overheadRadius: 'Promień',
     ntfyInstructions: 'Aby otrzymywać powiadomienia push, zainstaluj aplikację ntfy i wpisz ten kod jako temat:',
     regenerateTopic: 'Wygeneruj nowy kod',
     watchlist: 'Lista obserwowanych',

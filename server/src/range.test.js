@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { distanceKm, bearingDegrees, destinationPoint, isRangeEligible } from './range.js';
+import { distanceKm, bearingDegrees, destinationPoint, isRangeEligible, closestApproach } from './range.js';
 
 function assertClose(actual, expected, tolerance) {
   assert.ok(
@@ -116,4 +116,58 @@ test('isRangeEligible rejects MLAT and every other non-ADS-B sourceType', () => 
 test('isRangeEligible rejects a missing/undefined sourceType', () => {
   assert.equal(isRangeEligible(undefined), false);
   assert.equal(isRangeEligible(null), false);
+});
+
+const HOME = { lat: 50.0, lon: 20.0 };
+
+test('closestApproach: flying straight toward home gives ~0 CPA distance and eta = distance/speed', () => {
+  // destinationPoint(home, 90, 5) puts the aircraft exactly 5 km due east of
+  // home -- heading due west (270) is then heading exactly back at home,
+  // giving a closed-form expected answer independent of closestApproach's
+  // own internals.
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 90, 5);
+  const speedKt = 100;
+  const speedKmh = speedKt * 1.852; // 1 kt = 1.852 km/h, the nautical-mile definition
+  const result = closestApproach(HOME.lat, HOME.lon, lat, lon, 270, speedKt);
+  assert.ok(result, 'expected a real closest-approach result');
+  assertClose(result.etaSeconds, (5 / speedKmh) * 3600, 0.5);
+  assertClose(result.cpaDistanceKm, 0, 0.01);
+});
+
+test('closestApproach: a 45-degree grazing pass matches the closed-form right-triangle answer', () => {
+  // Aircraft placed northwest of home (bearing 315) at distance D, flying
+  // due east (90) -- crosses "north of home" perpendicular to the bearing
+  // to home, so by symmetry the closest point is D*sin(45) away, reached
+  // after covering D*cos(45) of its own track. Independent of the
+  // implementation: plain right-triangle trigonometry.
+  const D = 4;
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 315, D);
+  const speedKt = 120;
+  const speedKmh = speedKt * 1.852;
+  const result = closestApproach(HOME.lat, HOME.lon, lat, lon, 90, speedKt);
+  assert.ok(result);
+  const leg = D * Math.sin((45 * Math.PI) / 180);
+  assertClose(result.cpaDistanceKm, leg, 0.02);
+  assertClose(result.etaSeconds, (leg / speedKmh) * 3600, 1);
+});
+
+test('closestApproach returns null when the aircraft is flying away from home', () => {
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 90, 5);
+  // Due east of home, continuing east -- receding, not approaching.
+  assert.equal(closestApproach(HOME.lat, HOME.lon, lat, lon, 90, 100), null);
+});
+
+test('closestApproach returns null with no track', () => {
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 90, 5);
+  assert.equal(closestApproach(HOME.lat, HOME.lon, lat, lon, undefined, 100), null);
+});
+
+test('closestApproach returns null with no ground speed', () => {
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 90, 5);
+  assert.equal(closestApproach(HOME.lat, HOME.lon, lat, lon, 270, undefined), null);
+});
+
+test('closestApproach returns null for a stationary aircraft (ground speed 0)', () => {
+  const { lat, lon } = destinationPoint(HOME.lat, HOME.lon, 90, 5);
+  assert.equal(closestApproach(HOME.lat, HOME.lon, lat, lon, 270, 0), null);
 });

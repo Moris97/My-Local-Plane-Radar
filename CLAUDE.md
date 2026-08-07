@@ -968,6 +968,58 @@ own enabled/disabled toggle. **Squawk and watch-list both have a per-hex
 cooldown** (first-seen and range-record are naturally one-shot per
 hex/record already).
 
+**Overhead-proximity alert** (`overheadEnabled`/`overheadRadiusKm`,
+v2.1.19): fires once per cooldown for **any** aircraft within
+`overheadRadiusKm` (default 2 km) of the effective home location — the one
+rule with no watch-list-style filter at all, purely distance-gated. **The
+only rule here that defaults off** (`overheadEnabled: false`): every other
+rule fires on something rare (an emergency, a genuinely new aircraft, an
+explicit watch, an outage); this fires on plain proximity to a fixed point,
+so an install near a flight path, a GA circuit, or an approach corridor
+could see it fire many times a day, and there's no sane default radius
+either (airport-adjacent vs. open-countryside receivers want very different
+numbers). An install upgrading to this version must not suddenly get a
+burst of new notifications it never asked for. Gated first on a position
+being known, then on a home location being configured, before paying for
+any distance math — a Mode-S-only contact can never be "nearby" under this
+rule's own terms.
+
+Message carries azimuth (always, once inside the radius — the "where to
+look" the rule exists for), elevation (when altitude is known — `onGround`
+counts as 0), and an ETA to closest approach (only when the aircraft's own
+course/speed say something real about the future — see below), appended
+after `aircraftLabel`'s usual identity/altitude/speed with the same " · "
+join style. Title is a fixed `'Nearby aircraft'`, not dynamic per-ETA, to
+keep the message the one place with numbers that could be wrong/missing.
+
+`range.js`'s `closestApproach(homeLat, homeLon, lat, lon, trackDeg,
+groundSpeedKt)` is the actual geometry: resolves the aircraft's position
+relative to home into a local east/north plane in km (via the already-exact
+`distanceKm`/`bearingDegrees` — flat-earth error is meaningless at the few-
+km distances this rule ever operates at), then standard closest-point-of-
+approach algebra on `position(t) = p0 + v·t`. Returns `null` — not a stale
+or negative ETA — whenever there's nothing forward-looking to say: no
+track/speed to project from, stationary, or the closest point on the
+current course already lies in the past (already receding, or was already
+at its closest as of this exact fix). The rule's own trigger condition is
+still just "closer than `overheadRadiusKm` right now" — `closestApproach`
+only supplies the *bonus* ETA/CPA-distance in the message, it is not what
+decides whether this notifies at all.
+
+`rules.js`'s exported `buildOverheadInfo(home, aircraft)` computes the full
+`{distanceKm, azimuthDeg, elevationDeg, etaSeconds, cpaDistanceKm}` shape
+once, shared by the real rule and by `/dev/smart-home-test`'s
+`send-test-event` route (server.js) — same "derived server-side, not taken
+from the client" reasoning `squawkMeaningFor` already established for
+squawk test events, so the dev page can't disagree with what a real event
+would carry. Wired to smart-home like first-seen/watchlist/squawk
+(`publishSmartHomeEvent({reason: 'overhead', aircraft, overheadInfo})`,
+`smart-home.js` merges `overheadInfo` into the payload when present, same
+`if (matchedEntry)`-style presence check rather than a reason string
+check) — a discrete per-aircraft occurrence like watchlist, not an
+aggregate figure like range-record, so it belongs in scope by the same
+rule CLAUDE.md's Smart Home section already documents.
+
 **Receiver-silence watchdog** (`evaluateReceiverSilenceRule`): fires on the
 *absence* of any aircraft at all — a receiver health check, unlike every
 other rule which fires on presence of some condition. Called once per poll
@@ -1111,12 +1163,17 @@ mention it if the user is surprised by a notification burst after setup.
 
 A **third**, independent notification channel alongside ntfy: ntfy wants
 human-readable title/message for a push notification, this wants
-machine-readable JSON for a home-automation rule engine. Wired to three of
-`rules.js`'s four notification rules — first-seen, watch-list, and squawk
+machine-readable JSON for a home-automation rule engine. Wired to four of
+`rules.js`'s notification rules — first-seen, watch-list, squawk
 7500/7600/7700 (added later, same cooldown-gated block as the ntfy squawk
-notification, payload adds `squawk`/`squawkMeaning`). Range records remain
-deliberately out of scope (a single pre-aggregated number, not a discrete
-per-aircraft occurrence).
+notification, payload adds `squawk`/`squawkMeaning`), and overhead-proximity
+(v2.1.19, payload adds `distanceKm`/`azimuthDeg`/`elevationDeg`/
+`etaSeconds`/`cpaDistanceKm` — see the Notification engine section for what
+each means; a fit for a "flash the lights"/"slew a camera" automation since
+it's the one rule that already computes direction). Range records and the
+receiver-silence watchdog remain deliberately out of scope — a single
+pre-aggregated number and a health check respectively, neither a discrete
+per-aircraft occurrence.
 
 **Hand-rolled MQTT client (`server/src/notifications/mqtt-client.js`), not
 the `mqtt` npm package** — deliberated with the user first. MLPR only ever

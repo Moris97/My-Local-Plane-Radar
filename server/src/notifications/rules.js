@@ -5,7 +5,8 @@ import { isOnCooldown, markNotified } from './cooldown.js';
 import { sendNtfyNotification } from './ntfy.js';
 import { getWatchList } from './watchlist.js';
 import { publishSmartHomeEvent } from './smart-home.js';
-import { distanceKm, destinationPoint } from '../range.js';
+import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm } from '../range.js';
+import { getEffectiveHome } from '../home.js';
 
 // Exported as a function rather than the raw table so the "unknown code"
 // fallback lives in one place -- /dev/smart-home-test needs the same
@@ -174,6 +175,59 @@ function aircraftLabel(aircraft) {
   return parts.join(' · ');
 }
 
+const FT_TO_KM = 0.0003048;
+
+// Angle above the horizon to look, from the receiver's own position --
+// altBaro is barometric altitude above sea level, not height above the
+// receiver specifically, same approximation this codebase already makes
+// everywhere else altitude is used (the altitude filter, colorForAltitude,
+// etc.) rather than something new invented for this rule. null (not 0) when
+// there's nothing to compute from, so the caller can tell "no data" apart
+// from "level with the horizon".
+function elevationDegrees(aircraft, distanceKmValue) {
+  const altitudeFt = aircraft.onGround ? 0 : aircraft.altBaro;
+  if (typeof altitudeFt !== 'number') return null;
+  // atan2, not atan(alt/dist), specifically so a near-zero horizontal
+  // distance (an aircraft essentially straight overhead) still resolves to
+  // ~90° instead of a division blowing up.
+  return (Math.atan2(altitudeFt * FT_TO_KM, distanceKmValue) * 180) / Math.PI;
+}
+
+// The same {distanceKm, azimuthDeg, elevationDeg, etaSeconds, cpaDistanceKm}
+// shape both evaluateAircraftRules below and /dev/smart-home-test's
+// send-test-event route need (server.js) -- exported so the dev page's test
+// event carries genuinely-computed numbers instead of the client inventing
+// its own, same reasoning as squawkMeaningFor being derived server-side
+// rather than sent from the form.
+export function buildOverheadInfo(home, aircraft) {
+  const distanceKmValue = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
+  const azimuthDeg = bearingDegrees(home.lat, home.lon, aircraft.lat, aircraft.lon);
+  const elevationDeg = elevationDegrees(aircraft, distanceKmValue);
+  const closest = closestApproach(home.lat, home.lon, aircraft.lat, aircraft.lon, aircraft.track, aircraft.gs);
+  return {
+    distanceKm: roundKm(distanceKmValue),
+    azimuthDeg: Math.round(azimuthDeg),
+    elevationDeg: elevationDeg === null ? null : Math.round(elevationDeg),
+    etaSeconds: closest ? Math.round(closest.etaSeconds) : null,
+    cpaDistanceKm: closest ? roundKm(closest.cpaDistanceKm) : null,
+  };
+}
+
+// Azimuth (where to look) and, when the aircraft's course/speed say
+// something useful, an ETA to its closest approach -- appended after
+// aircraftLabel's own identity/altitude/speed rather than replacing any of
+// it, same " · " join style throughout this file. "closest in Ns" is
+// omitted whenever buildOverheadInfo found nothing to report (no track/
+// speed, stationary, or already receding) rather than shown as a stale/
+// negative number -- see closestApproach's own doc comment (range.js) for
+// exactly which cases that covers.
+function overheadDetail(aircraft, overheadInfo) {
+  const parts = [aircraftLabel(aircraft), `${overheadInfo.azimuthDeg}° az`];
+  if (overheadInfo.elevationDeg !== null) parts.push(`${overheadInfo.elevationDeg}° elev`);
+  if (overheadInfo.etaSeconds !== null) parts.push(`closest in ${overheadInfo.etaSeconds}s`);
+  return parts.join(' · ');
+}
+
 // `now` is injectable (defaults to the real clock) purely so tests can
 // exercise FIRST_SEEN_DELAY_MS deterministically without real waits or
 // fake timers -- index.js's only call site never passes it.
@@ -232,6 +286,35 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
         tags: ['eyes'],
       });
       publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
+    }
+  }
+
+  // Presence-based like squawk/watchlist above (fires once per cooldown
+  // while the condition holds), but the condition is plain distance from
+  // home rather than a flagged/watched aircraft -- so this is gated first
+  // on the position actually being known (a Mode-S-only contact can't be
+  // "nearby" in any sense this rule can measure) and on a home location
+  // being configured at all, before paying for a distance calculation.
+  if (
+    settings.overheadEnabled &&
+    typeof aircraft.lat === 'number' &&
+    typeof aircraft.lon === 'number' &&
+    !isOnCooldown('overhead', aircraft.hex)
+  ) {
+    const home = getEffectiveHome();
+    if (home) {
+      const distanceKmValue = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
+      if (distanceKmValue <= settings.overheadRadiusKm) {
+        markNotified('overhead', aircraft.hex);
+        const overheadInfo = buildOverheadInfo(home, aircraft);
+        notify({
+          title: 'Nearby aircraft',
+          message: overheadDetail(aircraft, overheadInfo),
+          priority: 4,
+          tags: ['airplane'],
+        });
+        publishSmartHomeEvent({ reason: 'overhead', aircraft, overheadInfo });
+      }
     }
   }
 }

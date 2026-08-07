@@ -87,3 +87,50 @@ export function destinationPoint(lat, lon, bearingDeg, distanceKm) {
   const lon2Deg = ((((toDegrees(lon2) + 180) % 360) + 360) % 360) - 180;
   return { lat: toDegrees(lat2), lon: lon2Deg };
 }
+
+const KM_PER_KT = 1.852; // 1 knot = 1 nautical mile/hour, exactly
+
+// For the overhead-proximity notification (rules.js): given an aircraft's
+// current position, course and ground speed, when and how close will it
+// come to `home`, assuming it holds that course? Aircraft close enough to
+// trigger this rule are within a few km of home, well inside the range
+// where treating the local patch of Earth as flat introduces no error this
+// use case could ever notice -- so position relative to home is resolved
+// once via distanceKm/bearingDegrees (both already exact) into a local
+// east/north plane in km, and the rest is plane closest-point-of-approach
+// algebra: position(t) = p0 + v*t, minimize |position(t)|^2 over t.
+//
+// Returns null, not a stale/negative ETA, when there is nothing meaningful
+// to report: no track/speed to project from, sitting still, or the closest
+// point on the current course already lies in the past (the aircraft is
+// moving away, or was already at its closest as of this fix). The caller's
+// job is deciding what "nothing to report" means for its message -- this
+// only ever answers "is there a real future closest approach, and if so
+// when/where".
+export function closestApproach(homeLat, homeLon, lat, lon, trackDeg, groundSpeedKt) {
+  if (typeof trackDeg !== 'number' || typeof groundSpeedKt !== 'number' || groundSpeedKt <= 0) return null;
+
+  const bearing = toRadians(bearingDegrees(homeLat, homeLon, lat, lon));
+  const distance = distanceKm(homeLat, homeLon, lat, lon);
+  const x = distance * Math.sin(bearing); // km east of home
+  const y = distance * Math.cos(bearing); // km north of home
+
+  const track = toRadians(trackDeg);
+  const speedKmh = groundSpeedKt * KM_PER_KT;
+  const vx = speedKmh * Math.sin(track);
+  const vy = speedKmh * Math.cos(track);
+
+  // t minimizing (x+vx*t)^2 + (y+vy*t)^2 -- the standard closest-point-of-
+  // approach result, derivative set to zero. Denominator is speedKmh^2,
+  // already guaranteed > 0 by the groundSpeedKt check above.
+  const etaHours = -(x * vx + y * vy) / (vx * vx + vy * vy);
+  if (etaHours <= 0) return null;
+
+  const cpaX = x + vx * etaHours;
+  const cpaY = y + vy * etaHours;
+
+  return {
+    etaSeconds: etaHours * 3600,
+    cpaDistanceKm: Math.sqrt(cpaX * cpaX + cpaY * cpaY),
+  };
+}

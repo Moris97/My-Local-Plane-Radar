@@ -166,12 +166,14 @@ Added to as they come up; picked up in a later stage when relevant.
   Simple detection: cumulative heading change past 360° while the trail's
   centroid barely moves. Catches events that would otherwise go unnoticed.
   Requested 2026-07-28.
-- **Overhead-proximity alert** (effort: small, impact: high, priority: low)
-  — a distinct notification category from the existing watch list: any
-  aircraft within e.g. 2 km of the receiver, with an ETA computed from its
-  current course/speed ("overhead in 40s — Boeing 737, 3200 ft"), giving
-  enough warning to actually step outside and look. Could also report
-  elevation angle and azimuth (where to look). Requested 2026-07-28.
+- ~~**Overhead-proximity alert**~~ **Done, 2026-08-07 (v2.1.19).** A new
+  `overheadEnabled`/`overheadRadiusKm` notification rule
+  (`rules.js`'s `evaluateAircraftRules`, `settings.js`) fires once per
+  cooldown for any aircraft within the configured radius (default 2 km) of
+  the receiver's effective home location, message carrying azimuth,
+  elevation (when altitude is known) and an ETA to closest approach (when
+  course/speed say something useful) — see CLAUDE.md's Notification engine
+  section for the full geometry and default-off reasoning.
 - **Altitude/speed-over-time chart in the aircraft details panel** (effort:
   small, impact: medium, priority: low) — a small time-series chart for the
   selected/inspected aircraft showing climb/cruise/step-down descent.

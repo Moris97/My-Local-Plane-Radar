@@ -98,7 +98,7 @@ function aircraftFields(aircraft) {
 // exists but the broker connection is currently down" alike. Used by
 // /dev/smart-home-test (see server.js) to tell a real user whether their
 // test event went anywhere, not just fire-and-forget silently.
-export function publishSmartHomeEvent({ reason, aircraft, matchedEntry, squawkMeaning }) {
+export function publishSmartHomeEvent({ reason, aircraft, matchedEntry, squawkMeaning, overheadInfo }) {
   const settings = getSmartHomeSettings();
   if (!settings.enabled || !client) return false;
 
@@ -111,6 +111,12 @@ export function publishSmartHomeEvent({ reason, aircraft, matchedEntry, squawkMe
     payload.matchedType = matchedEntry.matchType;
     payload.matchedValue = matchedEntry.matchValue;
   }
+  // Already fully computed by rules.js (it needed the same numbers for the
+  // ntfy message) -- merged as-is rather than recomputed here, so an HA
+  // automation reacting to "plane overhead" (flash a light, slew a camera)
+  // gets the same azimuth/elevation/ETA a person reading the notification
+  // sees, not a second, independently-derived version of it.
+  if (overheadInfo) Object.assign(payload, overheadInfo);
   if (reason === 'squawk') {
     // aircraft.squawk itself isn't part of aircraftFields() (no other event
     // needs it) -- included here, plus the human-readable meaning

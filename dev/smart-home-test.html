@@ -85,8 +85,21 @@
           <option value="first_seen">first_seen</option>
           <option value="watchlist">watchlist</option>
           <option value="squawk">squawk</option>
+          <option value="overhead">overhead</option>
         </select>
       </label>
+      <!-- azimuth/elevation/ETA are computed server-side from the receiver's
+           configured home location plus this aircraft's own lat/lon/track,
+           same reasoning as squawkMeaning above -- this page supplies the
+           inputs to that computation (including the extra "Track" field
+           below, which no other reason needs), not the computed numbers
+           themselves. If no home location is configured, or lat/lon are
+           left blank, the event still sends -- just without those fields,
+           same as a real overhead event would omit an ETA it can't compute. -->
+      <div id="overhead-fields" style="display:none">
+        <p class="hint">Requires a receiver location configured in Settings → Server, and this aircraft's Lat/Lon below, to compute direction/ETA.</p>
+        <label>Track (° true, optional -- needed only for an ETA) <input type="number" id="f-track" min="0" max="359"></label>
+      </div>
       <!-- Only the emergency codes rules.js actually notifies on: firing a
            test event for a code the real rule would ignore would be testing
            something that can never happen. The human-readable meaning is

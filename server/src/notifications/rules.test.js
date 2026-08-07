@@ -13,6 +13,7 @@ const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
 const { setConfigJSON, getConfig, setConfig } = await import('../db.js');
 const { hasSeenAircraft } = await import('../aircraft-tracked.js');
+const { setManualHome, clearManualHome } = await import('../home.js');
 const smartHome = await import('./smart-home.js');
 
 after(() => {
@@ -65,7 +66,10 @@ beforeEach(async () => {
     rangeRecordEnabled: true,
     watchedEnabled: true,
     receiverSilenceEnabled: true,
+    overheadEnabled: false,
+    overheadRadiusKm: 2,
   });
+  clearManualHome();
   const { updateSmartHomeSettings } = await import('./settings.js');
   smartHome.shutdownSmartHome(); // force a fresh client each test, regardless of whether settings actually changed
   updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://test-broker:1883', topicPrefix: 'mlpr' });
@@ -606,5 +610,127 @@ test('squawkEnabled=false suppresses the smart-home event too, not just ntfy', (
 
 test('a range record does NOT publish a smart-home event (deliberately out of scope)', () => {
   rules.evaluateRangeRecordRule(9999);
+  assert.equal(fakeSmartHomeClient.published.length, 0);
+});
+
+// Overhead-proximity alert. Placeholder coordinates only, same rule as
+// AREA_CENTRE above. 0.01 deg of latitude is ~1.11 km -- fine-grained
+// enough for the small (default 2 km) radius this rule actually uses.
+const HOME = { lat: 50.0, lon: 20.0 };
+
+function overheadNotifications() {
+  return sent.filter((n) => n.payload.title === 'Nearby aircraft');
+}
+
+test('disabled by default: no notification even directly over home', () => {
+  setManualHome(HOME.lat, HOME.lon);
+  // overheadEnabled: false is what beforeEach already sets -- this is
+  // exercising that default, not overriding it.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: HOME.lat, lon: HOME.lon }));
+  assert.equal(overheadNotifications().length, 0);
+});
+
+test('enabled but no home location configured: never fires, however close', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  // No setManualHome() call -- getEffectiveHome() returns null in this test
+  // environment (no receiver.json auto-detection either).
+  rules.evaluateAircraftRules(aircraftFixture({ lat: HOME.lat, lon: HOME.lon }));
+  assert.equal(overheadNotifications().length, 0);
+});
+
+test('an aircraft with no position never matches, regardless of settings', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture());
+  assert.equal(overheadNotifications().length, 0);
+});
+
+test('fires for an aircraft inside the configured radius', () => {
+  updateNotificationSettings({ overheadEnabled: true, overheadRadiusKm: 2 });
+  setManualHome(HOME.lat, HOME.lon);
+  // ~1.1 km north of home, inside a 2 km radius.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
+  assert.equal(overheadNotifications().length, 1);
+});
+
+test('does not fire for an aircraft outside the configured radius', () => {
+  updateNotificationSettings({ overheadEnabled: true, overheadRadiusKm: 2 });
+  setManualHome(HOME.lat, HOME.lon);
+  // ~5.5 km north of home, outside a 2 km radius.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.05, lon: 20.0 }));
+  assert.equal(overheadNotifications().length, 0);
+});
+
+test('a wider radius catches an aircraft a narrower one would miss', () => {
+  updateNotificationSettings({ overheadEnabled: true, overheadRadiusKm: 10 });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.05, lon: 20.0 }));
+  assert.equal(overheadNotifications().length, 1);
+});
+
+test('respects the per-hex cooldown', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  const aircraft = aircraftFixture({ lat: 50.01, lon: 20.0 });
+  rules.evaluateAircraftRules(aircraft);
+  rules.evaluateAircraftRules(aircraft);
+  assert.equal(overheadNotifications().length, 1);
+});
+
+test('message reports azimuth and omits ETA/elevation when track/speed/altitude are unavailable', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  // Due north of home -- a clean, unambiguous azimuth to assert on.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
+  const message = overheadNotifications()[0].payload.message;
+  assert.ok(message.includes('0° az'), message);
+  assert.ok(!message.includes('elev'), message);
+  assert.ok(!message.includes('closest in'), message);
+});
+
+test('message includes an ETA when the aircraft is heading toward home', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  // Due north of home, heading due south (180) -- straight toward it.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0, track: 180, gs: 100 }));
+  const message = overheadNotifications()[0].payload.message;
+  assert.ok(/closest in \d+s/.test(message), message);
+});
+
+test('message includes elevation when altitude is available', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0, altBaro: 3000 }));
+  const message = overheadNotifications()[0].payload.message;
+  assert.ok(/\d+° elev/.test(message), message);
+});
+
+test('an aircraft heading away from home gets an azimuth but no ETA', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  // Due north of home, continuing further north (track 0) -- receding.
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0, track: 0, gs: 100 }));
+  const message = overheadNotifications()[0].payload.message;
+  assert.ok(message.includes('0° az'), message);
+  assert.ok(!message.includes('closest in'), message);
+});
+
+test('publishes a smart-home event with the computed geometry', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0, track: 180, gs: 100, altBaro: 3000 }));
+
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/overhead');
+  assert.equal(events.length, 1);
+  const { payload } = events[0];
+  assert.equal(payload.azimuthDeg, 0);
+  assert.equal(typeof payload.elevationDeg, 'number');
+  assert.equal(typeof payload.etaSeconds, 'number');
+  assert.equal(typeof payload.distanceKm, 'number');
+});
+
+test('overheadEnabled=false suppresses the smart-home event too, not just ntfy', () => {
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
   assert.equal(fakeSmartHomeClient.published.length, 0);
 });
