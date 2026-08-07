@@ -305,20 +305,39 @@ falls back to "first aircraft," deliberately out of scope for this fix.
     Default `AttributionControl` disabled; custom `#mlpr-attribution` div
     with a "MapLibre" credit (always shown) and `#mlpr-osm-attribution`
     (shown only while effectively online), toggled by
-    `updateAttributionVisibility()`. Required exact text per OpenFreeMap's
-    docs: "OpenFreeMap © OpenMapTiles Data from OpenStreetMap" (each name
-    individually linked — three separate parties, not just OSM).
+    `updateAttributionVisibility()`. Text: "OpenFreeMap © OpenMapTiles ©
+    OpenStreetMap contributors" (each name individually linked — three
+    separate parties, not just OSM). **This deviates by one phrase from
+    OpenFreeMap's own snippet** ("… Data from OpenStreetMap"), deliberately
+    and after checking both sources directly (2026-08-07): OSMF's attribution
+    guideline lists "© OpenStreetMap contributors" verbatim as an acceptable
+    form, OpenFreeMap requires the OpenMapTiles/OpenStreetMap credit but
+    specifies no wording OSMF doesn't already allow, and the recognisable
+    form was preferred. Both were compliant — this was a readability call,
+    not a fix. **The OpenStreetMap link must stay pointed at
+    `/copyright`**: that is what satisfies OSMF's *separate* requirement
+    that the attribution "make it clear that the data is available under the
+    Open Database License", which no wording of the credit itself covers.
     `#mlpr-attribution` needs its own explicit `color` (plain text sits
     between links, unlike an all-link version that never needed one).
     MapLibre GL JS itself (BSD-3-Clause) does **not** legally require an
     on-map credit, included anyway per request. Offline mode needs no data
     attribution.
-    Position: bottom-left (`bottom: 6px`) on screens `>=720px`; below that,
-    raised above the bottom bar to avoid colliding with the List pill
-    button, and below 720px it moves to the **top-right** corner instead
-    (busiest UI is at the bottom of a phone screen). Any corner is
-    acceptable per OSM's own attribution guidelines — moving corners is not
-    a license constraint, purely to dodge overlaps with other UI.
+    Position: bottom-left (`bottom: 6px`) on screens `>=720px`; below 720px
+    it moves to the **top-right** corner instead (busiest UI is at the
+    bottom of a phone screen). Any corner is acceptable per OSM's own
+    attribution guidelines — moving corners is not a license constraint,
+    purely to dodge overlaps with other UI.
+    **Below 720px the credits "i" button follows it to the top edge**, in the
+    opposite (top-left) corner, and grows to 22px (v2.1.17, requested) —
+    scoped to `#mlpr-credits-toggle`, *not* the shared `.mlpr-info-icon`
+    15px, which is sized for Settings' inline hint icons sitting in a text
+    flow. Two knock-on effects that are easy to miss and were both real:
+    `.mlpr-credits-panel` defaults to `bottom: 100%` (opens upward, correct
+    at the bottom of the screen) and must be flipped to `top: 100%` here or
+    it opens off-screen; and the credit's own `max-width` has to leave room
+    for the button (`calc(100vw - 56px)`) or a long wrapped credit runs back
+    across the top edge and sits on it.
     **Credits panel byline**: "MLPR v<version> by Maurycy Kaczmarek", links
     to the GitHub repo. Version from `GET /api/version` (reads
     `package.json`, ungated).

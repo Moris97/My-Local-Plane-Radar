@@ -477,8 +477,45 @@ html, body {
     top: max(6px, env(safe-area-inset-top));
     right: 6px;
     left: auto;
-    max-width: calc(100vw - 12px);
+    /* Leaves room for the "i" button, which now shares this top edge from
+       the opposite corner (below) -- at the old full-width value a long
+       credit wrapped back across the screen and sat on top of it. */
+    max-width: calc(100vw - 56px);
     text-align: right;
+  }
+
+  /* The "i" button follows the credit up to the top edge (requested), to
+     the opposite corner: same reasoning as the credit's own move -- the
+     bottom of a phone screen carries the floating pills and a bottom sheet
+     that slides up over all of it, while the top edge is empty map. Both
+     stay reachable one-handed at the top of a phone.
+
+     This is the one width where #mlpr-corner-info isn't the credit's
+     positioning parent (the credit is position: fixed above), so here it
+     only carries the button. */
+  #mlpr-corner-info {
+    top: max(6px, env(safe-area-inset-top));
+    bottom: auto;
+  }
+
+  /* Bigger than the shared .mlpr-info-icon 15px, which is sized for
+     Settings' inline hint icons sitting in a text flow. This one is a
+     standalone tap target on a phone -- scoped to the id so those inline
+     icons are untouched. */
+  #mlpr-credits-toggle {
+    width: 22px;
+    height: 22px;
+    font-size: 13px;
+  }
+
+  /* The panel opens *downward* here. Its default is bottom: 100% (upward,
+     correct when the button sits at the bottom of the screen) -- left as-is
+     with the button moved to the top edge, it would open off-screen. */
+  #mlpr-corner-info .mlpr-credits-panel {
+    top: 100%;
+    bottom: auto;
+    margin-top: 8px;
+    margin-bottom: 0;
   }
 }
 
