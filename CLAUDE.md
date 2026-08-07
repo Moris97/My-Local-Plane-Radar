@@ -1406,6 +1406,26 @@ attribute the renderer itself wrote (`event.target.closest
 ('.mlpr-chart-hit')`), same "hit-test and drawing share one source of
 truth" reasoning as the trigger-area rectangle bounds. `pointerdown` is
 wired alongside `pointermove` for touch, which has no hover state.
+**Dismissal is `wireTooltipDismiss`, shared by all three tooltip wirings**
+(bucketed/doughnut/rose), and **`pointerleave` must never dismiss a touch
+pointer** (v2.1.18): a touch pointer stops existing the moment the finger
+lifts, so the browser fires `pointerout`/`pointerleave` immediately after
+`pointerup` — there is no "still hovering" state for a finger the way there
+is for a cursor. Hiding on `pointerleave` therefore cancelled the tooltip
+the tap had just raised; reported live and measured at shown-and-hidden
+4 ms after the tap, i.e. one frame. Wiring `pointerdown` only ever got it
+*shown*, nothing kept it up. A touch tooltip now stays until the next tap
+lands outside its own chart (a `document` `pointerdown` listener, touch
+only), so tapping a different bucket moves it rather than closing it.
+**Each `wireXTooltip` tears down its wrapper's previous wiring first**
+(`clearTooltipWiring`/`chartTooltipTeardowns`, a `WeakMap`): they are
+called right after `wrapEl.innerHTML = ...`, which replaces the chart's
+*contents* but not `wrapEl` itself, so listeners survived every redraw
+while the tooltip element they closed over was thrown away — measured
+growing 1 → 5 per wrapper over six range switches, each stale set still
+toggling `.active` on the live wrapper. Teardown must run *before* the
+empty-data early return too, or a chart whose data drops to empty keeps
+its old wiring.
 `series` arrays gained a `label` field purely for tooltip row text — the
 separately-built legend HTML is untouched. Tooltip reuses whatever
 `formatValue`/`formatBucket` the chart itself used. Positioned from the

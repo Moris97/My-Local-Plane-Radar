@@ -122,6 +122,59 @@ function doughnutLegendItemHtml(color, label, value, percent, i) {
   return `<span class="mlpr-chart-legend-item" data-i="${i}"><span class="mlpr-chart-legend-swatch" style="background:${color}"></span><span class="mlpr-chart-legend-item-label">${escapeHtml(label)}</span><span class="mlpr-chart-legend-item-value">${escapeHtml(String(value))}</span><span class="mlpr-chart-legend-item-percent">${percent}%</span></span>`;
 }
 
+// Every chart tooltip below (bucketed, doughnut, rose) shares one dismissal
+// rule, because they all had the same touch bug: a tapped tooltip appeared
+// and vanished within a single frame on a phone (reported live; measured at
+// shown-and-hidden 4 ms after the tap), while behaving correctly with a
+// mouse.
+//
+// Cause: a touch pointer stops existing the instant the finger lifts, so the
+// browser fires pointerout/pointerleave immediately after pointerup -- there
+// is no "still hovering" state for a finger to remain in the way there is
+// for a cursor. Hiding on pointerleave therefore cancels the tooltip the tap
+// just raised. Wiring pointerdown for touch (which these already did) only
+// ever got the tooltip *shown*; nothing kept it up.
+//
+// So pointerleave now only dismisses a hovering pointer. A touch tooltip
+// stays up until the next tap lands somewhere that isn't this chart, which
+// is the phone equivalent of moving the cursor away. Returns a teardown.
+function wireTooltipDismiss(wrapEl, hide) {
+  const onPointerLeave = (event) => {
+    // pointerType is absent on a synthetic/legacy event -- treat anything
+    // that isn't explicitly touch as hovering, i.e. keep the old behavior.
+    if (event.pointerType === 'touch') return;
+    hide();
+  };
+  const onDocumentPointerDown = (event) => {
+    if (event.pointerType !== 'touch') return;
+    if (wrapEl.contains(event.target)) return;
+    hide();
+  };
+  wrapEl.addEventListener('pointerleave', onPointerLeave);
+  document.addEventListener('pointerdown', onDocumentPointerDown);
+  return () => {
+    wrapEl.removeEventListener('pointerleave', onPointerLeave);
+    document.removeEventListener('pointerdown', onDocumentPointerDown);
+  };
+}
+
+// Each wireXTooltip below is called right after `wrapEl.innerHTML = ...`,
+// which replaces the chart's *contents* but not wrapEl itself -- so its
+// listeners survive every redraw while the tooltip element they close over
+// is thrown away. Left alone they accumulate for the life of the Stats view
+// (every range switch, every periodic refresh), each stale set still
+// toggling `.active` classes on the live wrapper and, since this fix, each
+// holding its own document-level listener. Registered here so re-wiring a
+// wrapper always tears down its previous wiring first.
+// Runs before each early return too, not just on the path that rewires --
+// a chart whose data drops to empty must still shed its previous listeners.
+const chartTooltipTeardowns = new WeakMap();
+
+function clearTooltipWiring(wrapEl) {
+  chartTooltipTeardowns.get(wrapEl)?.();
+  chartTooltipTeardowns.delete(wrapEl);
+}
+
 // Hover tooltip shared by every bucketed chart (line/area/bar): shows
 // exactly which bucket the pointer is over and each series' precise value
 // there, on request (2026-08-03) -- until now a chart's only readout was
@@ -142,7 +195,9 @@ function doughnutLegendItemHtml(color, label, value, percent, i) {
 // existing legend-building calls elsewhere are untouched and keep writing
 // their own labels by hand.
 function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormatValue, formatBucket = formatBucketLabel } = {}) {
-  if (!wrapEl || buckets.length === 0) return;
+  if (!wrapEl) return;
+  clearTooltipWiring(wrapEl);
+  if (buckets.length === 0) return;
 
   const tooltip = document.createElement('div');
   tooltip.className = 'mlpr-chart-tooltip';
@@ -183,7 +238,7 @@ function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormat
     showBucket(Number(hit.dataset.i), event.clientX, event.clientY);
   }
 
-  function onPointerLeave() {
+  function hide() {
     tooltip.classList.remove('visible');
     setActiveIndex(null);
   }
@@ -193,7 +248,13 @@ function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormat
   // updating once a drag is already under way.
   wrapEl.addEventListener('pointerdown', onPointerActive);
   wrapEl.addEventListener('pointermove', onPointerActive);
-  wrapEl.addEventListener('pointerleave', onPointerLeave);
+  const undoDismiss = wireTooltipDismiss(wrapEl, hide);
+
+  chartTooltipTeardowns.set(wrapEl, () => {
+    wrapEl.removeEventListener('pointerdown', onPointerActive);
+    wrapEl.removeEventListener('pointermove', onPointerActive);
+    undoDismiss();
+  });
 }
 
 // Doughnut equivalent of wireChartTooltip above -- same shared-tooltip-
@@ -205,7 +266,9 @@ function wireChartTooltip(wrapEl, buckets, series, { formatValue = defaultFormat
 // highlights the matching legend row (data-i set by doughnutLegendItemHtml)
 // so hovering either the ring or the legend cross-highlights the other.
 function wireDoughnutTooltip(wrapEl, legendEl, slices) {
-  if (!wrapEl || slices.length === 0) return;
+  if (!wrapEl) return;
+  clearTooltipWiring(wrapEl);
+  if (slices.length === 0) return;
   const total = slices.reduce((sum, s) => sum + s.value, 0) || 1;
 
   const tooltip = document.createElement('div');
@@ -244,14 +307,20 @@ function wireDoughnutTooltip(wrapEl, legendEl, slices) {
     showSlice(Number(hit.dataset.i), event.clientX, event.clientY);
   }
 
-  function onPointerLeave() {
+  function hide() {
     tooltip.classList.remove('visible');
     setActiveIndex(null);
   }
 
   wrapEl.addEventListener('pointerdown', onPointerActive);
   wrapEl.addEventListener('pointermove', onPointerActive);
-  wrapEl.addEventListener('pointerleave', onPointerLeave);
+  const undoDismiss = wireTooltipDismiss(wrapEl, hide);
+
+  chartTooltipTeardowns.set(wrapEl, () => {
+    wrapEl.removeEventListener('pointerdown', onPointerActive);
+    wrapEl.removeEventListener('pointermove', onPointerActive);
+    undoDismiss();
+  });
 }
 
 // Rose-chart equivalent of wireChartTooltip/wireDoughnutTooltip above --
@@ -261,7 +330,9 @@ function wireDoughnutTooltip(wrapEl, legendEl, slices) {
 // still hoverable and honestly reports its value instead of being a silent
 // dead zone next to responsive ones.
 function wireRoseTooltip(wrapEl, items, { formatValue = defaultFormatValue } = {}) {
-  if (!wrapEl || items.length === 0) return;
+  if (!wrapEl) return;
+  clearTooltipWiring(wrapEl);
+  if (items.length === 0) return;
   const sectorAngle = 360 / items.length;
 
   const tooltip = document.createElement('div');
@@ -299,14 +370,20 @@ function wireRoseTooltip(wrapEl, items, { formatValue = defaultFormatValue } = {
     showSector(Number(hit.dataset.i), event.clientX, event.clientY);
   }
 
-  function onPointerLeave() {
+  function hide() {
     tooltip.classList.remove('visible');
     setActiveIndex(null);
   }
 
   wrapEl.addEventListener('pointerdown', onPointerActive);
   wrapEl.addEventListener('pointermove', onPointerActive);
-  wrapEl.addEventListener('pointerleave', onPointerLeave);
+  const undoDismiss = wireTooltipDismiss(wrapEl, hide);
+
+  chartTooltipTeardowns.set(wrapEl, () => {
+    wrapEl.removeEventListener('pointerdown', onPointerActive);
+    wrapEl.removeEventListener('pointermove', onPointerActive);
+    undoDismiss();
+  });
 }
 
 // hint (optional): a translated explanation shown in the same
