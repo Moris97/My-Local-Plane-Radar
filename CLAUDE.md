@@ -1020,15 +1020,16 @@ check) — a discrete per-aircraft occurrence like watchlist, not an
 aggregate figure like range-record, so it belongs in scope by the same
 rule CLAUDE.md's Smart Home section already documents.
 
-**Circling detector** (`circlingEnabled`, v2.2.1): fires when an aircraft
-has turned through at least 360° while staying within a few km of where it
-started — usually police/air-ambulance overwatch, a survey run, or a
-search-and-rescue pattern, the kind of thing that would otherwise pass
-completely unremarked. "Simple detection" is the literal TODO.md wording
-this shipped from: `server/src/notifications/circling-detector.js`'s
+**Circling detector** (`circlingEnabled`, v2.2.1, thresholds widened in
+v2.2.2): fires when an aircraft has turned through at least 360° while
+staying roughly in one *region* — police/air-ambulance overwatch, a survey
+run, a search-and-rescue pattern, or a slow, wide military orbit (an AWACS
+or tanker anchor pattern). "Simple detection" is the literal TODO.md
+wording this shipped from:
+`server/src/notifications/circling-detector.js`'s
 `recordAndCheckCircling(hex, aircraft, now)` keeps a small rolling window
-(`WINDOW_MS`, 5 min) of `{t, trackDeg, lat, lon}` per hex, fed once per tick
-the aircraft is actually resent (same call site as every other rule). Two
+(`WINDOW_MS`) of `{t, trackDeg, lat, lon}` per hex, fed once per tick the
+aircraft is actually resent (same call site as every other rule). Two
 independent checks, both against the *same* window:
 - **Cumulative turn ≥ 360°**, summed as *signed* shortest-path deltas
   between consecutive `track` readings (`signedTurnDelta`, handles the
@@ -1038,9 +1039,30 @@ independent checks, both against the *same* window:
   by `MIN_SPAN_MS` (45s) of elapsed time across the window first, so a
   couple of noisy early samples right after an aircraft is first seen can
   never look like circling before there has been enough real time to tell.
-- **Max distance from the window's own centroid ≤ `MAX_RADIUS_KM`** (3) —
-  the "roughly the same place" half; without this, a spiral that keeps
-  turning while steadily drifting away would count too.
+  **This check is shape-agnostic**: a "racetrack" (two straight legs joined
+  by two same-direction ~180° turns — what a tanker/AWACS orbit and most
+  holding patterns actually fly, rather than a smooth circle) still nets
+  180+180 = 360° per lap, the straight legs contributing ~0 each — no
+  separate logic needed for it, confirmed by a dedicated test constructing
+  exactly that shape.
+- **Max distance from the window's own centroid ≤ `MAX_RADIUS_KM`** — the
+  "roughly the same place" half; without this, a spiral that keeps turning
+  while steadily drifting away would count too. `MAX_RADIUS_KM` is 75 (not
+  the 3 km this originally shipped with) and `WINDOW_MS` is 20 minutes (not
+  5) specifically because a large military orbit's own scale demands it —
+  reported live: a ~60 nm (110 km) leg at a typical orbit speed takes on
+  the order of 12 minutes one-way, so a full lap can run 25-30 minutes and
+  its two ends can sit 55-60 km from the lap's own centroid, both well
+  outside the original tight-orbit-only thresholds. Widening these doesn't
+  slow down detecting a *fast, tight* orbit at all — nothing here waits for
+  the window to fill before checking, a police helicopter orbit still gets
+  flagged in well under a minute regardless of how generous `WINDOW_MS` is
+  — and the real discriminator stays the sustained signed 360° turn, which
+  is rare outside an actual orbit at any scale; the radius mainly exists to
+  reject "drifting away while nominally still turning a bit," not to pin
+  down orbit size. `MAX_SAMPLES_PER_HEX` (the safety-net cap alongside the
+  time-based pruning) was raised from 600 to 1500 to match the larger
+  window at a ~1/s sample rate.
 
 Both conditions are re-evaluated fresh every tick — `recordAndCheckCircling`
 returns the live answer, not a latch — so `alertKinds` (see the on-map

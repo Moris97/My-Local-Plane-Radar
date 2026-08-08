@@ -1,12 +1,27 @@
 import { distanceKm } from '../range.js';
 
 // An aircraft that keeps turning through more than a full circle while
-// staying roughly in the same patch of sky is usually doing something
-// worth flagging -- police/air-ambulance overwatch, a survey run, a
-// search-and-rescue pattern -- rather than just flying somewhere.
+// staying roughly in the same *region* of sky is usually doing something
+// worth flagging: police/air-ambulance overwatch, a survey run, a
+// search-and-rescue pattern, or a slow, wide military orbit (an AWACS or
+// tanker anchor pattern -- reported live as something this missed
+// entirely at the first, much tighter, radius this shipped with).
 // "Simple detection" is literally the TODO.md wording this shipped from:
 // no altitude/speed/aircraft-type heuristics, just "has it turned through
-// 360 degrees while staying within a few km of where it started."
+// 360 degrees while staying roughly in one place."
+//
+// The turn geometry doesn't care whether that 360 degrees comes from a
+// smooth circle or a "racetrack" (two straight legs joined by two
+// same-direction turns, which is what a tanker/AWACS orbit and most
+// holding patterns actually fly) -- a full racetrack lap is still a net
+// signed 180+180 = 360 degrees, the straight legs simply contribute ~0
+// each. What genuinely differs between a tight police orbit and a wide
+// military one is *scale*: a leg on a large orbit can run tens of km and
+// take many minutes, which is why both the window and the radius below
+// are sized to the *largest* realistic case, not the smallest -- a fast,
+// tight orbit still gets flagged in well under a minute regardless of how
+// generous these are, since nothing here waits for the window to fill
+// before checking (see recordAndCheckCircling).
 //
 // Known false-positive, not solved here: a glider thermalling to gain
 // height circles just as tightly and just as persistently as anything
@@ -15,23 +30,38 @@ import { distanceKm } from '../range.js';
 // altitude/speed threshold that reliably tells the two apart, so this is
 // documented rather than guessed at (see CLAUDE.md).
 
-const WINDOW_MS = 5 * 60 * 1000;
-// A worst-case slow loiter still has to complete at least one full turn
-// inside WINDOW_MS to ever be detected -- five minutes comfortably covers
-// even a wide, gentle search circle, while staying well clear of "heading
-// gradually drifted over a long straight flight" accumulating by accident.
-const MIN_SPAN_MS = 45 * 1000;
+// Sized for a large military-style orbit: a ~60 nm (110 km) leg at a
+// typical orbit speed (~300 kt, ~9 km/min) takes on the order of 12
+// minutes one-way, so a full racetrack lap (two legs, two turns) can run
+// 25-30 minutes. 20 minutes doesn't cover the most extreme case with room
+// to spare, but is a deliberate middle ground rather than chasing the
+// largest orbit ever flown -- see CLAUDE.md if this needs revisiting
+// against a real sighting.
+const WINDOW_MS = 20 * 60 * 1000;
 // Guards against a coincidental couple of noisy samples right after an
 // aircraft is first seen looking like circling before there has been
 // enough real time to tell anything -- require at least this much elapsed
-// time across the window before ever answering true.
+// time across the window before ever answering true. Independent of
+// WINDOW_MS's own sizing -- this only needs to be long enough to smooth
+// out early positional noise, not to span a whole orbit.
+const MIN_SPAN_MS = 45 * 1000;
 const MIN_TURN_DEG = 360;
-const MAX_RADIUS_KM = 3;
+// A 60 nm leg racetrack has its two ends roughly 110 km apart -- the
+// centroid sits near the middle, so either end can be ~55-60 km from it.
+// 75 km leaves comfortable margin above that without approaching the
+// scale of an actual point-to-point flight (hundreds of km even over a
+// modest cruise segment), which is what keeps this a meaningful filter
+// rather than a rubber stamp: the real discriminator is still the sustained
+// signed 360-degree turn, genuinely rare outside an actual orbit; this
+// radius only exists to reject a spiral that keeps drifting away while
+// nominally still turning, not to pin down orbit size.
+const MAX_RADIUS_KM = 75;
 // Cheap safety net alongside the time-based pruning below (same shape as
 // stats-history.js's own MAX_SAMPLES) -- bounds memory even if something
 // somehow resent this aircraft far more often than the ~1/s poll rate
-// would normally produce.
-const MAX_SAMPLES_PER_HEX = 600;
+// would normally produce. Sized to comfortably hold a full WINDOW_MS at
+// that rate (20 min * 60 = 1200), with margin.
+const MAX_SAMPLES_PER_HEX = 1500;
 
 const history = new Map(); // hex -> [{ t, trackDeg, lat, lon }, ...]
 

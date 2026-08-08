@@ -83,9 +83,65 @@ test('a spiral that drifts away from its own centroid does not count as circling
   // Same cumulative turn as the genuine-orbit case, but radiusKm grows
   // with each sample instead of staying fixed -- the aircraft really is
   // turning through 360+ degrees, just while moving steadily away rather
-  // than staying "roughly in the same place".
-  const samples = Array.from({ length: 50 }, (_, i) => orbitSample(i, { radiusKm: 0.2 + i * 0.3 }));
+  // than staying "roughly in the same place". Has to drift well past
+  // MAX_RADIUS_KM (75) by the last sample, not just past the old, much
+  // tighter value this shipped with initially.
+  const samples = Array.from({ length: 50 }, (_, i) => orbitSample(i, { radiusKm: 1 + i * 2.5 }));
   assert.equal(feed('spiral1', samples), false);
+});
+
+test('a wide, slow military-style orbit (AWACS/tanker anchor pattern scale) is still detected', () => {
+  // 40 km radius, one full lap over ~19 minutes (64 * 18s) -- reported
+  // live as a real gap: the original 3 km radius this shipped with would
+  // have rejected this outright, even though it is exactly the kind of
+  // sustained, deliberate orbit the rule exists to catch, just flown much
+  // wider than a police helicopter or a glider. 65 samples * 6 deg/step
+  // gives 64 deltas -> 384 deg of cumulative turn, comfortably past the
+  // 360 threshold; the full span (64 * 18s ~= 19.2 min) still fits inside
+  // the 20-minute window with a little room to spare.
+  const samples = Array.from({ length: 65 }, (_, i) => orbitSample(i, { trackStep: 6, radiusKm: 40, tStepMs: 18000 }));
+  assert.equal(feed('wideorbit1', samples), true);
+});
+
+test('a racetrack pattern (two straight legs, two same-direction turns) is detected the same as a smooth circle', () => {
+  // The geometry AWACS/tanker orbits and most holding patterns actually
+  // fly: constant heading for a long straight leg, a sharp ~180-degree
+  // turn, the reverse heading for the return leg, another ~180-degree
+  // turn -- net 360 degrees per lap, same as a circle, just not shaped
+  // like one. Legs run perpendicular to the turn direction so the whole
+  // shape stays within MAX_RADIUS_KM of its own centroid.
+  const legLat = CENTER.lat;
+  const samples = [];
+  let t = 0;
+  const pushLeg = (trackDeg, lonStart, lonEnd, steps) => {
+    for (let i = 0; i <= steps; i++) {
+      const lon = lonStart + ((lonEnd - lonStart) * i) / steps;
+      samples.push({ t, trackDeg, lat: legLat, lon });
+      t += 5000;
+    }
+  };
+  // `toDegUnwrapped` is allowed to exceed 360 (only wrapped once, at the
+  // very end) so both turns keep rotating the *same* direction -- using a
+  // plain 270 for the second turn's target would interpolate the "short
+  // way" back (270 -> 90 decreasing), which is the opposite rotational
+  // sense from the first turn and nets to zero over the full lap instead
+  // of a real racetrack's 360. This is exactly the mistake a first draft
+  // of this test made, caught by the assertion failing rather than by
+  // reasoning about it up front.
+  const pushTurn = (fromDeg, toDegUnwrapped, lat, lon, steps) => {
+    for (let i = 1; i <= steps; i++) {
+      const trackDeg = (fromDeg + ((toDegUnwrapped - fromDeg) * i) / steps + 360) % 360;
+      samples.push({ t, trackDeg, lat, lon });
+      t += 2000;
+    }
+  };
+  const LON0 = CENTER.lon;
+  const LON1 = CENTER.lon + 0.5; // roughly a few tens of km at this latitude
+  pushLeg(90, LON0, LON1, 20); // outbound leg, heading east
+  pushTurn(90, 270, legLat, LON1, 10); // +180, turning right at the far end
+  pushLeg(270, LON1, LON0, 20); // return leg, heading west
+  pushTurn(270, 450, legLat, LON0, 10); // +180 more, same rotational sense (270 -> 360/0 -> 90)
+  assert.equal(feed('racetrack1', samples), true);
 });
 
 test('a missing track/position sample is skipped without resetting progress', () => {
