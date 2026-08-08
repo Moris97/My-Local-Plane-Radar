@@ -14,6 +14,8 @@ const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchl
 const { setConfigJSON, getConfig, setConfig } = await import('../db.js');
 const { hasSeenAircraft } = await import('../aircraft-tracked.js');
 const { setManualHome, clearManualHome } = await import('../home.js');
+const { destinationPoint } = await import('../range.js');
+const { resetCirclingHistory } = await import('./circling-detector.js');
 const smartHome = await import('./smart-home.js');
 
 after(() => {
@@ -74,8 +76,10 @@ beforeEach(async () => {
     receiverSilenceEnabled: true,
     overheadEnabled: false,
     overheadRadiusKm: 2,
+    circlingEnabled: true,
   });
   clearManualHome();
+  resetCirclingHistory();
   const { updateSmartHomeSettings } = await import('./settings.js');
   smartHome.shutdownSmartHome(); // force a fresh client each test, regardless of whether settings actually changed
   updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://test-broker:1883', topicPrefix: 'mlpr' });
@@ -858,4 +862,103 @@ test('overhead does not emit a UI event, even though it publishes to ntfy/smart-
   setManualHome(HOME.lat, HOME.lon);
   rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
   assert.equal(uiEvents.filter((e) => e.kind === 'overhead').length, 0);
+});
+
+// Circling detector, run through the real rule (circling-detector.test.js
+// covers the pure geometry directly). Placeholder coordinates, same
+// AREA_CENTRE/HOME convention as above.
+const CIRCLE_CENTER = { lat: 50.0, lon: 20.0 };
+
+function circlingNotifications() {
+  return sent.filter((n) => n.payload.title === 'Aircraft circling');
+}
+
+// Feeds one synthetic orbit's worth of samples for `hex` through the real
+// rule, `count * trackStep` degrees of turn spread over
+// `(count - 1) * tStepMs` milliseconds, all within `radiusKm` of
+// CIRCLE_CENTER -- same shape as circling-detector.test.js's own
+// orbitSample, but driving the full evaluateAircraftRules path (settings
+// gate, cooldown, notify/smart-home/UI-event) rather than the detector
+// directly.
+function feedOrbit(hex, { count = 50, trackStep = 8, radiusKm = 0.4, tStepMs = 1000, startTrack = 0, startTime = 0 } = {}) {
+  let lastKinds = [];
+  for (let i = 0; i < count; i++) {
+    const trackDeg = (startTrack + i * trackStep + 3600) % 360;
+    const { lat, lon } = destinationPoint(CIRCLE_CENTER.lat, CIRCLE_CENTER.lon, trackDeg, radiusKm);
+    lastKinds = rules.evaluateAircraftRules(aircraftFixture({ hex, lat, lon, track: trackDeg }), startTime + i * tStepMs);
+  }
+  return lastKinds;
+}
+
+test('a sustained orbit fires a notification (circlingEnabled defaults true)', () => {
+  feedOrbit('orbit-notify');
+  assert.equal(circlingNotifications().length, 1);
+});
+
+test('alertKinds reports circling live, independent of the notification cooldown', () => {
+  const kindsAtCompletion = feedOrbit('orbit-alertkinds');
+  assert.ok(kindsAtCompletion.includes('circling'));
+  assert.equal(circlingNotifications().length, 1);
+
+  // One more sample continuing the same orbit, well within cooldown --
+  // the *notification* must not repeat, but the live condition is still
+  // true and alertKinds must say so.
+  const { lat, lon } = destinationPoint(CIRCLE_CENTER.lat, CIRCLE_CENTER.lon, 8, 0.4);
+  const kindsAfterCooldown = rules.evaluateAircraftRules(
+    aircraftFixture({ hex: 'orbit-alertkinds', lat, lon, track: 8 }),
+    50000,
+  );
+  assert.ok(kindsAfterCooldown.includes('circling'));
+  assert.equal(circlingNotifications().length, 1);
+});
+
+test('circlingEnabled=false suppresses detection entirely, not just the notification', () => {
+  updateNotificationSettings({ circlingEnabled: false });
+  const kinds = feedOrbit('orbit-disabled');
+  assert.equal(circlingNotifications().length, 0);
+  assert.ok(!kinds.includes('circling'));
+});
+
+test('straight, level flight never fires, however long it runs', () => {
+  let lastKinds = [];
+  for (let i = 0; i < 200; i++) {
+    lastKinds = rules.evaluateAircraftRules(
+      aircraftFixture({ hex: 'straight1', lat: CIRCLE_CENTER.lat, lon: CIRCLE_CENTER.lon + i * 0.001, track: 90 }),
+      i * 1000,
+    );
+  }
+  assert.equal(circlingNotifications().length, 0);
+  assert.ok(!lastKinds.includes('circling'));
+});
+
+test('respects the per-hex cooldown across repeated full orbits', () => {
+  feedOrbit('orbit-cooldown', { startTime: 0 });
+  feedOrbit('orbit-cooldown', { startTime: 60000, startTrack: 40 });
+  assert.equal(circlingNotifications().length, 1);
+});
+
+test('publishes a smart-home event for a detected orbit', () => {
+  feedOrbit('orbit-smarthome');
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/circling');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].payload.hex, 'orbit-smarthome');
+});
+
+test('circlingEnabled=false suppresses the smart-home event too', () => {
+  updateNotificationSettings({ circlingEnabled: false });
+  // Filtered by topic, not a raw total of 0 -- this hex is also brand new
+  // to this test run, so it legitimately fires its own first-seen smart-
+  // home event partway through the same 49-second sequence, which is
+  // correct and unrelated to what this test is actually checking.
+  feedOrbit('orbit-smarthome-off');
+  const events = fakeSmartHomeClient.published.filter((p) => p.topic === 'mlpr/events/circling');
+  assert.equal(events.length, 0);
+});
+
+test('emits a UI event with the aircraft that was actually circling', () => {
+  feedOrbit('orbit-uievent');
+  const events = uiEvents.filter((e) => e.kind === 'circling');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, 'orbit-uievent');
+  assert.equal(typeof events[0].aircraft, 'object');
 });

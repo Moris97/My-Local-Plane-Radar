@@ -166,6 +166,8 @@ function buildContent(event) {
     }
     case 'first_seen':
       return { tag: 'first-seen', title: t('toastFirstSeenTitle'), body: aircraftSummaryLine(event.aircraft, units) };
+    case 'circling':
+      return { tag: 'circling', title: t('toastCirclingTitle'), body: aircraftSummaryLine(event.aircraft, units) };
     case 'watchlist':
       return {
         tag: 'watched',

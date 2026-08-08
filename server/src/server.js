@@ -545,7 +545,7 @@ export async function buildServer({ logger = true } = {}) {
     // toggle was added (2026-08-01), but every value silently never reached
     // updateNotificationSettings, so the checkbox had no effect. Found
     // 2026-08-02 while adding receiverSilenceEnabled to this same list.
-    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled', 'watchedEnabled', 'receiverSilenceEnabled', 'overheadEnabled']) {
+    for (const key of ['squawkEnabled', 'firstSeenEnabled', 'rangeRecordEnabled', 'watchedEnabled', 'receiverSilenceEnabled', 'overheadEnabled', 'circlingEnabled']) {
       if (key in body) {
         if (typeof body[key] !== 'boolean') {
           return reply.code(400).send({ error: `${key} must be a boolean` });
@@ -670,11 +670,11 @@ export async function buildServer({ logger = true } = {}) {
   // type left out becomes the one nobody can test -- which is exactly what
   // happened to 'squawk' when it was added as a third smart-home event
   // (2026-08-01) and this set wasn't updated with it.
-  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist', 'squawk', 'overhead']);
+  const VALID_TEST_EVENT_REASONS = new Set(['first_seen', 'watchlist', 'squawk', 'overhead', 'circling']);
   app.post('/api/notifications/smart-home/send-test-event', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     if (!VALID_TEST_EVENT_REASONS.has(body.reason)) {
-      return reply.code(400).send({ error: 'reason must be "first_seen", "watchlist", "squawk" or "overhead"' });
+      return reply.code(400).send({ error: 'reason must be "first_seen", "watchlist", "squawk", "overhead" or "circling"' });
     }
     const aircraft = body.aircraft ?? {};
     if (!aircraft.hex) {

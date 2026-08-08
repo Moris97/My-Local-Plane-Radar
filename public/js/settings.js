@@ -232,6 +232,10 @@ function renderSettingsForm(container) {
               <span id="mlpr-notif-overhead-radius-unit"></span>
             </label>
           </div>
+          <div class="mlpr-checkbox-row">
+            <label><input type="checkbox" id="mlpr-notif-circling"> ${t('circlingAlert')}</label>
+            <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('circlingAlertHint')}</span></button>
+          </div>
         </fieldset>
 
         <!-- Directly under the "Watched aircraft" toggle it configures,
@@ -873,6 +877,7 @@ function wireNotificationToggles(container) {
   const notifOverheadEl = container.querySelector('#mlpr-notif-overhead');
   const notifOverheadRadiusEl = container.querySelector('#mlpr-notif-overhead-radius');
   container.querySelector('#mlpr-notif-overhead-radius-unit').textContent = distanceUnitLabel(getSettings().units);
+  const notifCirclingEl = container.querySelector('#mlpr-notif-circling');
 
   async function loadNotificationSettings() {
     const response = await fetch('/api/notifications/settings');
@@ -894,6 +899,7 @@ function wireNotificationToggles(container) {
     // isn't fought over by a value the server hasn't confirmed yet.
     const displayRadius = kmToDisplayDistance(data.overheadRadiusKm, getSettings().units);
     notifOverheadRadiusEl.value = String(Math.round(displayRadius * 100) / 100);
+    notifCirclingEl.checked = data.circlingEnabled;
   }
 
   async function putNotificationSettings(patch) {
@@ -933,6 +939,9 @@ function wireNotificationToggles(container) {
     if (!Number.isFinite(typed) || typed <= 0) return;
     putNotificationSettings({ overheadRadiusKm: displayDistanceToKm(typed, getSettings().units) });
   });
+  notifCirclingEl.addEventListener('change', (event) =>
+    putNotificationSettings({ circlingEnabled: event.target.checked }),
+  );
 
   loadNotificationSettings();
 }

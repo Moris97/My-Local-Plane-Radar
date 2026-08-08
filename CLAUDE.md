@@ -1020,6 +1020,55 @@ check) — a discrete per-aircraft occurrence like watchlist, not an
 aggregate figure like range-record, so it belongs in scope by the same
 rule CLAUDE.md's Smart Home section already documents.
 
+**Circling detector** (`circlingEnabled`, v2.2.1): fires when an aircraft
+has turned through at least 360° while staying within a few km of where it
+started — usually police/air-ambulance overwatch, a survey run, or a
+search-and-rescue pattern, the kind of thing that would otherwise pass
+completely unremarked. "Simple detection" is the literal TODO.md wording
+this shipped from: `server/src/notifications/circling-detector.js`'s
+`recordAndCheckCircling(hex, aircraft, now)` keeps a small rolling window
+(`WINDOW_MS`, 5 min) of `{t, trackDeg, lat, lon}` per hex, fed once per tick
+the aircraft is actually resent (same call site as every other rule). Two
+independent checks, both against the *same* window:
+- **Cumulative turn ≥ 360°**, summed as *signed* shortest-path deltas
+  between consecutive `track` readings (`signedTurnDelta`, handles the
+  350°→10° wraparound correctly) — deliberately signed, not the sum of
+  absolute deltas, so S-turns (which alternate sign and cancel out) read
+  differently from a real, one-direction orbit that keeps adding up. Gated
+  by `MIN_SPAN_MS` (45s) of elapsed time across the window first, so a
+  couple of noisy early samples right after an aircraft is first seen can
+  never look like circling before there has been enough real time to tell.
+- **Max distance from the window's own centroid ≤ `MAX_RADIUS_KM`** (3) —
+  the "roughly the same place" half; without this, a spiral that keeps
+  turning while steadily drifting away would count too.
+
+Both conditions are re-evaluated fresh every tick — `recordAndCheckCircling`
+returns the live answer, not a latch — so `alertKinds` (see the on-map
+toast/glow section below) gets an honest "still circling right now" that
+turns itself off the moment the aircraft straightens out, same as
+squawk/watchlist and unlike the one-shot rules. **The whole detector,
+including the per-hex window itself, only runs while `circlingEnabled` is
+on** — disabling the rule also stops the always-on per-tick bookkeeping,
+not just the notification, matching squawk/watchlist's own
+condition-vs-notification split (see below) rather than quietly keeping
+the window warm in the background. Per-hex history is evicted on the same
+periodic sweep as trail history (`index.js`, one shared `activeHexes` set,
+same "still in `state.js`'s tracked set" definition of stale
+`evictStaleTrails` already uses).
+
+**Known false-positive, not solved algorithmically**: a glider thermalling
+to gain height circles just as tightly and just as persistently as
+anything genuinely worth flagging. There is no clean altitude/speed
+threshold that reliably tells the two apart (both occur across overlapping
+altitude bands), so an install near a gliding club should expect this to
+fire on completely routine local flying — documented in the settings hint
+rather than guessed at with an unprincipled heuristic. Defaults **on**
+(unlike overhead-proximity): the whole point, per TODO.md's own framing —
+"catches events that would otherwise go unnoticed" — is passive discovery,
+which only delivers on its promise if it doesn't need to be found and
+switched on first; if the gliding-club false-positive turns out to be a
+real nuisance for a given install, it's one toggle away from off.
+
 **Receiver-silence watchdog** (`evaluateReceiverSilenceRule`): fires on the
 *absence* of any aircraft at all — a receiver health check, unlike every
 other rule which fires on presence of some condition. Called once per poll
@@ -1165,9 +1214,10 @@ rest specifically because of this — see below.)
 
 A **fourth**, independent delivery channel alongside ntfy/MQTT — every rule
 that already sends a push notification (squawk, first-seen, watch-list,
-range-record, receiver-silence) now also raises a dismissible card in the
-browser and, where it names an aircraft, a red glow on that aircraft's own
-marker. Explicitly generalized past the original "just squawk" proposal
+range-record, receiver-silence, and, since v2.2.1, circling) now also
+raises a dismissible card in the browser and, where it names an aircraft, a
+red glow on that aircraft's own marker. Explicitly generalized past the
+original "just squawk" proposal
 (`TODO.md`) by the user when it was picked up — every rule that already
 notifies gets the same treatment, not just the emergency case.
 
@@ -1198,15 +1248,18 @@ wasn't in the user's explicit list when this was scoped; nothing structural
 blocks adding it later (the client's kind registry is a plain lookup table).
 
 **Live marker glow vs. one-shot marker glow — two different mechanisms,
-because the underlying facts have two different shapes.** Squawk and
-watch-list are *standing conditions* an aircraft can currently satisfy or
-not (still squawking an emergency code, still inside a watched trigger
-area); first-seen and range-record are *one-shot events* (an aircraft is
-only ever "first seen" for one tick). Gating the glow by the same 30-minute
+because the underlying facts have two different shapes.** Squawk,
+watch-list, and (since v2.2.1) circling are *standing conditions* an
+aircraft can currently satisfy or not (still squawking an emergency code,
+still inside a watched trigger area, still turning through its orbit);
+first-seen and range-record are *one-shot events* (an aircraft is only
+ever "first seen" for one tick). Gating the glow by the same 30-minute
 cooldown that throttles the *notification* would leave a plane glowing red
-for up to half an hour after its squawk cleared — wrong for a live radar.
-- **`evaluateAircraftRules` now returns `alertKinds`** (`['squawk']`,
-  `['watched']`, both, or `[]`) — the live, cooldown-independent truth,
+for up to half an hour after its squawk cleared (or its orbit ended) —
+wrong for a live radar.
+- **`evaluateAircraftRules` now returns `alertKinds`** (any combination of
+  `'squawk'`/`'watched'`/`'circling'`, or `[]`) — the live, cooldown-
+  independent truth,
   computed unconditionally alongside (but separately from) the
   cooldown-gated notify calls. **Watch-list matching had to be restructured**
   (v2.1.20): it used to check `!isOnCooldown('watched', hex)` *before* ever
@@ -1354,17 +1407,19 @@ title badge.
 
 A **third**, independent notification channel alongside ntfy: ntfy wants
 human-readable title/message for a push notification, this wants
-machine-readable JSON for a home-automation rule engine. Wired to four of
+machine-readable JSON for a home-automation rule engine. Wired to five of
 `rules.js`'s notification rules — first-seen, watch-list, squawk
 7500/7600/7700 (added later, same cooldown-gated block as the ntfy squawk
-notification, payload adds `squawk`/`squawkMeaning`), and overhead-proximity
+notification, payload adds `squawk`/`squawkMeaning`), overhead-proximity
 (v2.1.19, payload adds `distanceKm`/`azimuthDeg`/`elevationDeg`/
 `etaSeconds`/`cpaDistanceKm` — see the Notification engine section for what
 each means; a fit for a "flash the lights"/"slew a camera" automation since
-it's the one rule that already computes direction). Range records and the
-receiver-silence watchdog remain deliberately out of scope — a single
-pre-aggregated number and a health check respectively, neither a discrete
-per-aircraft occurrence.
+it's the one rule that already computes direction), and circling (v2.2.1,
+plain `aircraftFields()`, no extra geometry — the detector's own window
+already lives entirely server-side). Range records and the receiver-silence
+watchdog remain deliberately out of scope — a single pre-aggregated number
+and a health check respectively, neither a discrete per-aircraft
+occurrence.
 
 **Hand-rolled MQTT client (`server/src/notifications/mqtt-client.js`), not
 the `mqtt` npm package** — deliberated with the user first. MLPR only ever

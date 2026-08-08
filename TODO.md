@@ -173,13 +173,15 @@ Added to as they come up; picked up in a later stage when relevant.
   anything else. Needs a rendering pass matching the existing
   `OFFLINE_PALETTES` light/dark treatment in `basemap.js`. Proposed
   2026-08-02.
-- **Circling-aircraft notification** (effort: medium, impact: high,
-  priority: low) — an aircraft that loops in roughly the same place for
-  several minutes is usually doing something worth knowing about: police,
-  air ambulance, a survey flight, a patrol, a search-and-rescue operation.
-  Simple detection: cumulative heading change past 360° while the trail's
-  centroid barely moves. Catches events that would otherwise go unnoticed.
-  Requested 2026-07-28.
+- ~~**Circling-aircraft notification**~~ **Done, 2026-08-08 (v2.2.1).**
+  Requested 2026-07-28, built exactly to spec: `server/src/notifications/
+  circling-detector.js`'s `recordAndCheckCircling` tracks a signed
+  cumulative heading change per hex over a rolling window, true once it
+  passes 360° while the window's own centroid stays within a few km. New
+  `circlingEnabled` setting (default on), wired into the on-map toast/glow
+  feature and smart-home like every other standing-condition rule — see
+  CLAUDE.md's Notification engine section for the full design and the
+  known gliding-club false-positive.
 - ~~**Overhead-proximity alert**~~ **Done, 2026-08-07 (v2.1.19).** A new
   `overheadEnabled`/`overheadRadiusKm` notification rule
   (`rules.js`'s `evaluateAircraftRules`, `settings.js`) fires once per

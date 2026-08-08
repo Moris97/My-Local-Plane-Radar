@@ -25,6 +25,7 @@ import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
+import { evictStaleCircling } from './notifications/circling-detector.js';
 import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
@@ -377,7 +378,13 @@ async function main() {
     prunePendingFirstSeen();
   }, COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {
-    evictStaleTrails(new Set(getTrackedAircraft().map((aircraft) => aircraft.hex)));
+    // Shared between trail history and the circling detector's own per-hex
+    // window (server/src/notifications/circling-detector.js) -- same
+    // "still in state.js's tracked set" definition of stale, computed once
+    // rather than twice.
+    const activeHexes = new Set(getTrackedAircraft().map((aircraft) => aircraft.hex));
+    evictStaleTrails(activeHexes);
+    evictStaleCircling(activeHexes);
   }, TRAIL_EVICTION_INTERVAL_MS);
 
   async function shutdown(signal) {

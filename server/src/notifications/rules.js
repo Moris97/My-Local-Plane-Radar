@@ -7,6 +7,7 @@ import { getWatchList } from './watchlist.js';
 import { publishSmartHomeEvent, aircraftFields } from './smart-home.js';
 import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm } from '../range.js';
 import { getEffectiveHome } from '../home.js';
+import { recordAndCheckCircling } from './circling-detector.js';
 
 // Exported as a function rather than the raw table so the "unknown code"
 // fallback lives in one place -- /dev/smart-home-test needs the same
@@ -352,6 +353,35 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           matchedType: matchedEntry.matchType,
           matchedValue: matchedEntry.matchValue,
         });
+      }
+    }
+  }
+
+  // Standing condition, same shape as squawk/watchlist above: alertKinds
+  // gets the live answer every tick the rule is on, regardless of
+  // cooldown, so the map glow tracks the actual ongoing turn rather than
+  // freezing for 30 minutes after the first notification -- and, same as
+  // squawk/watchlist, gated on the setting for *both* the glow and the
+  // notification together, not just the notification: turning the rule
+  // off should also turn off the visual distraction, not just the pushes.
+  // recordAndCheckCircling only gets fed samples while the rule is on --
+  // a disabled rule doing per-tick position/heading bookkeeping for every
+  // moving aircraft on the off chance it gets re-enabled later isn't worth
+  // the always-on cost on a Pi 3 for a feature nobody asked to keep warm.
+  if (settings.circlingEnabled && typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+    const circling = recordAndCheckCircling(aircraft.hex, aircraft, now);
+    if (circling) {
+      alertKinds.push('circling');
+      if (!isOnCooldown('circling', aircraft.hex)) {
+        markNotified('circling', aircraft.hex);
+        notify({
+          title: 'Aircraft circling',
+          message: aircraftLabel(aircraft),
+          priority: 3,
+          tags: ['repeat'],
+        });
+        publishSmartHomeEvent({ reason: 'circling', aircraft });
+        emitUiEvent('circling', { hex: aircraft.hex, aircraft: aircraftFields(aircraft) });
       }
     }
   }

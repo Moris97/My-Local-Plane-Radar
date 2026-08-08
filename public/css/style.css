@@ -203,6 +203,10 @@ html, body {
   border-left-color: #e07f7f;
 }
 
+.mlpr-toast-circling {
+  border-left-color: #b07fdc;
+}
+
 .mlpr-toast-overflow {
   pointer-events: none;
   align-self: center;

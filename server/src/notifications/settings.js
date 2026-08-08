@@ -38,6 +38,17 @@ const DEFAULT_SETTINGS = {
   // silently start firing at either.
   overheadEnabled: false,
   overheadRadiusKm: 2,
+  // Circling detector (rules.js's evaluateAircraftRules, circling-
+  // detector.js) -- defaults true like most rules here (squawk/first-seen/
+  // watchlist/silence): unlike overhead-proximity, this fires on something
+  // genuinely rare (a sustained 360-degree turn while staying in roughly
+  // one place), not on plain presence, so it doesn't need the same opt-in
+  // caution. Known exception worth remembering if this needs revisiting:
+  // an install near a gliding club will see this fire on routine thermal
+  // circling, which looks identical to this detector on purpose (see
+  // circling-detector.js's own doc comment for why that isn't solved
+  // algorithmically).
+  circlingEnabled: true,
 };
 
 export function getNotificationSettings() {
