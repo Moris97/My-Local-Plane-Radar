@@ -144,7 +144,7 @@ const DICTIONARIES = {
     toastMoreCount: '+{count} more',
     circlingAlert: 'Circling aircraft alert',
     circlingAlertHint:
-      'Notifies when an aircraft turns through a full circle or more while staying roughly in one place -- often police, air ambulance, a survey flight, or a search. Known false positive: a glider circling in a thermal looks the same to this detector, so an install near a gliding club may want this off.',
+      'Notifies when a large aircraft (airliner or business jet), a helicopter, or any military aircraft turns through a full circle or more while staying roughly in one place -- often overwatch, a survey flight, or a search. Light aircraft and gliders are excluded, since they are almost always routine training circuits or thermalling rather than something worth flagging.',
     ntfyInstructions: 'To receive push notifications, install the ntfy app and enter this code as the topic:',
     regenerateTopic: 'Generate new code',
     watchlist: 'Watched aircraft',
@@ -481,7 +481,7 @@ const DICTIONARIES = {
     toastMoreCount: '+{count} więcej',
     circlingAlert: 'Alert krążącego samolotu',
     circlingAlertHint:
-      'Powiadamia, gdy samolot wykona pełny obrót (lub więcej), pozostając mniej więcej w jednym miejscu -- często policja, LPR, lot pomiarowy albo poszukiwania. Znany fałszywy alarm: szybowiec krążący w kominie termicznym wygląda dla tego mechanizmu identycznie, więc instalacja blisko klubu szybowcowego może chcieć to wyłączyć.',
+      'Powiadamia, gdy duży samolot (pasażerski albo biznesowy), śmigłowiec albo dowolny samolot wojskowy wykona pełny obrót (lub więcej), pozostając mniej więcej w jednym miejscu -- często obserwacja z powietrza, lot pomiarowy albo poszukiwania. Małe samoloty i szybowce są wykluczone, bo niemal zawsze to rutynowe kręgi treningowe albo krążenie w kominie termicznym, a nie coś wartego uwagi.',
     ntfyInstructions: 'Aby otrzymywać powiadomienia push, zainstaluj aplikację ntfy i wpisz ten kod jako temat:',
     regenerateTopic: 'Wygeneruj nowy kod',
     watchlist: 'Lista obserwowanych',

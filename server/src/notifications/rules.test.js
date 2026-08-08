@@ -880,12 +880,23 @@ function circlingNotifications() {
 // orbitSample, but driving the full evaluateAircraftRules path (settings
 // gate, cooldown, notify/smart-home/UI-event) rather than the detector
 // directly.
-function feedOrbit(hex, { count = 50, trackStep = 8, radiusKm = 0.4, tStepMs = 1000, startTrack = 0, startTime = 0 } = {}) {
+function feedOrbit(
+  hex,
+  { count = 50, trackStep = 8, radiusKm = 0.4, tStepMs = 1000, startTrack = 0, startTime = 0, aircraft = {} } = {},
+) {
   let lastKinds = [];
   for (let i = 0; i < count; i++) {
     const trackDeg = (startTrack + i * trackStep + 3600) % 360;
     const { lat, lon } = destinationPoint(CIRCLE_CENTER.lat, CIRCLE_CENTER.lon, trackDeg, radiusKm);
-    lastKinds = rules.evaluateAircraftRules(aircraftFixture({ hex, lat, lon, track: trackDeg }), startTime + i * tStepMs);
+    // category defaults to 'A3' (narrowbody) -- these tests are about the
+    // turn/position geometry and the rest of the rule's wiring, not about
+    // isCirclingRelevant's own category allowlist (which has its own
+    // dedicated tests below), so every existing scenario here needs to
+    // default to a category the allowlist actually accepts.
+    lastKinds = rules.evaluateAircraftRules(
+      aircraftFixture({ hex, lat, lon, track: trackDeg, category: 'A3', ...aircraft }),
+      startTime + i * tStepMs,
+    );
   }
   return lastKinds;
 }
@@ -905,7 +916,7 @@ test('alertKinds reports circling live, independent of the notification cooldown
   // true and alertKinds must say so.
   const { lat, lon } = destinationPoint(CIRCLE_CENTER.lat, CIRCLE_CENTER.lon, 8, 0.4);
   const kindsAfterCooldown = rules.evaluateAircraftRules(
-    aircraftFixture({ hex: 'orbit-alertkinds', lat, lon, track: 8 }),
+    aircraftFixture({ hex: 'orbit-alertkinds', lat, lon, track: 8, category: 'A3' }),
     50000,
   );
   assert.ok(kindsAfterCooldown.includes('circling'));
@@ -920,10 +931,14 @@ test('circlingEnabled=false suppresses detection entirely, not just the notifica
 });
 
 test('straight, level flight never fires, however long it runs', () => {
+  // category: 'A3' -- otherwise this would also be rejected by
+  // isCirclingRelevant, and the test would pass for the wrong reason
+  // (the category filter, not the turn geometry, which is what this test
+  // is actually about).
   let lastKinds = [];
   for (let i = 0; i < 200; i++) {
     lastKinds = rules.evaluateAircraftRules(
-      aircraftFixture({ hex: 'straight1', lat: CIRCLE_CENTER.lat, lon: CIRCLE_CENTER.lon + i * 0.001, track: 90 }),
+      aircraftFixture({ hex: 'straight1', lat: CIRCLE_CENTER.lat, lon: CIRCLE_CENTER.lon + i * 0.001, track: 90, category: 'A3' }),
       i * 1000,
     );
   }
@@ -961,4 +976,22 @@ test('emits a UI event with the aircraft that was actually circling', () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].hex, 'orbit-uievent');
   assert.equal(typeof events[0].aircraft, 'object');
+});
+
+test('a light aircraft (category A1) orbiting never fires -- isCirclingRelevant reaches through the full rule', () => {
+  const kinds = feedOrbit('cessna1', { aircraft: { category: 'A1' } });
+  assert.equal(circlingNotifications().length, 0);
+  assert.ok(!kinds.includes('circling'));
+});
+
+test('a helicopter (category A7) orbiting fires even at a size the light-aircraft exclusion would otherwise reject', () => {
+  const kinds = feedOrbit('heli1', { aircraft: { category: 'A7' } });
+  assert.equal(circlingNotifications().length, 1);
+  assert.ok(kinds.includes('circling'));
+});
+
+test('a military aircraft with no useful category still fires -- the military flag alone is enough', () => {
+  const kinds = feedOrbit('mil1', { aircraft: { category: undefined, military: true } });
+  assert.equal(circlingNotifications().length, 1);
+  assert.ok(kinds.includes('circling'));
 });

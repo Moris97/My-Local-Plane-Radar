@@ -7,8 +7,12 @@ import { distanceKm } from '../range.js';
 // tanker anchor pattern -- reported live as something this missed
 // entirely at the first, much tighter, radius this shipped with).
 // "Simple detection" is literally the TODO.md wording this shipped from:
-// no altitude/speed/aircraft-type heuristics, just "has it turned through
-// 360 degrees while staying roughly in one place."
+// the turn/position geometry below has no altitude/speed/aircraft-type
+// heuristics in it at all -- just "has it turned through 360 degrees while
+// staying roughly in one place." What *does* use aircraft type is
+// isCirclingRelevant below, and deliberately for a different reason: not
+// to guess "is this really circling", but to decide up front whose
+// circling is worth anyone's attention (see its own comment).
 //
 // The turn geometry doesn't care whether that 360 degrees comes from a
 // smooth circle or a "racetrack" (two straight legs joined by two
@@ -22,13 +26,6 @@ import { distanceKm } from '../range.js';
 // tight orbit still gets flagged in well under a minute regardless of how
 // generous these are, since nothing here waits for the window to fill
 // before checking (see recordAndCheckCircling).
-//
-// Known false-positive, not solved here: a glider thermalling to gain
-// height circles just as tightly and just as persistently as anything
-// genuinely worth flagging. An install near a gliding club should expect
-// this to fire on completely routine local flying -- there is no clean
-// altitude/speed threshold that reliably tells the two apart, so this is
-// documented rather than guessed at (see CLAUDE.md).
 
 // Sized for a large military-style orbit: a ~60 nm (110 km) leg at a
 // typical orbit speed (~300 kt, ~9 km/min) takes on the order of 12
@@ -62,6 +59,44 @@ const MAX_RADIUS_KM = 75;
 // would normally produce. Sized to comfortably hold a full WINDOW_MS at
 // that rate (20 min * 60 = 1200), with margin.
 const MAX_SAMPLES_PER_HEX = 1500;
+
+// ADS-B emitter category values (readsb's own `category` field, e.g.
+// 'A2', 'B1' -- see icon-classify.js's CATEGORY_MAP for the full table
+// this project already relies on elsewhere) that this rule considers
+// worth flagging when circling. Requested explicitly after the first
+// version of this rule shipped and turned out to fire constantly on
+// routine light-aircraft circuit training (a Cessna 172 and similar,
+// category A1) -- not just gliders (B1, already excluded by the same
+// mechanism). Rather than a denylist of "known uninteresting" categories
+// (which would need updating every time a new uninteresting category came
+// up -- balloons, parachutists, ultralights, drones...), this is the
+// opposite: an allowlist of what *is* interesting, so anything not
+// explicitly recognised is excluded by default.
+//
+// A2-A5 (small/large/high-vortex-large/heavy) covers regional turboprops,
+// business jets, and airliners of every size the category standard
+// distinguishes -- it does not split "airliner" from "bizjet" any finer
+// than by weight, and neither does this. A7 (rotorcraft) is unconditional
+// -- every helicopter, any size -- since a police/air-ambulance helicopter
+// orbiting a scene is the original, flagship use case this whole rule was
+// built for. A1 (light) and A6 (high performance -- aerobatic aircraft as
+// much as fast jets, an unreliable proxy for "military") are deliberately
+// left out of this set; a genuinely military aircraft of any size or
+// category is still caught by the separate military check below, which
+// doesn't depend on the category value at all.
+const RELEVANT_CATEGORIES = new Set(['A2', 'A3', 'A4', 'A5', 'A7']);
+
+// aircraft.military comes from the type/registration database (dbFlags
+// bit 1, see normalize.js), not the live ADS-B broadcast -- it only
+// resolves at all if the receiver has readsb's --db-file configured (see
+// CLAUDE.md's Production deployment section); an install without it never
+// sees this flag set for anyone, military or not, same pre-existing
+// dependency the aircraft details panel's registration/type tiles already
+// have.
+export function isCirclingRelevant(aircraft) {
+  if (aircraft.military) return true;
+  return RELEVANT_CATEGORIES.has(aircraft.category);
+}
 
 const history = new Map(); // hex -> [{ t, trackDeg, lat, lon }, ...]
 

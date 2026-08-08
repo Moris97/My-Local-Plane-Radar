@@ -1078,18 +1078,60 @@ periodic sweep as trail history (`index.js`, one shared `activeHexes` set,
 same "still in `state.js`'s tracked set" definition of stale
 `evictStaleTrails` already uses).
 
-**Known false-positive, not solved algorithmically**: a glider thermalling
-to gain height circles just as tightly and just as persistently as
-anything genuinely worth flagging. There is no clean altitude/speed
-threshold that reliably tells the two apart (both occur across overlapping
-altitude bands), so an install near a gliding club should expect this to
-fire on completely routine local flying — documented in the settings hint
-rather than guessed at with an unprincipled heuristic. Defaults **on**
-(unlike overhead-proximity): the whole point, per TODO.md's own framing —
-"catches events that would otherwise go unnoticed" — is passive discovery,
-which only delivers on its promise if it doesn't need to be found and
-switched on first; if the gliding-club false-positive turns out to be a
-real nuisance for a given install, it's one toggle away from off.
+**`isCirclingRelevant(aircraft)` (v2.2.3) — an allowlist by aircraft
+category/military status, gating whether the geometry above is even
+checked at all.** The glider false-positive documented when this shipped
+(v2.2.1) turned out to be only half the real problem: reported live, the
+overwhelming majority of what actually fired in practice was routine
+light-aircraft circuit training (a Cessna 172 and similar doing pattern
+work), not gliders specifically. Rather than trying to guess "training
+circuit vs. something interesting" from altitude/speed (there is no clean
+threshold — both a training circuit and a real patrol happen across
+overlapping altitude/speed bands, the same reasoning that already ruled
+out an altitude-based glider filter), this uses two signals that are
+*not* heuristics: readsb's own ADS-B emitter `category` field (the
+aircraft's own transponder self-declaring its type — `icon-classify.js`'s
+`CATEGORY_MAP` is the existing table this project already relies on for
+the same field) and `aircraft.military` (the dbFlags-derived type/
+registration lookup already used elsewhere).
+
+Deliberately an **allowlist of what's interesting**, not a denylist of
+what isn't — `RELEVANT_CATEGORIES = {A2, A3, A4, A5, A7}`:
+- **A2-A5** (small/large/high-vortex-large/heavy, by MTOW) — regional
+  turboprops, business jets, and airliners of any size; the category
+  standard doesn't distinguish "airliner" from "bizjet" any finer than by
+  weight, and neither does this.
+- **A7** (rotorcraft) unconditionally, any size — a police/air-ambulance
+  helicopter orbiting a scene is the original, flagship use case this
+  whole rule was written for.
+- **`aircraft.military` alone is also sufficient**, independent of
+  category — an AWACS or tanker is still flagged even if its category
+  happens to be missing/unusual, and a light *military* aircraft (which
+  category alone would otherwise exclude via A1) is still caught. Requires
+  readsb's `--db-file` to be configured (same pre-existing dependency the
+  aircraft details panel's registration/type tiles already have — see
+  Production deployment below) — without it, `military` is never true for
+  anyone, on any install.
+- **Deliberately excluded**: A1 (light — the actual, measured majority of
+  false positives) and A6 (high performance — an unreliable proxy for
+  "military": plenty of civilian aerobatic aircraft report this too, and
+  it doesn't reliably cover military aircraft either, which is what the
+  separate `military` check is for instead). Everything not explicitly
+  listed (unknown/missing category, gliders, balloons, parachutists,
+  ultralights, drones, ground vehicles) is excluded by omission — an
+  allowlist doesn't need a new entry every time another kind of
+  uninteresting traffic shows up.
+
+Checked at the *same* gate as `circlingEnabled` and the position check,
+before `recordAndCheckCircling` is ever called — an excluded aircraft gets
+no per-hex window built for it at all, not just no notification once one's
+detected, same "don't do the bookkeeping for something that was never
+going to fire" reasoning `circlingEnabled` itself already uses.
+
+Defaults **on** (unlike overhead-proximity): the whole point, per
+TODO.md's own framing — "catches events that would otherwise go
+unnoticed" — is passive discovery, which only delivers on its promise if
+it doesn't need to be found and switched on first.
 
 **Receiver-silence watchdog** (`evaluateReceiverSilenceRule`): fires on the
 *absence* of any aircraft at all — a receiver health check, unlike every

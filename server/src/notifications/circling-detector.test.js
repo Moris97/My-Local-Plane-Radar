@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { recordAndCheckCircling, evictStaleCircling, resetCirclingHistory } from './circling-detector.js';
+import { recordAndCheckCircling, evictStaleCircling, resetCirclingHistory, isCirclingRelevant } from './circling-detector.js';
 import { destinationPoint } from '../range.js';
 
 // Placeholder coordinates only -- never a real receiver location.
@@ -179,4 +179,39 @@ test('evictStaleCircling leaves an aircraft still in the active set untouched', 
 
   const more = Array.from({ length: 10 }, (_, i) => orbitSample(40 + i));
   assert.equal(feed('keep1', more), true);
+});
+
+// isCirclingRelevant -- the category/military allowlist requested after
+// the first version of this rule fired constantly on routine light-
+// aircraft circuit training.
+test('a light aircraft (category A1, e.g. a Cessna 172) is not relevant', () => {
+  assert.equal(isCirclingRelevant({ category: 'A1' }), false);
+});
+
+test('a glider (category B1) is not relevant', () => {
+  assert.equal(isCirclingRelevant({ category: 'B1' }), false);
+});
+
+test('an aircraft with no category info at all is not relevant', () => {
+  assert.equal(isCirclingRelevant({}), false);
+  assert.equal(isCirclingRelevant({ category: 'A0' }), false);
+});
+
+test('large civilian categories (A2-A5: regional, narrowbody, widebody) are relevant', () => {
+  for (const category of ['A2', 'A3', 'A4', 'A5']) {
+    assert.equal(isCirclingRelevant({ category }), true, category);
+  }
+});
+
+test('a helicopter (category A7) is relevant regardless of size', () => {
+  assert.equal(isCirclingRelevant({ category: 'A7' }), true);
+});
+
+test('any military aircraft is relevant, even a light one that would otherwise be excluded', () => {
+  assert.equal(isCirclingRelevant({ category: 'A1', military: true }), true);
+  assert.equal(isCirclingRelevant({ military: true }), true); // no category at all
+});
+
+test('a high-performance category (A6) alone is not relevant -- an unreliable proxy for military', () => {
+  assert.equal(isCirclingRelevant({ category: 'A6' }), false);
 });

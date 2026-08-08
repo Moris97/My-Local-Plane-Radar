@@ -7,7 +7,7 @@ import { getWatchList } from './watchlist.js';
 import { publishSmartHomeEvent, aircraftFields } from './smart-home.js';
 import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm } from '../range.js';
 import { getEffectiveHome } from '../home.js';
-import { recordAndCheckCircling } from './circling-detector.js';
+import { recordAndCheckCircling, isCirclingRelevant } from './circling-detector.js';
 
 // Exported as a function rather than the raw table so the "unknown code"
 // fallback lives in one place -- /dev/smart-home-test needs the same
@@ -368,7 +368,17 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
   // a disabled rule doing per-tick position/heading bookkeeping for every
   // moving aircraft on the off chance it gets re-enabled later isn't worth
   // the always-on cost on a Pi 3 for a feature nobody asked to keep warm.
-  if (settings.circlingEnabled && typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
+  // isCirclingRelevant is checked at the same gate, for the same reason --
+  // a light aircraft doing routine circuit training (reported live as the
+  // overwhelming majority of what this rule was firing on before this
+  // check existed) gets no window built for it at all, not just no
+  // notification once one's detected.
+  if (
+    settings.circlingEnabled &&
+    isCirclingRelevant(aircraft) &&
+    typeof aircraft.lat === 'number' &&
+    typeof aircraft.lon === 'number'
+  ) {
     const circling = recordAndCheckCircling(aircraft.hex, aircraft, now);
     if (circling) {
       alertKinds.push('circling');
