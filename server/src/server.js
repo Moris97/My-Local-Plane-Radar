@@ -15,7 +15,9 @@ import {
   isPasswordSet, verifyPassword, setPassword, removePassword, issueToken, isValidToken,
   isLockedOut, recordFailedAttempt, recordSuccessfulAttempt,
 } from './settings-auth.js';
-import { exportConfig, importConfig } from './config-backup.js';
+import { backupChunks, importBackup, validateBrowserSettings } from './config-backup.js';
+import { decodeBackupFile, gzipChunkStream, BackupFileError } from './backup-file.js';
+import { flushAllRuntimeState, reloadRuntimeStateFromDb } from './runtime-state.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange, granularityFor } from './stats-query.js';
 import { queryTable } from './stats-table.js';
@@ -73,8 +75,29 @@ const AIRLINES_TABLE_SPEC = (airlineNameFor) => ({
   defaultSort: { key: 'registrationsCount', dir: 'desc' },
 });
 
+// A restored .mlpr is uploaded as raw bytes, so it needs a parser of its
+// own -- Fastify only understands JSON out of the box and would answer 415
+// before the route ever ran. Registered globally but only ever reached by
+// the import route, since nothing else in this app accepts this type; the
+// built-in JSON parser is untouched, so every other route keeps Fastify's
+// default 1 MiB body limit.
+const BACKUP_CONTENT_TYPE = 'application/octet-stream';
+
+// Comfortably above the ~6-8 MB a gzipped backup of a heavy multi-year
+// install produces, and small enough that a LAN client (requireSettingsAuth
+// is a no-op when no Settings password is set) can't make the Pi buffer
+// something absurd. Fastify answers 413 past this.
+const IMPORT_BODY_LIMIT_BYTES = 16 * 1024 * 1024;
+// The export request body only ever carries the browser's own settings
+// blob, which config-backup.js caps at 64 KB anyway.
+const EXPORT_BODY_LIMIT_BYTES = 256 * 1024;
+
 export async function buildServer({ logger = true } = {}) {
   const app = Fastify({ logger });
+
+  app.addContentTypeParser(BACKUP_CONTENT_TYPE, { parseAs: 'buffer' }, (request, body, done) => {
+    done(null, body);
+  });
 
   // No reason for this app to ever be framed by another site, and no
   // reason for a browser to guess a response's type past what we already
@@ -276,24 +299,94 @@ export async function buildServer({ logger = true } = {}) {
     return { port, source, restartRequired: true };
   });
 
-  // A full config backup/restore (config-backup.js) -- gated the same as
-  // /api/settings and /api/server/port even though it also bundles things
-  // that normally aren't gated on their own (notification settings, watch
-  // list): the export is one payload containing the password hash, home
-  // location, and smart-home broker credentials alongside those, so the
-  // combined response has to be protected at the level of its most
+  // A full backup/restore (config-backup.js + backup-file.js) -- gated the
+  // same as /api/settings and /api/server/port even though it also bundles
+  // things that normally aren't gated on their own (notification settings,
+  // watch list): the export is one payload containing the password hash,
+  // home location, and smart-home broker credentials alongside those, so
+  // the combined response has to be protected at the level of its most
   // sensitive content, not its least.
-  app.get('/api/settings/export', { preHandler: requireSettingsAuth }, async () => exportConfig());
+  function sendBackup(reply, browserSettings) {
+    // The periodic flushes are what make this necessary: today's chart
+    // history is only written hourly and the antenna blob every five
+    // minutes, so without this the file would silently be missing whatever
+    // has accumulated since the last tick.
+    flushAllRuntimeState();
 
-  app.post('/api/settings/import', { preHandler: requireSettingsAuth }, async (request, reply) => {
-    const result = importConfig(request.body);
-    if (!result.ok) return reply.code(400).send({ error: result.error });
-    // Any of the imported keys could be the smart-home settings blob --
-    // same "apply immediately, no restart needed" behavior the smart-home
-    // PUT route already has, just reached from a different entry point.
-    reconfigureSmartHome();
-    return result;
-  });
+    const stamp = new Date().toISOString().slice(0, 10);
+    reply
+      .header('Content-Type', 'application/gzip')
+      .header('Content-Disposition', `attachment; filename="mlpr-backup-${stamp}.mlpr"`)
+      .header('Cache-Control', 'no-store');
+    // Never Content-Encoding: gzip -- fetch() would transparently
+    // decompress it and the browser would save an uncompressed file under a
+    // .mlpr name. The compression is the file format here, not a transfer
+    // detail.
+    return gzipChunkStream(backupChunks({ browserSettings, appVersion }));
+  }
+
+  // POST carries the browser's own localStorage settings, because a browser
+  // cannot append a section to a finished gzip stream without decompressing
+  // it -- so it sends that section up instead and the server embeds it
+  // before compressing. No CompressionStream anywhere on the client.
+  app.post(
+    '/api/settings/export',
+    { preHandler: requireSettingsAuth, bodyLimit: EXPORT_BODY_LIMIT_BYTES },
+    async (request, reply) => sendBackup(reply, validateBrowserSettings(request.body?.browserSettings)),
+  );
+
+  // Same file without the browser section, for `curl -o backup.mlpr`.
+  app.get('/api/settings/export', { preHandler: requireSettingsAuth }, async (request, reply) =>
+    sendBackup(reply, null),
+  );
+
+  app.post(
+    '/api/settings/import',
+    { preHandler: requireSettingsAuth, bodyLimit: IMPORT_BODY_LIMIT_BYTES },
+    async (request, reply) => {
+      let data;
+      if (Buffer.isBuffer(request.body)) {
+        try {
+          data = decodeBackupFile(request.body);
+        } catch (err) {
+          if (err instanceof BackupFileError) return reply.code(400).send({ error: err.message });
+          throw err;
+        }
+      } else {
+        // The pre-existing JSON-body path, unchanged -- anything scripted
+        // against the old config-only import keeps working.
+        data = request.body;
+      }
+
+      // Flush before importing, never after: reloadRuntimeStateFromDb()
+      // below throws the in-memory caches away, and anything still dirty at
+      // that point would simply be lost. Flushing first also means the
+      // row-level min()/max() merges compare the backup against genuinely
+      // current values.
+      flushAllRuntimeState();
+
+      const startedAt = Date.now();
+      const result = importBackup(data);
+      if (!result.ok) return reply.code(400).send({ error: result.error });
+
+      // Without this the import undoes itself: the modules that keep
+      // authoritative state in memory (antenna cells, the registration and
+      // seen-* caches, the all-time range record, the stats-history
+      // snapshot) would overwrite the freshly restored rows at their next
+      // periodic flush.
+      reloadRuntimeStateFromDb();
+      // Any of the imported keys could be the smart-home settings blob --
+      // same "apply immediately, no restart needed" behavior the smart-home
+      // PUT route already has, just reached from a different entry point.
+      reconfigureSmartHome();
+
+      request.log.info(
+        { keys: result.importedKeys.length, counts: result.counts, ms: Date.now() - startedAt },
+        'settings backup restored',
+      );
+      return result;
+    },
+  );
 
   app.get('/api/stats/history', async (request) => getStatsHistoryForRange(parseStatsRange(request)));
 

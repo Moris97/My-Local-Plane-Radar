@@ -381,6 +381,136 @@ export function getRegistrationsSince(sinceMs) {
   return db.prepare('SELECT * FROM registrations WHERE last_seen_at >= ? ORDER BY last_seen_at DESC').all(sinceMs);
 }
 
+// Merge-safe row writers used by exactly one caller: config-backup.js's
+// restore path. Every upsert* function above is deliberately NOT reusable
+// here, and each in its own data-losing way:
+//
+//   - the three seen tables set last_seen_at = excluded.last_seen_at, so
+//     restoring an older backup would move a live "last seen" *backwards*,
+//     and none of them touch first_seen_at at all -- discarding precisely
+//     the oldest-sighting history a backup exists to preserve.
+//   - upsertRegistration overwrites times_seen with the backup's (possibly
+//     smaller) count, and overwrites a live non-null type_code/airline_icao
+//     with a null from an older backup that hadn't resolved it yet.
+//   - upsertDailyStats always stamps updated_at = Date.now(), so it cannot
+//     express "leave this row alone, the live one is fresher".
+//
+// So the restore path merges instead: oldest first_seen_at wins, newest
+// last_seen_at wins, the higher times_seen wins, and a null never clobbers
+// a known value. On a fresh install (empty database -- the headline
+// "reinstall the SD card" case) these behave identically to the plain
+// upserts; the difference only shows up when importing into a database that
+// already has rows, which is exactly the case the merge-not-replace decision
+// committed us to.
+//
+// daily_stats merges whole-row newest-wins rather than per-column max()
+// because a row's averages (avg_aircraft, avg_with_pos) are only meaningful
+// alongside the maxima from the same accumulator -- mixing columns from two
+// different runs would produce a day that never actually happened.
+const importRowWriters = {
+  daily_stats: {
+    stmt: db.prepare(`
+      INSERT INTO daily_stats (
+        date, max_aircraft, total_messages, max_range_km,
+        avg_aircraft, avg_with_pos, max_with_pos, avg_without_pos, max_without_pos, range_top_avg_km,
+        unique_aircraft_count, unique_flights_count,
+        updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(date) DO UPDATE SET
+        max_aircraft = excluded.max_aircraft,
+        total_messages = excluded.total_messages,
+        max_range_km = excluded.max_range_km,
+        avg_aircraft = excluded.avg_aircraft,
+        avg_with_pos = excluded.avg_with_pos,
+        max_with_pos = excluded.max_with_pos,
+        avg_without_pos = excluded.avg_without_pos,
+        max_without_pos = excluded.max_without_pos,
+        range_top_avg_km = excluded.range_top_avg_km,
+        unique_aircraft_count = excluded.unique_aircraft_count,
+        unique_flights_count = excluded.unique_flights_count,
+        updated_at = excluded.updated_at
+      WHERE excluded.updated_at > daily_stats.updated_at
+    `),
+    bind: (row) => [
+      row.date,
+      row.maxAircraft,
+      row.totalMessages,
+      row.maxRangeKm,
+      row.avgAircraft,
+      row.avgWithPos,
+      row.maxWithPos,
+      row.avgWithoutPos,
+      row.maxWithoutPos,
+      row.rangeTopAvgKm,
+      row.uniqueAircraftCount,
+      row.uniqueFlightsCount,
+      row.updatedAt,
+    ],
+  },
+  seen_aircraft: {
+    stmt: db.prepare(`
+      INSERT INTO seen_aircraft (hex, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+      ON CONFLICT(hex) DO UPDATE SET
+        first_seen_at = min(seen_aircraft.first_seen_at, excluded.first_seen_at),
+        last_seen_at = max(seen_aircraft.last_seen_at, excluded.last_seen_at)
+    `),
+    bind: (row) => [row.hex, row.firstSeenAt, row.lastSeenAt],
+  },
+  all_seen_aircraft: {
+    stmt: db.prepare(`
+      INSERT INTO all_seen_aircraft (hex, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+      ON CONFLICT(hex) DO UPDATE SET
+        first_seen_at = min(all_seen_aircraft.first_seen_at, excluded.first_seen_at),
+        last_seen_at = max(all_seen_aircraft.last_seen_at, excluded.last_seen_at)
+    `),
+    bind: (row) => [row.hex, row.firstSeenAt, row.lastSeenAt],
+  },
+  seen_flights: {
+    stmt: db.prepare(`
+      INSERT INTO seen_flights (flight, first_seen_at, last_seen_at) VALUES (?, ?, ?)
+      ON CONFLICT(flight) DO UPDATE SET
+        first_seen_at = min(seen_flights.first_seen_at, excluded.first_seen_at),
+        last_seen_at = max(seen_flights.last_seen_at, excluded.last_seen_at)
+    `),
+    bind: (row) => [row.flight, row.firstSeenAt, row.lastSeenAt],
+  },
+  registrations: {
+    stmt: db.prepare(`
+      INSERT INTO registrations (registration, type_code, airline_icao, first_seen_at, last_seen_at, times_seen)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(registration) DO UPDATE SET
+        type_code = coalesce(excluded.type_code, registrations.type_code),
+        airline_icao = coalesce(excluded.airline_icao, registrations.airline_icao),
+        first_seen_at = min(registrations.first_seen_at, excluded.first_seen_at),
+        last_seen_at = max(registrations.last_seen_at, excluded.last_seen_at),
+        times_seen = max(registrations.times_seen, excluded.times_seen)
+    `),
+    bind: (row) => [
+      row.registration,
+      row.typeCode ?? null,
+      row.airlineIcao ?? null,
+      row.firstSeenAt,
+      row.lastSeenAt,
+      row.timesSeen,
+    ],
+  },
+};
+
+// Whitelist lookup, never dynamic SQL: `table` comes from config-backup.js's
+// TABLE_SPECS, and an unknown name throws rather than reaching the database.
+// Wrapped in runBatch so a restore of one table is one commit; the caller
+// wraps the whole import in an outer runBatch, which SAVEPOINT-nests.
+export function importRows(table, entries) {
+  if (!Object.hasOwn(importRowWriters, table)) throw new Error(`Unknown table for import: ${table}`);
+  const writer = importRowWriters[table];
+  if (entries.length === 0) return 0;
+  runBatch(() => {
+    for (const entry of entries) writer.stmt.run(...writer.bind(entry));
+  });
+  return entries.length;
+}
+
 // One row per airline ICAO code actually seen, aggregated straight from the
 // registrations table -- no separate airlines table needed, this is exactly
 // the same data the "most common airline" chart already reads, just grouped

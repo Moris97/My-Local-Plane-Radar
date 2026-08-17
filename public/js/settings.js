@@ -1,5 +1,8 @@
 import { t } from './i18n.js';
-import { getSettings, updateSettings, ICON_SIZE_MIN, ICON_SIZE_MAX } from './settings-state.js';
+import {
+  getSettings, updateSettings, collectLocalBackup, applyLocalBackup, ICON_SIZE_MIN, ICON_SIZE_MAX,
+} from './settings-state.js';
+import { readStatsRangePreference, writeStatsRangePreference } from './stats.js';
 import { COMMON_AIRCRAFT_TYPES } from './aircraft-types.js';
 import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from './settings-auth.js';
 import { isOnlineFallbackActive } from './basemap.js';
@@ -415,12 +418,16 @@ async function renderServerTab(root) {
     <fieldset class="mlpr-settings-group">
       <legend>${t('configBackup')}</legend>
       <p class="mlpr-home-status">${t('configBackupHint')}</p>
+      <label><input type="checkbox" id="mlpr-backup-include-local" checked> ${t('backupIncludeLocal')}</label>
       <div class="mlpr-home-actions">
         <button type="button" id="mlpr-config-export">${t('downloadBackup')}</button>
         <button type="button" id="mlpr-config-import-btn">${t('restoreBackup')}</button>
-        <input type="file" id="mlpr-config-import-file" accept="application/json" style="display:none">
+        <input type="file" id="mlpr-config-import-file" accept=".mlpr,.json,application/json" style="display:none">
       </div>
       <p id="mlpr-config-backup-status" class="mlpr-home-status"></p>
+      <div class="mlpr-home-actions" id="mlpr-config-reload-row" style="display:none">
+        <button type="button" id="mlpr-config-reload">${t('backupReloadNow')}</button>
+      </div>
       <p id="mlpr-config-backup-error" class="mlpr-gate-error"></p>
     </fieldset>
   `;
@@ -432,34 +439,69 @@ async function renderServerTab(root) {
   renderSecuritySection(root);
 }
 
+// Turns importBackup's per-table counts into one readable line. t() has no
+// interpolation, so the numbers are composed here rather than in i18n.js.
+function summarizeRestoredCounts(counts) {
+  const total = Object.values(counts ?? {}).reduce((sum, n) => sum + n, 0);
+  if (!total) return '';
+  return ` (${total.toLocaleString()} ${t('backupRowsRestored')})`;
+}
+
 function wireConfigBackup(container, onUnauthorized) {
   const exportBtn = container.querySelector('#mlpr-config-export');
   const importBtn = container.querySelector('#mlpr-config-import-btn');
   const fileInput = container.querySelector('#mlpr-config-import-file');
+  const includeLocalEl = container.querySelector('#mlpr-backup-include-local');
   const statusEl = container.querySelector('#mlpr-config-backup-status');
   const errorEl = container.querySelector('#mlpr-config-backup-error');
+  const reloadRow = container.querySelector('#mlpr-config-reload-row');
+  const reloadBtn = container.querySelector('#mlpr-config-reload');
+
+  reloadBtn.addEventListener('click', () => window.location.reload());
 
   exportBtn.addEventListener('click', async () => {
-    statusEl.textContent = '';
+    statusEl.textContent = t('backupWorking');
     errorEl.textContent = '';
-    const response = await authedFetch('/api/settings/export', undefined, onUnauthorized);
-    if (!response) return;
+    reloadRow.style.display = 'none';
+
+    // POST, not GET: the server compresses the file, and a browser can't
+    // append its own section to a finished gzip stream -- so the per-browser
+    // settings are sent up instead and embedded before compression. The
+    // checkbox is a per-action choice, deliberately not persisted as a
+    // setting of its own.
+    const browserSettings = includeLocalEl.checked
+      ? collectLocalBackup(readStatsRangePreference())
+      : null;
+
+    const response = await authedFetch(
+      '/api/settings/export',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ browserSettings }),
+      },
+      onUnauthorized,
+    );
+    if (!response) {
+      statusEl.textContent = '';
+      return;
+    }
     if (!response.ok) {
+      statusEl.textContent = '';
       errorEl.textContent = t('configExportError');
       return;
     }
-    const dump = await response.json();
-    // Plain client-side "download this JSON as a file" -- a Blob + a
-    // throwaway <a download> click, the standard no-dependency technique;
-    // nothing here is ever proxied through anywhere, it's a straight
-    // save of the response body already sitting in memory.
-    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+
+    // The bytes are saved exactly as they arrive -- the gzip *is* the file
+    // format, so nothing here decodes or re-encodes anything.
+    const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `mlpr-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `mlpr-backup-${new Date().toISOString().slice(0, 10)}.mlpr`;
     link.click();
     URL.revokeObjectURL(url);
+    statusEl.textContent = '';
   });
 
   importBtn.addEventListener('click', () => fileInput.click());
@@ -471,6 +513,7 @@ function wireConfigBackup(container, onUnauthorized) {
 
     statusEl.textContent = '';
     errorEl.textContent = '';
+    reloadRow.style.display = 'none';
 
     // Same "this is hard to walk back, confirm first" precedent the
     // server-port change already set -- restoring an old backup can just
@@ -478,29 +521,47 @@ function wireConfigBackup(container, onUnauthorized) {
     // stale port) as a mistyped port can.
     if (!window.confirm(t('confirmConfigImport'))) return;
 
-    let dump;
-    try {
-      dump = JSON.parse(await file.text());
-    } catch {
-      errorEl.textContent = t('configImportError');
-      return;
-    }
+    statusEl.textContent = t('restoreWorking');
 
+    // Sent as raw bytes with an explicit Content-Type. Both halves matter:
+    // the file is gzip so there is nothing to parse client-side, and a File
+    // picked with an unknown .mlpr extension has type === '', which would
+    // leave fetch sending no content-type header at all and Fastify
+    // answering 415 before the route ever ran.
     const response = await authedFetch(
       '/api/settings/import',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dump),
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
       },
       onUnauthorized,
     );
-    if (!response) return;
-    if (!response.ok) {
-      errorEl.textContent = t('configImportError');
+    if (!response) {
+      statusEl.textContent = '';
       return;
     }
-    statusEl.textContent = t('configImportSuccess');
+    if (!response.ok) {
+      statusEl.textContent = '';
+      errorEl.textContent = response.status === 413 ? t('backupFileTooLarge') : t('configImportError');
+      return;
+    }
+
+    const result = await response.json();
+    let message = t('configImportSuccess') + summarizeRestoredCounts(result.counts);
+
+    // The two halves are applied independently: a backup could legitimately
+    // carry a remembered Stats range and no recognisable settings (or the
+    // other way round), and either one is worth restoring on its own.
+    const local = result.browserSettings;
+    if (local) {
+      const appliedSettings = applyLocalBackup(local);
+      const appliedRange = Boolean(local.statsRange);
+      if (appliedRange) writeStatsRangePreference(local.statsRange);
+      if (appliedSettings || appliedRange) message += ` ${t('backupLocalRestored')}`;
+    }
+    statusEl.textContent = message;
+    reloadRow.style.display = '';
   });
 }
 

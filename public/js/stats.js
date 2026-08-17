@@ -62,6 +62,18 @@ function persistRange(range) {
   }
 }
 
+// Exposed for the backup export/import in settings.js, so the key and its
+// validation stay owned here rather than being spelled out a second time.
+export function readStatsRangePreference() {
+  return loadPersistedRange();
+}
+
+export function writeStatsRangePreference(range) {
+  if (!RANGES.includes(range)) return;
+  persistRange(range);
+  currentRange = range;
+}
+
 let currentRange = loadPersistedRange();
 
 // Bumped every time currentRange changes. Every range-scoped async draw

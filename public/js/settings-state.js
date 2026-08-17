@@ -101,3 +101,58 @@ export function onSettingsChange(fn) {
   listeners.add(fn);
   return () => listeners.delete(fn);
 }
+
+// --- Backup support -------------------------------------------------------
+//
+// These settings are per-browser by design and the server never sees them,
+// so a full backup can only include them if the browser puts them in the
+// file itself. That is opt-in at export time (a checkbox in Settings ->
+// Server), which is why this is a pair of explicit functions rather than
+// something the export path always does.
+
+// Keeps only keys this version actually defines, and only where the stored
+// value's type matches the default's. load() spreads whatever is in
+// localStorage over the defaults, so without this filter a junk key from a
+// hand-edited or hostile backup file would be carried around forever.
+// null is allowed through for keys whose default is null (the altitude
+// filter bounds), since that is their genuine "unset" value.
+export function filterKnownSettings(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+
+  const out = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === '__proto__' || !Object.hasOwn(defaults, key)) continue;
+    const fallback = defaults[key];
+    if (value === null) {
+      if (fallback === null) out[key] = null;
+      continue;
+    }
+    if (fallback === null) {
+      // altitudeFilterMin/Max: null or a number, nothing else.
+      if (typeof value === 'number' && Number.isFinite(value)) out[key] = value;
+      continue;
+    }
+    if (Array.isArray(fallback) !== Array.isArray(value)) continue;
+    if (typeof value !== typeof fallback) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+export function collectLocalBackup(statsRange) {
+  const section = { settings: { ...settings } };
+  if (typeof statsRange === 'string') section.statsRange = statsRange;
+  return section;
+}
+
+// Goes through updateSettings(), never localStorage.setItem: that is the
+// only path that also refreshes this module's in-memory copy and notifies
+// onSettingsChange listeners, so the map/list pick the restored values up
+// without waiting for a reload.
+export function applyLocalBackup(section) {
+  if (!section || typeof section !== 'object') return false;
+  const patch = filterKnownSettings(section.settings);
+  if (Object.keys(patch).length === 0) return false;
+  updateSettings(patch);
+  return true;
+}

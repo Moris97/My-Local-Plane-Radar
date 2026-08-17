@@ -16,6 +16,7 @@ assumes it's already running and open in your browser.
   - [Aircraft](#aircraft-tab)
   - [Notifications](#notifications-tab)
   - [Server](#server-tab)
+  - [Backup and restore](#backup-and-restore)
 - [Setting up push notifications (ntfy)](#setting-up-push-notifications-ntfy)
 - [Building a watch list](#building-a-watch-list)
 
@@ -221,6 +222,60 @@ automation at the same time — see the [Smart Home tab](#smart-home-tab).
   (e.g. if auto-detection picked up the wrong value, or your receiver
   doesn't report a location) — this feeds range calculations, the home
   marker, and the "automatic" map theme's sunrise/sunset calculation.
+- **Backup** — see [Backup and restore](#backup-and-restore) below.
+
+### Backup and restore
+
+**Download backup** saves your entire install as a single `.mlpr` file.
+It contains everything MLPR has: all your settings (notification rules,
+watch list, smart-home broker settings, receiver location, server port,
+the Settings password), *and* all the history it has accumulated — daily
+statistics, every aircraft, flight and registration it has ever seen, and
+the antenna coverage map. On an established install that's months of data
+nothing else can recreate.
+
+The intended use is exactly what it sounds like: export, copy the file
+somewhere safe, reinstall the OS on a fresh SD card, install MLPR, click
+**Restore from file**, and you're back where you were.
+
+- **"Also include this browser's own settings"** (on by default) — units,
+  language, map theme, list columns, icon size and the rest live in *this
+  browser*, not on the Pi, so MLPR can only put them in the file if you
+  ask it to. Leave it on for a true one-to-one restore; turn it off if the
+  backup is going to a different machine whose display preferences you'd
+  rather keep.
+- **Restoring merges, it never deletes.** Settings are replaced by what's
+  in the file; history is merged into whatever is already there, keeping
+  the earliest "first seen" and the latest "last seen" on both sides. So
+  restoring an old backup onto a running install can't lose data — and on
+  a fresh install, merging into an empty database is simply a restore.
+- After a successful restore MLPR shows how many records came back and
+  offers a **Reload the page** button. Some restored settings (language,
+  units) only take effect after that reload.
+- **The file is compressed** — it's gzip inside, so it's typically a small
+  fraction of the raw size. If you're curious what's in one,
+  `gunzip -c mlpr-backup-2026-08-17.mlpr | head` shows the settings first.
+- **Older backups still work.** A `.json` backup taken with MLPR 2.2 or
+  earlier restores fine; it just only contains what that version saved
+  (settings, no history).
+- **Keep the file private.** It includes your Settings password hash and
+  your smart-home broker username and password. Treat it like a password
+  manager export, not like a screenshot.
+
+You can also grab a backup without opening the browser, which makes an
+automated copy easy to schedule:
+
+```sh
+curl -o mlpr-backup.mlpr http://<pi-address>:1090/api/settings/export
+```
+
+(If you've set a Settings password, add
+`-H "X-MLPR-Settings-Token: <token>"` — that endpoint is protected along
+with the rest of the Server tab.)
+
+What is *not* in the backup, because it doesn't need to be: the map data
+and airline name database (the install script fetches those), and live
+aircraft state, which is by design never stored at all.
 
 ### Smart Home tab
 

@@ -305,6 +305,24 @@ export function clearAntennaStats() {
   deleteConfig(CONFIG_KEY);
 }
 
+// Forgets the in-memory cells so the next read re-reads the stored blob --
+// used after a backup restore has replaced that blob underneath us.
+//
+// Deliberately neither of its two neighbours. clearAntennaStats() would
+// deleteConfig() the key we just imported. resetAntennaStats() zeroes
+// `revision`, which app.js compares with !== against its own cached number
+// specifically so a server restart still reads as "changed" -- winding it
+// back to 0 here would leave a browser that last saw 0 convinced its
+// coverage polygon was already up to date. It also drops the latest signal
+// readings, which are live receiver measurements with nothing to do with an
+// import.
+export function reloadAntennaStatsFromDb() {
+  cells = createEmptyCells();
+  loaded = false;
+  dirty = false;
+  revision += 1;
+}
+
 export function resetAntennaStats() {
   cells = createEmptyCells();
   latestSignalDbfs = null;

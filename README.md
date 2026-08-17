@@ -147,6 +147,10 @@ see the **[wiki](https://github.com/Moris97/My-Local-Plane-Radar/wiki)**.
   publish a structured MQTT message for Home Assistant (or any other
   MQTT-speaking system) to react to — e.g. dim the lights and change their
   color when a watched aircraft type appears nearby.
+- **Full backup and restore** — export the whole install (settings *and*
+  every statistic, aircraft, flight and registration it has ever recorded)
+  as a single `.mlpr` file. Reinstall the OS on a fresh SD card, import the
+  file, and you're back exactly where you were.
 - **Runs entirely on a Raspberry Pi 3** — 1 GB RAM, no Docker, no native
   dependencies, SD-card-friendly (batched writes, no raw position history).
 

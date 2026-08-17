@@ -480,6 +480,18 @@ export function resetAllTimeMaxRangeKm() {
   recordDirty = false;
 }
 
+// Forgets the cached record so the next read takes it from SQLite again --
+// used after a backup restore has written a different value there.
+// Deliberately not resetAllTimeMaxRangeKm() above, which deleteConfig()s
+// the key. null (rather than 0) is what means "not loaded yet" to
+// loadRecordKm; leaving 0 would make a restored 300 km record look like a
+// fresh install with no record at all, and the next sample above 0 would
+// overwrite it.
+export function invalidateAllTimeMaxRangeKmCache() {
+  cachedRecordKm = null;
+  recordDirty = false;
+}
+
 // Called from the same periodic flush tick as flushDailyStats (and the
 // graceful-shutdown path that also calls it) -- see evaluateRangeRecordRule
 // for why the write itself is deferred to here instead of happening inline

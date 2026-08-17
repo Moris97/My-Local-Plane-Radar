@@ -5,28 +5,29 @@ import { toWireAircraftList } from './wire.js';
 import { setAutoDetectedHome, getEffectiveHome } from './home.js';
 import {
   ingestStats,
-  getDailyAccumulator,
   getLatestStatsValues,
   recordRangeSample,
   recordTrackedCounts,
-  getRangeSummary,
   getMaxRangeLastHourKm,
   recordDailyUnique,
-  getDailyUniqueCounts,
-  snapshotForPersistence,
   restoreFromSnapshot,
 } from './stats-history.js';
-import { upsertDailyStats, getConfigJSON, setConfigJSON, runBatch } from './db.js';
-import { noteFlightSeen, flushDirtySeenFlights } from './seen-flights.js';
-import { noteAircraftSeen, flushDirtyAircraftSeen } from './aircraft-seen.js';
-import { touchAircraftTracked, flushDirtyAircraftTracked } from './aircraft-tracked.js';
-import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, flushAllTimeMaxRangeKmIfDirty, setUiEventSender } from './notifications/rules.js';
+import { getConfigJSON } from './db.js';
+import {
+  flushDailyStats,
+  flushStatsHistorySnapshot,
+  STATS_HISTORY_SNAPSHOT_CONFIG_KEY,
+} from './runtime-state.js';
+import { noteFlightSeen } from './seen-flights.js';
+import { noteAircraftSeen } from './aircraft-seen.js';
+import { touchAircraftTracked } from './aircraft-tracked.js';
+import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, setUiEventSender } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
 import { evictStaleCircling } from './notifications/circling-detector.js';
-import { recordSighting, flushDirtyRegistrations } from './stats-registrations.js';
+import { recordSighting } from './stats-registrations.js';
 import { resolveAirlineIcao } from './airline-lookup.js';
 import { getAirlines } from './airlines-data.js';
 import { distanceKm, isRangeEligible, roundKm } from './range.js';
@@ -54,7 +55,6 @@ const STATS_HISTORY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
 // to five minutes of new maxima to an unclean shutdown is irrelevant --
 // they are best-ever records that the next contact re-establishes.
 const ANTENNA_STATS_FLUSH_INTERVAL_MS = 5 * 60 * 1000;
-const STATS_HISTORY_SNAPSHOT_CONFIG_KEY = 'statsHistorySnapshot';
 const COOLDOWN_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 const TRAIL_EVICTION_INTERVAL_MS = 60 * 1000;
 
@@ -249,56 +249,6 @@ function broadcastStats(broadcast) {
     messagesPerSec,
     maxRangeLastHourKm: getMaxRangeLastHourKm(),
   });
-}
-
-// The five writes below used to be five separate SQLite transactions (one
-// implicit one for upsertDailyStats's bare .run(), four more from the
-// flushDirtyX() calls each reaching their own runBatch/upsert* internally)
-// on every single flush tick. Wrapping the whole function in one outer
-// runBatch collapses that to one commit -- runBatch is reentrant via
-// SAVEPOINT (see db.js), so each of these still commits/rolls back
-// correctly on its own if ever called outside this function too.
-function flushDailyStats() {
-  runBatch(() => {
-    const accumulator = getDailyAccumulator();
-    // Today's max/top-avg range come from our own Haversine sampling
-    // (getRangeSummary), not accumulator.maxRangeKm -- that field only ever
-    // reflects readsb's own all-time running record's value as observed
-    // today, not a true daily max. See stats-history.js.
-    const rangeSummary = getRangeSummary();
-    const uniqueCounts = getDailyUniqueCounts();
-    const avgAircraft = accumulator.sampleCount ? accumulator.sumAircraft / accumulator.sampleCount : 0;
-    const avgWithPos = accumulator.sampleCount ? accumulator.sumWithPos / accumulator.sampleCount : 0;
-    const avgWithoutPos = accumulator.sampleCount ? accumulator.sumWithoutPos / accumulator.sampleCount : 0;
-
-    upsertDailyStats(accumulator.date, {
-      maxAircraft: accumulator.maxAircraft,
-      totalMessages: accumulator.totalMessages,
-      maxRangeKm: rangeSummary.maxRangeKm,
-      avgAircraft,
-      avgWithPos,
-      maxWithPos: accumulator.maxWithPos,
-      avgWithoutPos,
-      maxWithoutPos: accumulator.maxWithoutPos,
-      rangeTopAvgKm: rangeSummary.rangeTopAvgKm,
-      uniqueAircraftCount: uniqueCounts.uniqueAircraftCount,
-      uniqueFlightsCount: uniqueCounts.uniqueFlightsCount,
-    });
-
-    flushDirtyRegistrations();
-    flushDirtySeenFlights();
-    flushDirtyAircraftSeen();
-    flushDirtyAircraftTracked();
-    // Same periodic tick (and the graceful-shutdown call to this same
-    // function) now also covers the all-time range record -- see
-    // evaluateRangeRecordRule in rules.js for why that write was moved off
-    // the per-second poll loop.
-    flushAllTimeMaxRangeKmIfDirty();
-  });
-}
-
-function flushStatsHistorySnapshot() {
-  setConfigJSON(STATS_HISTORY_SNAPSHOT_CONFIG_KEY, snapshotForPersistence());
 }
 
 async function main() {

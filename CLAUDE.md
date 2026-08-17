@@ -248,6 +248,10 @@ falls back to "first aircraft," deliberately out of scope for this fix.
    write itself is deferred, same "an in-flight value can be lost on an
    untimely restart, same as everything else under hard rule 6" tradeoff
    already accepted for the daily accumulator.
+   The one place that writes many rows at once on purpose is the backup
+   restore (`config-backup.js`'s `importBackup`): every table goes into a
+   **single** `runBatch`, validated first, so a restore is one commit and
+   is atomic rather than a half-restored install.
 6. Current state lives in RAM only. A service restart losing live state is
    acceptable and expected.
 7. **No Docker.** Install via systemd + a plain script.
@@ -922,18 +926,151 @@ stating the exact new address — a heavier gate than usual, since mistyping a
 port on a headless Pi can lock you out. Config backup/restore uses the same
 gate for the same reason.
 
-**Config backup/restore** (`server/src/config-backup.js`, Server tab
-"Backup"): full export/import of everything in SQLite's `config` table in
-one JSON file. Generic over the table's raw-string/JSON-blob mix
-(`getAllConfigEntries`) — export/import round-trip every value as an opaque
-string, so the module doesn't need updating when a new config key is added
-elsewhere. Import **merges** rather than wiping the table, so restoring an
-older export can't delete a newer-version-only setting. `GET`/`POST
-/api/settings/export`/`/import`, both gated behind `requireSettingsAuth` —
-a deliberate exception to the usual scope, since the bundle includes the
-password hash and smart-home credentials alongside the normally-ungated
-notification settings. A successful import calls `reconfigureSmartHome()`
-immediately; frontend just says "reload the page."
+### Full backup/restore — the `.mlpr` file (v2.2.4)
+
+Server tab → "Backup". The whole install in one file, sized for the real
+scenario: **export → move the file → reinstall the OS → import → 1:1**. Was
+config-table-only through v2.2.x; that left every history table out, i.e.
+months of observations that nothing else could recreate.
+
+**Format** (`server/src/config-backup.js`): gzip-compressed UTF-8 JSON,
+extension `.mlpr` (just a name — nothing needs registering; `gunzip -c
+backup.mlpr` still reads it). Shape: `{version: 2, exportedAt, appVersion,
+browserSettings?, config, tables}`. **A v1 file is a strict subset of a v2
+file** (`version: 1`, no `tables`/`browserSettings`), so import never
+branches on version — missing sections are simply absent, and every
+pre-v2 `mlpr-backup-*.json` still restores. `version` is now actually
+validated: absent/1/2 accepted, `>2` refused as "made by a newer version".
+
+The file has **two halves with deliberately different maintenance costs**,
+and keeping them apart is the point:
+- `config` stays **generic** over that table (`getAllConfigEntries`) —
+  opaque strings, round-tripped byte-for-byte, so a new config key
+  anywhere in the app still needs no change here.
+- `tables` is an explicit per-column spec (`TABLE_SPECS`) covering
+  `daily_stats`, `seen_aircraft`, `all_seen_aircraft`, `seen_flights`,
+  `registrations` — so a **new column does need one line added**, the same
+  cost and shape as `db.js`'s own `DAILY_STATS_NEW_COLUMNS` list. Rows use
+  camelCase names, not SQL column names, so the format is decoupled from
+  the schema. Unknown table names are skipped and reported as
+  `skippedTables`, never fatal.
+
+**Import merges by primary key, never replaces** — no `DELETE` anywhere on
+this path. The existing `upsert*` helpers are **not reusable for this** and
+each loses data in its own way (they set `last_seen_at` straight from the
+input, so an older backup rewinds a live one; they never touch
+`first_seen_at`, discarding exactly the history a backup exists for;
+`upsertRegistration` overwrites `times_seen` downward and lets a null erase
+a resolved `type_code`; `upsertDailyStats` always stamps `updated_at =
+Date.now()`). `db.js`'s **`importRows(sqlTable, entries)`** is the restore-
+only writer: `min()` on first-seen, `max()` on last-seen/`times_seen`,
+`coalesce()` on the nullable columns, and whole-row newest-wins for
+`daily_stats` (per-column `max()` would mix averages and maxima from two
+different accumulators into a day that never happened). Whitelist lookup
+over five prepared statements, no dynamic SQL. On an empty database — the
+headline case — these behave identically to the plain upserts.
+
+Everything is **validated before anything is written**, then written in
+**one `runBatch`** (a half-restored install is worse than a failed one).
+`importBackup` deliberately contains **no `await`**, which is what
+guarantees the 45s flush timer can't interleave with the open transaction.
+
+**The load-bearing part is `server/src/runtime-state.js`, not the file
+format.** Several modules hold authoritative state in RAM and only write it
+out on a timer (45s daily row + dirty trackers, 5 min antenna blob, 1 h
+stats-history snapshot), so without this an import looks like it worked and
+then silently undoes itself within a minute. The route's order is
+`flushAllRuntimeState()` → `importBackup()` → `reloadRuntimeStateFromDb()`
+→ `reconfigureSmartHome()`:
+- flush **before**, because `reset*Cache()` discards dirty in-memory
+  entries (up to 45s of sightings, 5 min of antenna samples) and because
+  the `min`/`max` merges should compare against genuinely current values;
+- reload **after**, so the next `ensureLoaded()` lazily picks up the merged
+  rows.
+The **same `flushAllRuntimeState()` runs on the export path too** — the
+snapshot is only written hourly, so without it "1:1" would be missing
+today's charts. `index.js`'s `flushDailyStats`/`flushStatsHistorySnapshot`/
+`STATS_HISTORY_SNAPSHOT_CONFIG_KEY` moved into this module (behavior
+unchanged); it lives apart from `config-backup.js` so that file stays pure
+"SQLite rows in, rows out" and its test keeps booting with nothing but a
+temp DB, instead of dragging in the whole notification stack.
+
+Two cache-invalidation helpers exist **specifically because their obvious
+neighbours are wrong here**: `antenna-stats.js`'s
+`reloadAntennaStatsFromDb()` (not `clearAntennaStats()`, which would
+`deleteConfig` the blob just imported; not `resetAntennaStats()`, which
+zeroes `revision` — the client compares it with `!==`, so a browser holding
+0 would never refetch its coverage) and `rules.js`'s
+`invalidateAllTimeMaxRangeKmCache()` (not `resetAllTimeMaxRangeKm()`, which
+deletes the key; `null` rather than `0` means "not loaded", or a restored
+300 km record reads as a fresh install and the next sample overwrites it).
+`home.js`, `notifications/settings.js` and `notifications/watchlist.js`
+read SQLite per call and need nothing.
+
+**Transport** (`server/src/backup-file.js`, `node:zlib`, no dependency):
+`decodeBackupFile` sniffs the gzip magic (`1f 8b`) rather than trusting the
+filename, so a renamed file still restores, and falls through to plain JSON
+for v1 files. `maxOutputLength` is **not optional** — without it a 100 KB
+crafted gzip inflates to gigabytes and kills the Pi.
+
+Export **streams** (`backupChunks` generator → `createGzip` level 6,
+2000-row batches), and **the reason is the event loop, not memory** — the
+intuitive "streaming saves RAM" story was measured and is false here. On a
+~203k-row install (x86; a Pi 3 is several times slower): streamed took
+543 ms and let a 10 ms heartbeat timer fire 33 times (worst stall 59 ms);
+buffered (`gzipSync(JSON.stringify(...))`) took 382 ms — *faster* — but the
+heartbeat fired **zero** times, i.e. the aircraft poll and every WebSocket
+would freeze end to end, ~1.5-2 s on a Pi 3. Peak heap is actually slightly
+higher streamed (~51 MB vs ~34 MB under `--max-old-space-size=192`) because
+the async pump gives V8 fewer GC points; V8 regulates it and the export
+still completes under a 64 MB cap, so this trades a little memory for a
+live event loop. Resulting file for that install: **1.6 MB**.
+Each table is still read whole rather than with a live `StatementSync
+.iterate()` cursor — that would bound memory properly, but an open cursor
+held across the export's awaits reads a table the poll loop is writing to,
+and SQLite leaves a SELECT's results undefined if its table changes
+mid-iteration. Consistency beats the megabytes here.
+A side benefit worth keeping: gzip's trailing CRC32/ISIZE makes a
+mid-stream failure produce a file that **fails loudly at restore** instead
+of importing as a silently truncated backup.
+
+`POST /api/settings/export` (the UI) carries `{browserSettings}` in its
+body — a browser can't append a section to a finished gzip stream, so it
+sends its `localStorage` up and the server embeds it before compressing;
+no `CompressionStream` on the client. `GET /api/settings/export` returns
+the same file without that section, for `curl -o backup.mlpr`. **Never set
+`Content-Encoding: gzip`** — `fetch` would transparently decompress and the
+browser would save plain JSON under a `.mlpr` name. Import accepts both a
+`Buffer` (new binary path, `application/octet-stream` content-type parser,
+`bodyLimit` 16 MiB) and a JSON body (the pre-existing path, unchanged).
+Both routes stay behind `requireSettingsAuth` — a deliberate exception to
+the usual scope, since the bundle includes the password hash and
+smart-home credentials alongside normally-ungated notification settings.
+
+**Per-browser settings are opt-in**, via a checkbox in the Backup
+fieldset (default on) — `localStorage` is invisible to the server, so only
+the browser can put it in the file. `settings-state.js`'s
+`filterKnownSettings` keeps only keys this version defines whose type
+matches the default's (`load()` spreads stored values over the defaults, so
+a junk key would otherwise survive forever), and `applyLocalBackup` goes
+through **`updateSettings()`, never `localStorage.setItem`** — the only
+path that also refreshes the module's in-memory copy and fires
+`onSettingsChange`. The import response echoes the section back so the
+browser never decompresses the file it just uploaded. `mlpr-stats-range` is
+read/written through `stats.js`'s own exported accessors rather than
+duplicating the key.
+
+**Known and accepted**: the restore blocks the event loop, because
+`node:sqlite` is synchronous and chunking it would break atomicity (an
+`await` inside `runBatch` would let a periodic flush nest in as a SAVEPOINT
+and be rolled back along with a failed import). Measured rather than
+guessed: 203k rows merged in **365 ms** on x86, so roughly 1.5-2 s on a
+Pi 3 — noticeable, not alarming, and the UI says "this can take a while".
+Also: importing an *old* backup onto a
+*running* install rewinds the `antennaStats`/`statsHistorySnapshot` blobs
+wholesale, correct for a reinstall and surprising for "merge two installs";
+and with no Settings password the import is unauthenticated, same as before
+but with a bigger blast radius.
 
 ## Notification engine
 
