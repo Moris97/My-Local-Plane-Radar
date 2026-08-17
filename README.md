@@ -184,10 +184,9 @@ Then open `http://<host>:1090/`.
 
 ## Why
 
-Replacing a heavyweight Virtual Radar Server setup with something lightweight,
-hackable, and built around one specific goal: get notified when something
-interesting shows up in range (military aircraft, emergency squawks, a new
-personal range record, a watched registration, ...).
+I wanted to create a modern web application to display data from your antenna, react to interesting events—such as circling aircraft, unique aircraft types, and the like—and allow you to send notifications about intriguing flights directly to your phone or smart home system.
+
+The application also features an advanced statistics module.
 
 ## Hardware target
 
@@ -195,6 +194,8 @@ personal range record, a watched registration, ...).
   headless, readsb running as a systemd service.
 - **Development**: Debian on WSL2 (x86_64), deployed to the Pi via `git pull`
   + systemd restart.
+
+Both production and development will likely run on any Linux distribution.
 
 The 1 GB RAM / SD card constraint is treated as a hard requirement throughout,
 not an afterthought — see the performance rules in [CLAUDE.md](./CLAUDE.md).
