@@ -17,7 +17,7 @@ import {
 } from './settings-auth.js';
 import { backupChunks, importBackup, validateBrowserSettings } from './config-backup.js';
 import { decodeBackupFile, gzipChunkStream, BackupFileError } from './backup-file.js';
-import { flushAllRuntimeState, reloadRuntimeStateFromDb } from './runtime-state.js';
+import { flushAllRuntimeState, reloadRuntimeStateFromDb, flushDailyStats } from './runtime-state.js';
 import { getTrail, getAllTrails } from './trail-history.js';
 import { getStatsHistoryForRange, granularityFor } from './stats-query.js';
 import { queryTable } from './stats-table.js';
@@ -375,6 +375,17 @@ export async function buildServer({ logger = true } = {}) {
       // snapshot) would overwrite the freshly restored rows at their next
       // periodic flush.
       reloadRuntimeStateFromDb();
+
+      // And this is what gets *today's* daily_stats row right. The flush
+      // above stamped a live row for today with a fresh updated_at, so the
+      // backup's own row for the same day is necessarily older and the
+      // merge correctly declines it -- on a fresh install that would mean
+      // losing the whole current day and keeping the couple of minutes this
+      // install happened to accumulate. reloadRuntimeStateFromDb() has just
+      // restored the accumulator from whichever snapshot covered more of
+      // today, so re-flushing now writes that row back out with a current
+      // timestamp and the right numbers, in both directions.
+      flushDailyStats();
       // Any of the imported keys could be the smart-home settings blob --
       // same "apply immediately, no restart needed" behavior the smart-home
       // PUT route already has, just reached from a different entry point.

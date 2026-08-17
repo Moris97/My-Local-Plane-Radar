@@ -501,14 +501,19 @@ const importRowWriters = {
 // TABLE_SPECS, and an unknown name throws rather than reaching the database.
 // Wrapped in runBatch so a restore of one table is one commit; the caller
 // wraps the whole import in an outer runBatch, which SAVEPOINT-nests.
+// Returns how many rows were actually written, not how many were offered:
+// the daily_stats merge has a WHERE clause that can legitimately decline a
+// row (the live one is fresher), and reporting the input length would let
+// the UI claim it restored something it didn't.
 export function importRows(table, entries) {
   if (!Object.hasOwn(importRowWriters, table)) throw new Error(`Unknown table for import: ${table}`);
   const writer = importRowWriters[table];
   if (entries.length === 0) return 0;
+  let applied = 0;
   runBatch(() => {
-    for (const entry of entries) writer.stmt.run(...writer.bind(entry));
+    for (const entry of entries) applied += writer.stmt.run(...writer.bind(entry)).changes;
   });
-  return entries.length;
+  return applied;
 }
 
 // One row per airline ICAO code actually seen, aggregated straight from the

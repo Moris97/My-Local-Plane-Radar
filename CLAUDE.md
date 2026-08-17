@@ -955,8 +955,19 @@ and keeping them apart is the point:
   the schema. Unknown table names are skipped and reported as
   `skippedTables`, never fatal.
 
-**Import merges by primary key, never replaces** — no `DELETE` anywhere on
-this path. The existing `upsert*` helpers are **not reusable for this** and
+**Import merges, never deletes** — no `DELETE` anywhere on this path, and
+that promise covers the config table too, not just the row tables.
+**Three rows in `config` are accumulated history, not settings**
+(`HISTORY_CONFIG_MERGERS`), and blanket-overwriting them was a real bug
+caught in review: `allTimeMaxRangeKm` merges as a max (a record only goes
+up), `antennaStats` merges cell by cell via `antenna-stats.js`'s new pure
+`mergeAntennaStatsBlobs` (each (band, sector) keeps the best `TOP_K`
+*distinct aircraft* from both sides — the existing `insertIntoTopK` already
+enforces exactly that within one install), and `statsHistorySnapshot` keeps
+whichever side covers more (later day wins; same day, more poll samples
+wins). Everything else in `config` is a setting and is still overwritten
+wholesale, which is what a setting should do. `mergedKeys` in the response
+names any key where the live side won. The existing `upsert*` helpers are **not reusable for this** and
 each loses data in its own way (they set `last_seen_at` straight from the
 input, so an older backup rewinds a live one; they never touch
 `first_seen_at`, discarding exactly the history a backup exists for;
@@ -981,12 +992,25 @@ out on a timer (45s daily row + dirty trackers, 5 min antenna blob, 1 h
 stats-history snapshot), so without this an import looks like it worked and
 then silently undoes itself within a minute. The route's order is
 `flushAllRuntimeState()` → `importBackup()` → `reloadRuntimeStateFromDb()`
-→ `reconfigureSmartHome()`:
+→ **`flushDailyStats()`** → `reconfigureSmartHome()`:
 - flush **before**, because `reset*Cache()` discards dirty in-memory
   entries (up to 45s of sightings, 5 min of antenna samples) and because
   the `min`/`max` merges should compare against genuinely current values;
 - reload **after**, so the next `ensureLoaded()` lazily picks up the merged
-  rows.
+  rows;
+- **flush daily stats again, last** — and this one is not obvious. That
+  first flush stamps a live `daily_stats` row for *today* with a fresh
+  `updated_at`, and the row merge is newest-wins, so the backup's own row
+  for the same day is necessarily older and gets declined. On a fresh
+  install that silently discarded the whole current day and kept the two
+  minutes the new install happened to accumulate — reported by review,
+  reproduced, and now pinned by a route-level regression test (removing the
+  final flush fails it). Re-flushing after the reload writes today's row
+  from whichever accumulator the snapshot merge decided covered more of the
+  day, with a current timestamp, so it wins in both directions.
+`importRows` returns rows **actually written** (`changes`), not rows
+offered — the declined-row case above is exactly when those differ, and
+reporting the input length made the UI claim restores that never happened.
 The **same `flushAllRuntimeState()` runs on the export path too** — the
 snapshot is only written hourly, so without it "1:1" would be missing
 today's charts. `index.js`'s `flushDailyStats`/`flushStatsHistorySnapshot`/
@@ -1066,11 +1090,17 @@ duplicating the key.
 and be rolled back along with a failed import). Measured rather than
 guessed: 203k rows merged in **365 ms** on x86, so roughly 1.5-2 s on a
 Pi 3 — noticeable, not alarming, and the UI says "this can take a while".
-Also: importing an *old* backup onto a
-*running* install rewinds the `antennaStats`/`statsHistorySnapshot` blobs
-wholesale, correct for a reinstall and surprising for "merge two installs";
-and with no Settings password the import is unauthenticated, same as before
-but with a bigger blast radius.
+Also: with no Settings password the import is
+unauthenticated, same as before but with a bigger blast radius.
+
+`settings-state.js`'s `filterKnownSettings` needs **per-key validators**,
+not just a type match against the default — `listSortLevels: [null]` is a
+perfectly good array, gets persisted, and then throws in `list.js`'s sort
+comparator on every redraw, leaving the List panel broken across reloads
+until `localStorage` is cleared by hand. A validator, where one exists, is
+the **complete** rule for its key and the generic type check is skipped:
+`coverageBand` is legitimately a string *or* a band index, so matching it
+against its default's type would silently drop the numeric form.
 
 ## Notification engine
 

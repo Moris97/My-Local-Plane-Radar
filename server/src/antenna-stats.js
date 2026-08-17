@@ -121,18 +121,15 @@ function serializeCells() {
   return cells.map((band) => band.map((cell) => cell.map((e) => [e.km, e.hex])));
 }
 
-function ensureLoaded() {
-  if (loaded) return;
-  loaded = true;
-  const stored = getConfigJSON(CONFIG_KEY, null);
-  // Checked all the way down to each entry, not just the outer band/sector
-  // shape: a blob from before hex-deduping (this file's own earlier
-  // format) has the same BAND_SLOTS x SECTOR_COUNT shape but plain-number
-  // leaves, which would otherwise pass the outer check and then be
-  // misread as tuples (`v[0]`/`v[1]` on a number). There is no way to
-  // recover which aircraft contributed each historical number, so -- same
-  // as the redesign before this one -- a shape that doesn't match is
-  // ignored and started fresh rather than migrated.
+// Validates a stored blob all the way down to each entry, not just the
+// outer band/sector shape: a blob from before hex-deduping (this file's own
+// earlier format) has the same BAND_SLOTS x SECTOR_COUNT shape but
+// plain-number leaves, which would otherwise pass the outer check and then
+// be misread as tuples (`v[0]`/`v[1]` on a number). There is no way to
+// recover which aircraft contributed each historical number, so -- same as
+// the redesign before this one -- a shape that doesn't match is ignored and
+// started fresh rather than migrated. Returns in-memory cells, or null.
+function parseStoredCells(stored) {
   const validShape =
     Array.isArray(stored?.cells) &&
     stored.cells.length === BAND_SLOTS &&
@@ -146,9 +143,44 @@ function ensureLoaded() {
             cell.every((e) => Array.isArray(e) && e.length === 2 && typeof e[0] === 'number' && typeof e[1] === 'string'),
         ),
     );
-  if (validShape) {
-    cells = stored.cells.map((band) => band.map((cell) => cell.map(([km, hex]) => ({ km, hex }))));
+  if (!validShape) return null;
+  return stored.cells.map((band) => band.map((cell) => cell.map(([km, hex]) => ({ km, hex }))));
+}
+
+function ensureLoaded() {
+  if (loaded) return;
+  loaded = true;
+  const parsed = parseStoredCells(getConfigJSON(CONFIG_KEY, null));
+  if (parsed) cells = parsed;
+}
+
+// Combines two stored blobs into one, for the backup restore path
+// (config-backup.js): every cell keeps the best TOP_K *distinct aircraft*
+// across both sides, which is exactly what insertIntoTopK already enforces
+// within one install. A plain overwrite would throw away whichever side
+// wasn't in the file -- and unlike a setting, coverage cells are months of
+// accumulated observation that nothing regenerates.
+//
+// Merging is only meaningful because every cell is keyed by (altitude band,
+// bearing sector) relative to the home location. If the receiver has moved
+// between the two blobs both are already invalid, which is what the
+// "reset antenna stats" button exists for.
+//
+// Pure: takes and returns serialized blobs, touches no module state.
+export function mergeAntennaStatsBlobs(existingBlob, incomingBlob) {
+  const existing = parseStoredCells(existingBlob);
+  const incoming = parseStoredCells(incomingBlob);
+  if (!incoming) return existingBlob ?? null;
+  if (!existing) return incomingBlob;
+
+  for (let band = 0; band < BAND_SLOTS; band += 1) {
+    for (let sector = 0; sector < SECTOR_COUNT; sector += 1) {
+      for (const entry of incoming[band][sector]) {
+        insertIntoTopK(existing[band][sector], entry.hex, entry.km);
+      }
+    }
   }
+  return { cells: existing.map((band) => band.map((cell) => cell.map((e) => [e.km, e.hex]))) };
 }
 
 export function altitudeBandIndex(altBaro, onGround) {

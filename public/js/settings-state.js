@@ -110,18 +110,56 @@ export function onSettingsChange(fn) {
 // Server), which is why this is a pair of explicit functions rather than
 // something the export path always does.
 
+// Per-key checks for the settings whose *shape* matters, not just their
+// top-level type. A matching type is not enough: `listSortLevels: [null]`
+// is a perfectly good array and would be persisted, then throw on every
+// redraw in list.js's sort comparator (`level.key` on null), leaving the
+// List panel broken across reloads until localStorage is cleared by hand.
+// Anything not listed here is checked against its default's type only.
+// A validator here is the COMPLETE rule for its key -- the generic
+// type-matching below is skipped entirely when one exists, so each must
+// check the type itself. That is not just tidiness: coverageBand is
+// legitimately either a string ('all'/'stacked') or a band index, so
+// matching it against its default's type would silently drop the numeric
+// form and reset the user's chosen altitude layer on every restore.
+const isInt = (v, min, max) => Number.isInteger(v) && v >= min && v <= max;
+const VALIDATORS = {
+  units: (v) => v === 'metric' || v === 'imperial',
+  basemapMode: (v) => v === 'online' || v === 'offline',
+  mapTheme: (v) => v === 'light' || v === 'dark' || v === 'auto',
+  trailMode: (v) => v === 'click' || v === 'all',
+  planeColorMode: (v) => v === 'signalLoss' || v === 'altitude' || v === 'speed',
+  aircraftIconSize: (v) => isInt(v, ICON_SIZE_MIN, ICON_SIZE_MAX),
+  sidePanelWidth: (v) => isInt(v, 320, 2000),
+  coverageBand: (v) => v === 'all' || v === 'stacked' || isInt(v, 0, 8),
+  // Non-empty, all strings -- an empty list renders a column-less table,
+  // a state the Configure UI itself refuses to produce.
+  listColumns: (v) => Array.isArray(v) && v.length > 0 && v.every((k) => typeof k === 'string'),
+  listSortLevels: (v) =>
+    Array.isArray(v)
+    && v.length > 0
+    && v.every((l) => l && typeof l === 'object' && !Array.isArray(l) && typeof l.key === 'string' && typeof l.asc === 'boolean'),
+  aircraftLabelFields: (v) =>
+    Boolean(v) && typeof v === 'object' && !Array.isArray(v) && Object.values(v).every((on) => typeof on === 'boolean'),
+};
+
 // Keeps only keys this version actually defines, and only where the stored
-// value's type matches the default's. load() spreads whatever is in
-// localStorage over the defaults, so without this filter a junk key from a
-// hand-edited or hostile backup file would be carried around forever.
-// null is allowed through for keys whose default is null (the altitude
-// filter bounds), since that is their genuine "unset" value.
+// value's type matches the default's and passes any validator above.
+// load() spreads whatever is in localStorage over the defaults, so without
+// this filter a junk key from a hand-edited or hostile backup file would be
+// carried around forever. null is allowed through for keys whose default is
+// null (the altitude filter bounds), since that is their genuine "unset"
+// value.
 export function filterKnownSettings(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
 
   const out = {};
   for (const [key, value] of Object.entries(raw)) {
     if (key === '__proto__' || !Object.hasOwn(defaults, key)) continue;
+    if (Object.hasOwn(VALIDATORS, key)) {
+      if (VALIDATORS[key](value)) out[key] = value;
+      continue;
+    }
     const fallback = defaults[key];
     if (value === null) {
       if (fallback === null) out[key] = null;
@@ -134,6 +172,7 @@ export function filterKnownSettings(raw) {
     }
     if (Array.isArray(fallback) !== Array.isArray(value)) continue;
     if (typeof value !== typeof fallback) continue;
+    if (typeof value === 'number' && !Number.isFinite(value)) continue;
     out[key] = value;
   }
   return out;

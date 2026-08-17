@@ -309,6 +309,82 @@ test('an unknown table name is skipped and reported rather than failing the whol
 });
 
 // ---------------------------------------------------------------------------
+// The three config rows that are accumulated history, not settings
+// ---------------------------------------------------------------------------
+
+test('an ordinary setting is overwritten wholesale, as before', () => {
+  setConfig('ntfyTopic', 'live2345');
+  importBackup({ config: { ntfyTopic: 'backup78' } });
+  assert.equal(getConfig('ntfyTopic'), 'backup78', 'a setting is exactly what the file says');
+});
+
+test('the all-time range record only ever goes up, in either direction', () => {
+  setConfig('allTimeMaxRangeKm', '412.5');
+  const result = importBackup({ config: { allTimeMaxRangeKm: '300' } });
+  assert.equal(getConfig('allTimeMaxRangeKm'), '412.5', 'an older backup must not rewind the record');
+  assert.deepEqual(result.mergedKeys, ['allTimeMaxRangeKm']);
+
+  importBackup({ config: { allTimeMaxRangeKm: '999.25' } });
+  assert.equal(getConfig('allTimeMaxRangeKm'), '999.25', 'a better record in the backup does win');
+});
+
+test('antenna coverage cells are merged, so a restore never deletes recorded contacts', () => {
+  const BANDS = 10;
+  const SECTORS = 180;
+  const blob = (entries) => {
+    const cells = Array.from({ length: BANDS }, () => Array.from({ length: SECTORS }, () => []));
+    for (const [band, sector, km, hex] of entries) cells[band][sector] = [[km, hex]];
+    return JSON.stringify({ cells });
+  };
+
+  // The live install has a contact this backup never saw, and vice versa.
+  setConfig('antennaStats', blob([[2, 10, 250, 'liveaa'], [3, 20, 100, 'shared']]));
+  importBackup({ config: { antennaStats: blob([[4, 30, 310, 'bkupbb'], [3, 20, 180, 'shared']]) } });
+
+  const merged = JSON.parse(getConfig('antennaStats'));
+  assert.deepEqual(merged.cells[2][10], [[250, 'liveaa']], 'a live-only cell survives the restore');
+  assert.deepEqual(merged.cells[4][30], [[310, 'bkupbb']], 'a backup-only cell is restored');
+  assert.deepEqual(merged.cells[3][20], [[180, 'shared']], 'the same aircraft keeps its better distance, once');
+});
+
+test('a malformed antenna blob on either side falls back rather than throwing', () => {
+  setConfig('antennaStats', 'not json at all');
+  assert.equal(importBackup({ config: { antennaStats: '{"cells":[]}' } }).ok, true);
+  assert.equal(getConfig('antennaStats'), '{"cells":[]}');
+});
+
+test('the stats-history snapshot keeps whichever side covers more of the day', () => {
+  const snap = (date, sampleCount) => JSON.stringify({ date, dailyAccumulator: { date, sampleCount } });
+
+  // Same day, the live install has been running much longer.
+  setConfig('statsHistorySnapshot', snap('2026-08-17', 40000));
+  importBackup({ config: { statsHistorySnapshot: snap('2026-08-17', 900) } });
+  assert.equal(JSON.parse(getConfig('statsHistorySnapshot')).dailyAccumulator.sampleCount, 40000);
+
+  // Same day, but this time the backup is the fuller one (a fresh install).
+  setConfig('statsHistorySnapshot', snap('2026-08-17', 12));
+  importBackup({ config: { statsHistorySnapshot: snap('2026-08-17', 30000) } });
+  assert.equal(JSON.parse(getConfig('statsHistorySnapshot')).dailyAccumulator.sampleCount, 30000);
+
+  // A backup from a previous day must not replace today's rolling window.
+  setConfig('statsHistorySnapshot', snap('2026-08-17', 5));
+  importBackup({ config: { statsHistorySnapshot: snap('2026-08-16', 90000) } });
+  assert.equal(JSON.parse(getConfig('statsHistorySnapshot')).date, '2026-08-17');
+});
+
+test('importRows reports rows actually written, not rows offered', () => {
+  // A fresher live row makes the merge decline the backup's -- the count
+  // must say so rather than claiming a restore that did not happen.
+  importBackup({ config: {}, tables: { dailyStats: [{ date: '2026-06-01', maxAircraft: 5, updatedAt: 9000 }] } });
+  const declined = importBackup({
+    config: {},
+    tables: { dailyStats: [{ date: '2026-06-01', maxAircraft: 99, updatedAt: 1000 }] },
+  });
+  assert.equal(declined.counts.dailyStats, 0, 'a declined row is not counted as restored');
+  assert.equal(getDailyStats('2026-06-01').max_aircraft, 5);
+});
+
+// ---------------------------------------------------------------------------
 // The browser-settings section
 // ---------------------------------------------------------------------------
 

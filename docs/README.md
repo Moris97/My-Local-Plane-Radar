@@ -245,10 +245,13 @@ somewhere safe, reinstall the OS on a fresh SD card, install MLPR, click
   backup is going to a different machine whose display preferences you'd
   rather keep.
 - **Restoring merges, it never deletes.** Settings are replaced by what's
-  in the file; history is merged into whatever is already there, keeping
-  the earliest "first seen" and the latest "last seen" on both sides. So
-  restoring an old backup onto a running install can't lose data — and on
-  a fresh install, merging into an empty database is simply a restore.
+  in the file — that's what a setting should do. Everything that was
+  *accumulated* is merged instead, keeping the better of the two sides:
+  the earliest "first seen", the latest "last seen", the higher visit
+  count, the longer range record, and antenna coverage combined direction
+  by direction. So restoring an old backup onto a running install can't
+  lose data — and on a fresh install, merging into an empty database is
+  simply a restore.
 - After a successful restore MLPR shows how many records came back and
   offers a **Reload the page** button. Some restored settings (language,
   units) only take effect after that reload.

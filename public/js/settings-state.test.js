@@ -67,6 +67,41 @@ test('__proto__ and non-object input are handled defensively', () => {
   assert.equal({}.units, undefined, 'Object.prototype must be untouched');
 });
 
+test('a structurally broken list config is rejected, not just a wrong-typed one', () => {
+  // The whole point of the filter: these all pass a naive typeof/isArray
+  // check, get persisted, and then throw on every redraw in list.js's sort
+  // comparator or render a column-less table -- broken across reloads until
+  // localStorage is cleared by hand.
+  assert.deepEqual(filterKnownSettings({ listSortLevels: [null] }), {});
+  assert.deepEqual(filterKnownSettings({ listSortLevels: [{ key: 'flight' }] }), {}, 'asc must be present');
+  assert.deepEqual(filterKnownSettings({ listSortLevels: [{ key: 42, asc: true }] }), {});
+  assert.deepEqual(filterKnownSettings({ listSortLevels: [] }), {}, 'sorting by nothing is not a state the UI allows');
+  assert.deepEqual(filterKnownSettings({ listColumns: [] }), {}, 'a column-less table is not a state the UI allows');
+  assert.deepEqual(filterKnownSettings({ listColumns: ['flight', 7] }), {});
+  assert.deepEqual(filterKnownSettings({ aircraftLabelFields: { flight: 'yes' } }), {});
+  assert.deepEqual(filterKnownSettings({ aircraftLabelFields: null }), {}, "typeof null is 'object' too");
+
+  // And the good versions still pass.
+  assert.deepEqual(filterKnownSettings({ listSortLevels: [{ key: 'gs', asc: false }] }), {
+    listSortLevels: [{ key: 'gs', asc: false }],
+  });
+});
+
+test('out-of-range numbers and unknown enum values are rejected', () => {
+  assert.deepEqual(filterKnownSettings({ aircraftIconSize: 1e9 }), {});
+  assert.deepEqual(filterKnownSettings({ aircraftIconSize: 0 }), {});
+  assert.deepEqual(filterKnownSettings({ aircraftIconSize: NaN }), {});
+  assert.deepEqual(filterKnownSettings({ sidePanelWidth: -5 }), {});
+  assert.deepEqual(filterKnownSettings({ basemapMode: 'bogus' }), {});
+  assert.deepEqual(filterKnownSettings({ mapTheme: 'neon' }), {});
+  assert.deepEqual(filterKnownSettings({ units: 'furlongs' }), {});
+  assert.deepEqual(filterKnownSettings({ coverageBand: 42 }), {});
+
+  assert.deepEqual(filterKnownSettings({ aircraftIconSize: 52 }), { aircraftIconSize: 52 });
+  assert.deepEqual(filterKnownSettings({ coverageBand: 'stacked' }), { coverageBand: 'stacked' });
+  assert.deepEqual(filterKnownSettings({ coverageBand: 3 }), { coverageBand: 3 });
+});
+
 test('collectLocalBackup snapshots the settings and only adds statsRange when given one', () => {
   const withoutRange = collectLocalBackup();
   assert.equal(withoutRange.settings.aircraftIconSize, ICON_SIZE_DEFAULT);

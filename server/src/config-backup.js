@@ -1,5 +1,7 @@
+import { mergeAntennaStatsBlobs } from './antenna-stats.js';
 import {
   getAllConfigEntries,
+  getConfig,
   setConfig,
   runBatch,
   importRows,
@@ -35,6 +37,58 @@ import {
 //     the same shape, as db.js's own DAILY_STATS_NEW_COLUMNS list.
 
 const EXPORT_VERSION = 2;
+
+// Three rows in `config` are not settings at all -- they are accumulated
+// history that happens to be stored as config blobs. Blanket-overwriting
+// them (which is right for a setting: the file's value is the one you
+// asked for) would make a restore *delete* observations, contradicting the
+// merge-never-delete contract the table half already keeps. So each gets
+// the same treatment as a table: keep the better of the two sides.
+//
+// Values are raw config strings in and out; a merger that can't make sense
+// of either side falls back to the incoming value, matching the old
+// overwrite behaviour rather than dropping the import on the floor.
+const HISTORY_CONFIG_MERGERS = {
+  // A record only ever goes up.
+  allTimeMaxRangeKm(incoming, existing) {
+    const a = Number(incoming);
+    const b = Number(existing);
+    const best = Math.max(Number.isFinite(a) ? a : 0, Number.isFinite(b) ? b : 0);
+    return String(best);
+  },
+
+  // Per (altitude band, bearing sector), keep the best distinct aircraft
+  // from both sides -- see antenna-stats.js's mergeAntennaStatsBlobs.
+  antennaStats(incoming, existing) {
+    try {
+      const merged = mergeAntennaStatsBlobs(JSON.parse(existing ?? 'null'), JSON.parse(incoming));
+      return merged === null ? incoming : JSON.stringify(merged);
+    } catch {
+      return incoming;
+    }
+  },
+
+  // The rolling 24h window plus today's accumulator. These describe a
+  // moment, not a total, so there is nothing to add up -- the right answer
+  // is simply whichever side covers more. Later day wins; within the same
+  // day, the one built from more poll samples wins. Deliberately reads only
+  // the two plain JSON fields it needs rather than importing
+  // stats-history.js (whose shape it is otherwise agnostic about).
+  statsHistorySnapshot(incoming, existing) {
+    try {
+      const next = JSON.parse(incoming);
+      const current = JSON.parse(existing ?? 'null');
+      if (!current?.date) return incoming;
+      if (!next?.date) return existing;
+      if (next.date !== current.date) return next.date > current.date ? incoming : existing;
+      const nextSamples = next.dailyAccumulator?.sampleCount ?? 0;
+      const currentSamples = current.dailyAccumulator?.sampleCount ?? 0;
+      return nextSamples >= currentSamples ? incoming : existing;
+    } catch {
+      return incoming;
+    }
+  },
+};
 
 // Rows are exported with camelCase names rather than the raw SQL column
 // names, so the file format is decoupled from the schema (a future column
@@ -338,8 +392,18 @@ export function importBackup(data) {
   }
 
   const counts = {};
+  const mergedKeys = [];
   runBatch(() => {
-    for (const [key, value] of configEntries) setConfig(key, value);
+    for (const [key, value] of configEntries) {
+      const merger = Object.hasOwn(HISTORY_CONFIG_MERGERS, key) ? HISTORY_CONFIG_MERGERS[key] : null;
+      if (!merger) {
+        setConfig(key, value);
+        continue;
+      }
+      const merged = merger(value, getConfig(key));
+      setConfig(key, merged);
+      if (merged !== value) mergedKeys.push(key);
+    }
     for (const { spec, rows } of pending) {
       counts[spec.name] = importRows(spec.sqlTable, rows);
     }
@@ -348,6 +412,9 @@ export function importBackup(data) {
   return {
     ok: true,
     importedKeys: configEntries.map(([key]) => key),
+    // Keys whose stored value ended up different from the file's, because
+    // the live side held more history (see HISTORY_CONFIG_MERGERS).
+    mergedKeys,
     counts,
     skippedTables,
     // Echoed back so the browser can apply its own settings without ever

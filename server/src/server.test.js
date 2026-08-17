@@ -248,6 +248,49 @@ test('a legacy uncompressed .json backup still imports through the binary path',
   assert.deepEqual(JSON.parse(response.body).importedKeys, ['ntfyTopic']);
 });
 
+test("restoring keeps the backup's own numbers for TODAY, not the fresh install's", async () => {
+  // The regression this guards: the route flushes runtime state *before*
+  // importing, which stamps a live daily_stats row for today with a fresh
+  // updated_at. The merge is newest-wins, so the backup's row for the same
+  // day is necessarily older and gets declined -- on a fresh install that
+  // silently threw away the whole current day. Fixed by re-flushing after
+  // the reload, once the accumulator has been restored from the backup.
+  const authHeader = await settingsToken();
+  const { localDayString } = await import('./time-buckets.js');
+  const today = localDayString(Date.now());
+
+  // A backup holding a full day, plus the snapshot that describes it -- the
+  // snapshot is what carries the accumulator the post-import flush reads.
+  const backup = {
+    version: 2,
+    config: {
+      statsHistorySnapshot: JSON.stringify({
+        date: today,
+        dailyAccumulator: {
+          date: today, maxAircraft: 47, totalMessages: 9999999, sampleCount: 50000,
+          sumAircraft: 500000, sumWithPos: 400000, sumWithoutPos: 100000,
+          maxWithPos: 40, maxWithoutPos: 12, uniqueHexes: [], uniqueFlights: [],
+        },
+        history: [], rangeSamples: [],
+      }),
+    },
+    tables: { dailyStats: [{ date: today, maxAircraft: 47, totalMessages: 9999999, updatedAt: Date.now() - 60000 }] },
+  };
+
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/settings/import',
+    headers: { ...authHeader, 'content-type': 'application/octet-stream' },
+    payload: Buffer.from(JSON.stringify(backup)),
+  });
+  assert.equal(response.statusCode, 200);
+
+  const { getDailyStats } = await import('./db.js');
+  const row = getDailyStats(today);
+  assert.equal(row.max_aircraft, 47, "today's row must hold the backup's numbers, not the live install's");
+  assert.equal(row.total_messages, 9999999);
+});
+
 test('an oversized upload is refused by the route body limit rather than buffered', async () => {
   const authHeader = await settingsToken();
   const huge = gzipSync(Buffer.alloc(1024, 0x41));
