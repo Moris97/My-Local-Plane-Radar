@@ -247,7 +247,8 @@
     "A189": "helicopter",
     "W3SO": "helicopter",
     "MI2": "helicopter",
-    "SW4": "helicopter"
+    "SW4": "helicopter",
+    "BALL": "balloon"
   },
   "prefix": {
     "A31": "narrowbody",

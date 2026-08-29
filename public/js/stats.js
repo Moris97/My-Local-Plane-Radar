@@ -431,14 +431,16 @@ function wireRoseTooltip(wrapEl, items, { formatValue = defaultFormatValue } = {
 // Settings -- reused here rather than cramming the explanation into the
 // tile label itself, e.g. "Aircraft tracked" needing to say *why* it can
 // read lower than "Aircraft seen" (the ~3s/second-look confirmation gate).
+// Matches settings.js's existing .mlpr-info-icon call sites: hint is always
+// a static, developer-authored t() string, never user data, so it's
+// interpolated unescaped -- not a real HTML-injection path, just consistent
+// with how every other info-icon tooltip in the app is already built.
+function infoIconHtml(hint) {
+  return hint ? ` <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${hint}</span></button>` : '';
+}
+
 function tileHtml(label, value, hint) {
-  // Matches settings.js's existing .mlpr-info-icon call sites: hint is
-  // always a static, developer-authored t() string, never user data, so
-  // it's interpolated unescaped there too -- not a real HTML-injection
-  // path, just consistent with how every other info-icon tooltip in the
-  // app is already built.
-  const hintHtml = hint ? ` <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${hint}</span></button>` : '';
-  return `<div class="mlpr-tile"><div class="mlpr-tile-label">${escapeHtml(label)}${hintHtml}</div><div class="mlpr-tile-value">${escapeHtml(value)}</div></div>`;
+  return `<div class="mlpr-tile"><div class="mlpr-tile-label">${escapeHtml(label)}${infoIconHtml(hint)}</div><div class="mlpr-tile-value">${escapeHtml(value)}</div></div>`;
 }
 
 // entry: an aircraft object (from geo.js's findNearestFarthest) with an
@@ -482,7 +484,7 @@ export function renderStatsPanel(container) {
         <div class="mlpr-stats-grid">
           <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
             <div class="mlpr-chart-header">
-              <p class="mlpr-chart-label">${t('chartTopType')}</p>
+              <p class="mlpr-chart-label">${t('chartTopType')}${infoIconHtml(t('chartTopTypeHint'))}</p>
               <div class="mlpr-chart-view-toggle" data-chart="topType">
                 <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
                 <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
@@ -494,7 +496,7 @@ export function renderStatsPanel(container) {
 
           <section class="mlpr-stat-chart mlpr-stat-chart-doughnut">
             <div class="mlpr-chart-header">
-              <p class="mlpr-chart-label">${t('chartTopAirline')}</p>
+              <p class="mlpr-chart-label">${t('chartTopAirline')}${infoIconHtml(t('chartTopAirlineHint'))}</p>
               <div class="mlpr-chart-view-toggle" data-chart="topAirline">
                 <button type="button" class="mlpr-range-btn active" data-view="doughnut">${t('chartViewDoughnut')}</button>
                 <button type="button" class="mlpr-range-btn" data-view="line">${t('chartViewLine')}</button>
