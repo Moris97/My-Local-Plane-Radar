@@ -501,10 +501,18 @@ html, body {
 .maplibregl-popup-content {
   background: #0e161c;
   border: 1px solid #1c2e3a;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  /* Bumped from MapLibre's own 3px default to a real card radius, matching
+     the rounder look used across the rest of the app's own cards/tiles.
+     The anchor-specific rules below (from maplibre-gl.css, more specific
+     than this class alone) still zero out the corner nearest the tip per
+     direction, so the tip keeps reading as flush against the card. */
+  border-radius: 14px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   color: #d8f3e6;
   font: 13px/1.5 system-ui, sans-serif;
-  padding: 12px 14px;
+  /* Extra right padding clears the enlarged close button below -- it now
+     floats inside the card rather than sitting flush in the corner. */
+  padding: 14px 40px 14px 16px;
 }
 
 /* Redraws the little triangle "tip" that points from the popup card to
@@ -534,74 +542,116 @@ html, body {
   border-left-color: #0e161c;
 }
 
-/* MapLibre's own close button is a plain unstyled "x" glyph -- inherits
-   whatever color happens to cascade in rather than anything chosen for
-   this card, so it needs an explicit one same as everything else here.
-   Muted like #panel-close's own icon, for the same "dismiss" role. */
+/* MapLibre's own close button is a plain unstyled "x" glyph, sized to its
+   text with no real hit area (font-size unset, ~4-6px of padding) -- easy
+   to miss on a touch screen, reported live 2026-08-29. Rebuilt as a proper
+   circular button floating just inside the card (matches #panel-close's
+   own ~30px touch target elsewhere in the app), overriding MapLibre's own
+   absolute right:0/top:0/border-radius:0_3px_0_0 rather than nesting a
+   second element -- this is still the one real button MapLibre puts in the
+   DOM, just given a shape and hit area that match the rest of the app. */
 .maplibregl-popup-close-button {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1px solid transparent;
   color: #7fa3b3;
-  font-size: 16px;
-  padding: 2px 6px;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
-.maplibregl-popup-close-button:hover {
+.maplibregl-popup-close-button:hover,
+.maplibregl-popup-close-button:focus-visible {
   color: #d8f3e6;
-  background-color: rgba(255, 255, 255, 0.06);
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: #2a4152;
 }
 
 .mlpr-popup {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  min-width: 150px;
+  gap: 10px;
+  min-width: 170px;
 }
 
 .mlpr-popup-callsign {
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
+  letter-spacing: 0.2px;
   color: #d8f3e6;
+  /* A thin divider under the header, like a card title, so the identity
+     row reads as separate from the value chips below it rather than just
+     the first line of a paragraph. */
+  padding-bottom: 8px;
+  border-bottom: 1px solid #1c2e3a;
 }
 
 .mlpr-popup-chips {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 14px;
+  gap: 6px;
 }
 
 /* Same green flag/pill look as aircraft-panel.js's .mlpr-detail-flag
    (boolean tiles like military/alert/spi) -- "on ground" is its own flag
-   here too, not a value paired with a label. */
+   here too, not a value paired with a label. Fully rounded to match the
+   pill chips below it. */
 .mlpr-popup-badge {
   color: #7fd8a8;
   background: #123423;
   border: 1px solid #245c3c;
-  border-radius: 4px;
-  padding: 2px 7px;
+  border-radius: 999px;
+  padding: 3px 10px;
   font-size: 12px;
 }
 
-/* Reuses the exact chip look aircraft-panel.js's cluster rows already use
-   (.mlpr-detail-chip/-chip b) -- same "muted label, bright value" pattern
-   as everywhere else in this app, so the popup and the full details panel
-   it opens into read as the same visual language, not two different ones. */
+/* Reuses aircraft-panel.js's .mlpr-detail-chip/-chip b "muted label, bright
+   value" pattern for the text, but wraps each one in its own small pill
+   here (background/border/radius) rather than the plain inline-text look
+   the shared cluster rows use elsewhere -- scoped to this popup only, so
+   the details panel's own chip rows are untouched. */
 .mlpr-popup-chips .mlpr-detail-chip {
   font-size: 13px;
+  background: #121e26;
+  border: 1px solid #1c2e3a;
+  border-radius: 999px;
+  padding: 3px 10px;
 }
 
 #mlpr-more-details {
   background: #123423;
   color: #7fd8a8;
   border: 1px solid #245c3c;
-  border-radius: 6px;
-  padding: 5px 10px;
+  border-radius: 999px;
+  padding: 6px 14px;
   font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
   align-self: flex-start;
+  transition:
+    background-color 0.15s ease,
+    transform 0.1s ease;
 }
 
 #mlpr-more-details:hover {
   background: #1a4630;
+  transform: translateY(-1px);
+}
+
+#mlpr-more-details:active {
+  transform: translateY(0);
 }
 
 /* Fixed-positioning owner for the whole bottom-left corner stack (credits

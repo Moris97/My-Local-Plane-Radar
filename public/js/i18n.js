@@ -99,6 +99,10 @@ const DICTIONARIES = {
     chartNewRegistrations: 'New registrations',
     chartTopType: 'Most common aircraft type',
     chartTopAirline: 'Most common airline',
+    chartTopTypeHint:
+      'The number in the middle is the total of distinct registrations shown here -- only aircraft with a known type (needs readsb\'s --db-file) count, so this can be lower than "Aircraft seen".',
+    chartTopAirlineHint:
+      'The number in the middle is the total of distinct registrations shown here -- only aircraft with a callsign matching a known airline count, so private, GA and military flights are excluded.',
     showRegistrations: 'Show all registrations',
     colRegistration: 'Registration',
     colType: 'Type',
@@ -448,6 +452,10 @@ const DICTIONARIES = {
     chartNewRegistrations: 'Nowe rejestracje',
     chartTopType: 'Najpopularniejszy typ samolotu',
     chartTopAirline: 'Najpopularniejsza linia lotnicza',
+    chartTopTypeHint:
+      'Liczba na środku to suma unikatowych rejestracji pokazanych na wykresie -- liczą się tylko samoloty z rozpoznanym typem (wymaga --db-file w readsb), dlatego może być niższa niż "Zauważone samoloty".',
+    chartTopAirlineHint:
+      'Liczba na środku to suma unikatowych rejestracji pokazanych na wykresie -- liczą się tylko samoloty z callsignem pasującym do znanej linii lotniczej, więc loty prywatne, GA i wojskowe są pominięte.',
     showRegistrations: 'Pokaż wszystkie rejestracje',
     colRegistration: 'Rejestracja',
     colType: 'Typ',
