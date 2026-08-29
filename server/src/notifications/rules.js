@@ -9,6 +9,7 @@ import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm 
 import { getEffectiveHome } from '../home.js';
 import { recordAndCheckCircling, isCirclingRelevant } from './circling-detector.js';
 import { recordEvent } from './event-history.js';
+import { getAirlineName } from '../airlines-data.js';
 
 // Exported as a function rather than the raw table so the "unknown code"
 // fallback lives in one place -- /dev/smart-home-test needs the same
@@ -191,17 +192,36 @@ function formatSpeed(aircraft) {
 }
 
 // The notification's title already carries the reason (squawk code, "First
-// time seen", "Watched aircraft") -- this is just the aircraft identity +
-// current altitude/speed, so registration/type/flight/altitude/speed are
-// always present when available.
+// time seen", "Watched aircraft") -- this is the aircraft identity + current
+// altitude/speed, each part present only when known.
+//
+// Order (requested 2026-08-29, applies identically to this ntfy message and
+// notification-content.js's own client-side aircraftSummaryLine, the
+// browser toast's equivalent): military flag, type, airline, registration,
+// altitude, speed, then flight/hex last -- a deliberate move from its
+// previous always-first position, now the least useful identity field of
+// the bunch once type/airline/registration are available (registration in
+// particular already identifies the exact airframe; flight/hex is mostly a
+// fallback for when nothing else resolved). "Military" is a literal English
+// word, not translated -- ntfy's messages are English-only by design (see
+// the on-map toast feature's own doc comment on why *that* surface is
+// different); the browser toast reuses aircraft-details.js's own
+// `detailMilitary` i18n key instead of a new one. Airline name is never
+// shown for a military aircraft (identifyOperator's own "military -> no
+// airline" rule, airline-lookup.js) so the two fields never fight for the
+// same slot in practice.
 function aircraftLabel(aircraft) {
-  const parts = [aircraft.flight || aircraft.hex];
-  if (aircraft.registration) parts.push(aircraft.registration);
+  const parts = [];
+  if (aircraft.military) parts.push('Military');
   if (aircraft.typeCode) parts.push(aircraft.typeCode);
+  const airlineName = getAirlineName(aircraft.airlineIcao);
+  if (airlineName) parts.push(airlineName);
+  if (aircraft.registration) parts.push(aircraft.registration);
   const altitude = formatAltitude(aircraft);
   if (altitude) parts.push(altitude);
   const speed = formatSpeed(aircraft);
   if (speed) parts.push(speed);
+  parts.push(aircraft.flight || aircraft.hex);
   return parts.join(' · ');
 }
 

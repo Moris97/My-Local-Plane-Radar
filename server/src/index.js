@@ -83,6 +83,19 @@ async function pollOnce(broadcast) {
     // aircraft object before toWireAircraftList below -- wire.js spreads
     // the whole object rather than picking a fixed field list, so this
     // rides along on the existing delta for free, no new WS message needed.
+    // Also lets the client (the aircraft details panel, the map popup) show
+    // an airline name at all, reported live as a real gap (no field in the
+    // wire payload, not just a missing UI tile). Omitted rather than null/
+    // undefined when unresolved (military/private/no callsign match/unknown
+    // prefix) -- most aircraft on most ticks have no resolvable airline.
+    //
+    // Deliberately computed *before* evaluateAircraftRules below (moved
+    // 2026-08-29, was after) -- rules.js's own aircraftLabel() now shows the
+    // airline name in the notification message itself (ntfy + the on-map
+    // toast), by reading `aircraft.airlineIcao` straight off this same
+    // object, so it has to already be set by the time that call happens.
+    const airlineIcao = resolveAirlineIcao(aircraft, airlines);
+    if (airlineIcao) aircraft.airlineIcao = airlineIcao;
     // See rules.js's own doc comment on evaluateAircraftRules for why this
     // is a live, cooldown-independent fact rather than the same throttled
     // signal the notification itself uses. Only set when non-empty --
@@ -92,18 +105,6 @@ async function pollOnce(broadcast) {
     // delta's own `removed` field already follows below).
     const alertKinds = evaluateAircraftRules(aircraft);
     if (alertKinds.length > 0) aircraft.alertKinds = alertKinds;
-    // Same attach-before-wire shape as alertKinds above -- airline-lookup.js
-    // already computed this per tick for stats-registrations.js's own sake
-    // (recordRangeAndRegistrationSightings below); reusing it here instead
-    // of leaving it stranded server-side is what actually lets the client
-    // (the aircraft details panel, the map popup) show an airline name at
-    // all, reported live as a real gap (no field in the wire payload, not
-    // just a missing UI tile). Omitted rather than null/undefined when
-    // unresolved (military/private/no callsign match/unknown prefix) --
-    // same reasoning as alertKinds, most aircraft on most ticks have no
-    // resolvable airline.
-    const airlineIcao = resolveAirlineIcao(aircraft, airlines);
-    if (airlineIcao) aircraft.airlineIcao = airlineIcao;
     if (typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
       recordPosition(aircraft.hex, {
         lat: aircraft.lat,

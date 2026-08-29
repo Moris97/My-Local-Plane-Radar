@@ -1502,10 +1502,36 @@ route-intercept FakeMap/FakeMarker stub technique instead).
 with `{topic, title, message, priority, tags}`) — not the header-based API,
 which breaks on non-ASCII. `priority` must be a **number 1–5**.
 
-**Message content** (`aircraftLabel`): flight/hex, registration, type code,
-altitude (or "ground"), speed, each omitted when unavailable. Title carries
-the reason (squawk code/meaning, "First time seen", "Watched aircraft") —
-message body doesn't repeat it.
+**Message content** (`aircraftLabel`): military flag, type code, airline
+name, registration, altitude (or "ground"), speed, then flight/hex last —
+each omitted when unavailable. Title carries the reason (squawk
+code/meaning, "First time seen", "Watched aircraft") — message body doesn't
+repeat it. **This exact order was requested 2026-08-29** (previously
+flight/hex, registration, type, altitude, speed — no military flag, no
+airline at all) and applies identically to the on-map toast's own
+`aircraftSummaryLine` (`public/js/notification-content.js`) — one field
+order, not two that could drift. "Military" is a **literal, un-translated
+English word** here (ntfy's messages are English-only by design, see the
+on-map toast section below); the browser toast reuses
+`aircraft-details.js`'s own `detailMilitary` i18n key instead of a new one,
+so it reads "Wojskowy" in Polish. Airline name is never shown for a
+military aircraft (`identifyOperator`'s own "military → no airline" rule)
+so the two never compete for the same slot. Flight/hex moved from its
+previous always-first position to last, on request — once
+type/airline/registration are known it's the least useful identity field
+(registration alone already pins the exact airframe), and it still serves
+as a fallback when literally nothing else resolved (a bare hex is a
+one-part message). Depends on `aircraft.airlineIcao` already being set on
+the aircraft object — `index.js`'s `pollOnce` had to move that resolution
+to **before** its `evaluateAircraftRules` call (previously after) so the
+name is available in time; `server/src/airlines-data.js`'s new
+`getAirlineName(icao)` (a server-side mirror of
+`airlines-client.js`'s client-side one, same null-not-bare-code contract)
+does the lookup. `smart-home.js`'s shared `aircraftFields()` gained
+`military`/`airlineName` fields for the toast's own consumption (see the
+Smart Home section) — additive, so an MQTT/Home Assistant payload gains two
+new fields as a side effect rather than growing a third near-identical
+aircraft-summary function just for this.
 
 **Click-to-open**: ntfy's `click` URL, auto-detected once at startup via
 `os.networkInterfaces()` (first non-internal IPv4) — must be a LAN address
@@ -1694,6 +1720,22 @@ title badge.
   starting a countdown nobody can see — the whole point of the unread badge
   below. `remainingMs`/`resumedAt` per toast track cumulative pause time
   across however many hide/show cycles happen before it's finally dismissed.
+- **The notification sound now plays regardless of tab visibility**
+  (changed 2026-08-29 on request — `handleNotificationEvent` used to skip
+  `playNotificationSound` entirely while `document.hidden`, on the theory
+  that a backgrounded tab is a different situation from "recover my
+  attention right now"; the user wants exactly that recovery effect while
+  backgrounded too, arguably the more common real case a sound is for). The
+  unread title badge above is unaffected — both fire independently off the
+  same event. One real constraint outside this app's control:
+  `notification-sound.js`'s `AudioContext` can only be created/resumed
+  inside a prior user-gesture's call stack (browser autoplay policy), so
+  the very first notification sound of a session still needs at least one
+  earlier click/tap anywhere on the page — background or not — before it
+  can actually produce sound; every notification after that plays normally
+  regardless of visibility. Verified with Playwright: `document.hidden`
+  forced `true`, a spied `SOUND_PRESETS` entry confirmed called once, and
+  the unread badge still incremented alongside it.
 - **`document.title` gets a `(N)` unread prefix** while the tab is hidden,
   cleared the instant it regains visibility (standard tab-badge UX,
   independent of whether each toast has since been individually dismissed
@@ -1824,10 +1866,14 @@ itself.
 
 **Payload**: flat JSON, one topic per reason (`<prefix>/events/first_seen`,
 `/watchlist`, `/squawk`) rather than one shared topic with a `reason`
-field. Fields: `reason`, `timestamp`, `hex`, `flight`, `registration`,
-`typeCode`, `altitude` (ground = `0`), `onGround`, `speed`, `lat`/`lon`
-(`null` if unavailable); watch-list adds `matchedType`/`matchedValue`.
-Never retained — a discrete occurrence, not persistent state.
+field. Fields: `reason`, `timestamp`, `hex`, `flight`, `military` (plain
+boolean), `typeCode`, `airlineName` (`null` if unresolved — added
+2026-08-29 alongside `military`, purely so the on-map toast/ntfy field-order
+change above had a shared shape to read them from, see that section; a
+free side-effect for any HA automation that wants them too), `registration`,
+`altitude` (ground = `0`), `onGround`, `speed`, `lat`/`lon` (`null` if
+unavailable); watch-list adds `matchedType`/`matchedValue`. Never retained
+— a discrete occurrence, not persistent state.
 
 **Settings**: a "Configure smart home" subview inside Notifications, behind
 `requireSettingsAuth` since before the rest of that tab was (2026-08-29) —

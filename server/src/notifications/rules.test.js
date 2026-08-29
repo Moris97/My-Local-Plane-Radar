@@ -1,11 +1,19 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'mlpr-rules-test-'));
 process.env.MLPR_DB_PATH = join(tmpDir, 'test.db');
+// A small, controlled airlines map -- same technique as
+// airlines-data.test.js's own -- rather than whatever (if anything) happens
+// to sit in the real, gitignored, best-effort-fetched data/airlines.json on
+// this machine. Read once, at airlines-data.js's own module-load time, so
+// this must be set before rules.js (which imports it transitively) is ever
+// imported below.
+process.env.MLPR_AIRLINES_PATH = join(tmpDir, 'airlines.json');
+writeFileSync(process.env.MLPR_AIRLINES_PATH, JSON.stringify({ LOT: { name: 'LOT Polish Airlines', country: 'Poland' } }));
 
 const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
@@ -108,18 +116,48 @@ test('the ntfy payload carries hex, for ntfy.js\'s click-to-select deep link', (
   assert.equal(payload.hex, 'clickhex1');
 });
 
-test('notification message includes registration, type, flight, altitude and speed', () => {
+test('notification message includes type, registration, altitude, speed and flight, in that order', () => {
   rules.evaluateAircraftRules(
     aircraftFixture({ squawk: '7700', registration: 'SP-TEST', typeCode: 'B738', altBaro: 5000, gs: 210.6 }),
   );
   const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
-  assert.equal(message, 'TEST123 · SP-TEST · B738 · 5000 ft · 211 kt');
+  assert.equal(message, 'B738 · SP-TEST · 5000 ft · 211 kt · TEST123');
 });
 
 test('notification message shows "ground" for an on-ground aircraft and omits missing speed', () => {
   rules.evaluateAircraftRules(aircraftFixture({ squawk: '7700', onGround: true }));
   const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
-  assert.equal(message, 'TEST123 · ground');
+  assert.equal(message, 'ground · TEST123');
+});
+
+test('notification message leads with "Military" for a military aircraft, and never shows an airline', () => {
+  rules.evaluateAircraftRules(
+    aircraftFixture({ squawk: '7700', military: true, typeCode: 'C130', registration: '08-8601' }),
+  );
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'Military · C130 · 08-8601 · TEST123');
+});
+
+test('notification message includes the airline name (from airlineIcao) between type and registration', () => {
+  rules.evaluateAircraftRules(
+    aircraftFixture({ squawk: '7700', typeCode: 'B738', airlineIcao: 'LOT', registration: 'SP-LSA' }),
+  );
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'B738 · LOT Polish Airlines · SP-LSA · TEST123');
+});
+
+test('an unresolved airlineIcao (not in the loaded airlines map) is simply omitted, not shown as the bare code', () => {
+  rules.evaluateAircraftRules(
+    aircraftFixture({ squawk: '7700', typeCode: 'B738', airlineIcao: 'ZZZ', registration: 'SP-LSA' }),
+  );
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'B738 · SP-LSA · TEST123');
+});
+
+test('a bare hex with nothing else resolved is still a valid (single-part) message', () => {
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'bareaircraft', flight: undefined, squawk: '7700' }));
+  const message = sent.find((n) => n.payload.title.startsWith('Squawk')).payload.message;
+  assert.equal(message, 'bareaircraft');
 });
 
 test('a non-emergency squawk does not trigger', () => {

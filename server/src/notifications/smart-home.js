@@ -11,6 +11,7 @@
 import { hostname } from 'node:os';
 import { MqttClient } from './mqtt-client.js';
 import { getSmartHomeSettings } from './settings.js';
+import { getAirlineName } from '../airlines-data.js';
 
 const CLIENT_ID = `mlpr-${hostname()}`;
 const TEST_TIMEOUT_MS = 5000;
@@ -77,13 +78,21 @@ export function reconfigureSmartHome() {
 // Exported so rules.js's UI-event broadcaster (the on-map toast/glow
 // feature) can reuse the exact same compact shape for its own WS payload,
 // rather than a third near-identical hand-rolled aircraft-summary function
-// alongside this one and ntfy's own aircraftLabel().
+// alongside this one and ntfy's own aircraftLabel(). `military`/
+// `airlineName` (added 2026-08-29) exist for that reuse specifically -- the
+// browser toast's own aircraftSummaryLine (notification-content.js) needs
+// them to match aircraftLabel's new field order -- but land here rather
+// than in a third function precisely to keep that one-shape rule, so a
+// Home Assistant automation gets them too as a side effect, same as every
+// other field already in this object.
 export function aircraftFields(aircraft) {
   return {
     hex: aircraft.hex,
     flight: aircraft.flight ?? null,
-    registration: aircraft.registration ?? null,
+    military: !!aircraft.military,
     typeCode: aircraft.typeCode ?? null,
+    airlineName: getAirlineName(aircraft.airlineIcao),
+    registration: aircraft.registration ?? null,
     altitude: aircraft.onGround ? 0 : typeof aircraft.altBaro === 'number' ? aircraft.altBaro : null,
     onGround: !!aircraft.onGround,
     speed: typeof aircraft.gs === 'number' ? Math.round(aircraft.gs) : null,

@@ -262,16 +262,22 @@ export function handleNotificationEvent(event) {
 
   if (document.hidden) {
     unseenCount += 1;
-  } else {
-    // Same-tab-only, deliberately (TODO.md's own note on this feature): a
-    // tab backgrounded/minimized is a fundamentally different situation
-    // from "recover my attention right now", which is the one thing a
-    // sound is for. 'none' (the default) isn't a key in notification-
-    // sound.js's own SOUND_PRESETS map, and playNotificationSound already
-    // no-ops for any id it doesn't recognize -- no extra off-state check
-    // needed here.
-    playNotificationSound(getSettings().notificationSound);
   }
+  // Plays regardless of tab visibility (changed 2026-08-29 on request --
+  // previously same-tab-only, on the theory that a backgrounded tab is a
+  // fundamentally different situation from "recover my attention right
+  // now"; the user wants exactly that attention-recovery effect while the
+  // tab is in the background too, which is arguably the more common real
+  // case sound exists for). 'none' (the default) isn't a key in
+  // notification-sound.js's own SOUND_PRESETS map, and playNotificationSound
+  // already no-ops for any id it doesn't recognize -- no extra off-state
+  // check needed here. One real browser constraint outside this app's
+  // control: notification-sound.js's AudioContext can only be created/
+  // resumed inside a prior user-gesture's call stack (browsers' autoplay
+  // policy) -- in practice this means the very first notification sound of
+  // a session needs at least one earlier click/tap anywhere on the page,
+  // background or not; every notification after that plays normally.
+  playNotificationSound(getSettings().notificationSound);
   updateTitleBadge();
 
   pending.push(toast);

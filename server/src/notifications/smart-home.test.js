@@ -1,11 +1,16 @@
 import { test, beforeEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'mlpr-smart-home-test-'));
 process.env.MLPR_DB_PATH = join(tmpDir, 'test.db');
+// A controlled airlines map, same technique as rules.test.js's own -- not
+// whatever (if anything) happens to sit in the real, gitignored,
+// best-effort-fetched data/airlines.json on this machine.
+process.env.MLPR_AIRLINES_PATH = join(tmpDir, 'airlines.json');
+writeFileSync(process.env.MLPR_AIRLINES_PATH, JSON.stringify({ LOT: { name: 'LOT Polish Airlines', country: 'Poland' } }));
 
 const smartHome = await import('./smart-home.js');
 const { updateSmartHomeSettings } = await import('./settings.js');
@@ -127,6 +132,8 @@ test('publishSmartHomeEvent publishes a flat JSON payload to <prefix>/events/<re
   assert.equal(payload.altitude, 3500);
   assert.equal(payload.speed, 210);
   assert.equal(payload.onGround, false);
+  assert.equal(payload.military, false);
+  assert.equal(payload.airlineName, null);
   assert.equal(typeof payload.timestamp, 'number');
   // Never retained -- see smart-home.js's comment on why.
   assert.equal(instance.published[0].opts, undefined);
@@ -179,6 +186,32 @@ test('publishSmartHomeEvent reports ground-level altitude as 0, not the last air
   const payload = JSON.parse(instance.published[0].payload);
   assert.equal(payload.altitude, 0);
   assert.equal(payload.onGround, true);
+});
+
+test('publishSmartHomeEvent reports military as a plain boolean', () => {
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
+  smartHome.reconfigureSmartHome();
+  const instance = FakeMqttClient.instances[0];
+  instance.published.length = 0;
+
+  smartHome.publishSmartHomeEvent({ reason: 'first_seen', aircraft: aircraftFixture({ military: true }) });
+
+  const payload = JSON.parse(instance.published[0].payload);
+  assert.equal(payload.military, true);
+});
+
+test('publishSmartHomeEvent resolves airlineName from airlineIcao, and omits it when unresolved', () => {
+  updateSmartHomeSettings({ enabled: true, brokerUrl: 'mqtt://broker:1883' });
+  smartHome.reconfigureSmartHome();
+  const instance = FakeMqttClient.instances[0];
+  instance.published.length = 0;
+
+  smartHome.publishSmartHomeEvent({ reason: 'first_seen', aircraft: aircraftFixture({ airlineIcao: 'LOT' }) });
+  smartHome.publishSmartHomeEvent({ reason: 'first_seen', aircraft: aircraftFixture({ airlineIcao: 'ZZZ' }) });
+
+  const [resolved, unresolved] = instance.published.map((p) => JSON.parse(p.payload));
+  assert.equal(resolved.airlineName, 'LOT Polish Airlines');
+  assert.equal(unresolved.airlineName, null);
 });
 
 test('testSmartHomeConnection resolves ok:true on a successful CONNACK', async () => {

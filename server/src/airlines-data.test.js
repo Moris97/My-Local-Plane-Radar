@@ -8,7 +8,7 @@ const tmpDir = mkdtempSync(join(tmpdir(), 'mlpr-airlines-test-'));
 const dataPath = join(tmpDir, 'airlines.json');
 process.env.MLPR_AIRLINES_PATH = dataPath;
 
-const { getAirlines } = await import('./airlines-data.js');
+const { getAirlines, getAirlineName } = await import('./airlines-data.js');
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -45,4 +45,21 @@ test('getAirlines keeps the last good map if the file becomes unreadable/corrupt
   writeFileSync(dataPath, '{ not valid json');
   utimesSync(dataPath, future2, future2);
   assert.deepEqual(getAirlines().get('WZZ'), { name: 'Wizz Air', country: 'Hungary' });
+});
+
+test('getAirlineName returns the resolved name for a known icao', () => {
+  const future = new Date(Date.now() + 20000);
+  writeFileSync(dataPath, JSON.stringify({ WZZ: { name: 'Wizz Air', country: 'Hungary' } }));
+  utimesSync(dataPath, future, future);
+  assert.equal(getAirlineName('WZZ'), 'Wizz Air');
+});
+
+test('getAirlineName returns null for an unmatched icao, not the bare code', () => {
+  assert.equal(getAirlineName('ZZZ'), null);
+});
+
+test('getAirlineName returns null for a falsy icao without touching the map at all', () => {
+  assert.equal(getAirlineName(null), null);
+  assert.equal(getAirlineName(undefined), null);
+  assert.equal(getAirlineName(''), null);
 });

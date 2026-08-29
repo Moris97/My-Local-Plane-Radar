@@ -17,11 +17,24 @@ import { t } from './i18n.js';
 import { formatAltitude, formatSpeed, formatDistance } from './units.js';
 import { getSettings } from './settings-state.js';
 
+// Field order (requested 2026-08-29, applies identically to server-side
+// rules.js's own aircraftLabel(), the ntfy message's equivalent): military
+// flag, type, airline, registration, altitude, speed, then flight/hex last
+// -- moved out of its previous always-first spot, now the least useful
+// identity field once type/airline/registration resolve. Reuses
+// aircraft-details.js's own `detailMilitary` key for the label rather than
+// a new one (ntfy's own message hardcodes the English word instead --
+// ntfy's messages are English-only by design, this is a real localized UI
+// surface). `aircraft.military`/`aircraft.airlineName` come from
+// smart-home.js's aircraftFields(), the same compact shape every event's
+// `aircraft` field already uses.
 export function aircraftSummaryLine(aircraft, units) {
   if (!aircraft) return '';
-  const parts = [aircraft.flight?.trim() || aircraft.hex];
-  if (aircraft.registration) parts.push(aircraft.registration);
+  const parts = [];
+  if (aircraft.military) parts.push(t('detailMilitary'));
   if (aircraft.typeCode) parts.push(aircraft.typeCode);
+  if (aircraft.airlineName) parts.push(aircraft.airlineName);
+  if (aircraft.registration) parts.push(aircraft.registration);
   if (aircraft.onGround) {
     parts.push(t('onGround'));
   } else {
@@ -30,6 +43,7 @@ export function aircraftSummaryLine(aircraft, units) {
   }
   const speed = formatSpeed(aircraft.speed, units);
   if (speed) parts.push(speed);
+  parts.push(aircraft.flight?.trim() || aircraft.hex);
   return parts.join(' · ');
 }
 

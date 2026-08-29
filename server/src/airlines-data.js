@@ -37,3 +37,16 @@ export function getAirlines() {
   reloadIfChanged();
   return airlines;
 }
+
+// Sync name lookup, server-side mirror of airlines-client.js's own
+// getAirlineName -- null both when icao itself is falsy and when the
+// loaded map has no entry for it (an unmatched prefix, already logged once
+// by airline-lookup.js), never a fallback to the bare code, so callers can
+// treat "no name" as "omit this field entirely" the same way the client
+// already does. Added for rules.js's/smart-home.js's own aircraft-summary
+// text, which -- unlike server.js's stats-table `airlineNameFor` -- has no
+// use for a bare ICAO code standing in for an unresolved name.
+export function getAirlineName(icao) {
+  if (!icao) return null;
+  return getAirlines().get(icao)?.name ?? null;
+}
