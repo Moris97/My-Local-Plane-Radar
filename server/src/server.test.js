@@ -311,8 +311,8 @@ test('GET /api/stats/events serves the flushed event history, paginated and kind
   recordEvent('watchlist', { hex: 'e2e0002', matchedType: 'type', matchedValue: 'B738' });
   flushPendingEventsIfDirty();
 
-  // No auth header at all -- same tier as /api/stats/registrations and
-  // /api/notifications/*, not the Server tab's requireSettingsAuth gate.
+  // No auth header at all -- same tier as /api/stats/registrations, not
+  // the Server/Notifications tabs' requireSettingsAuth gate.
   const all = await app.inject({ method: 'GET', url: '/api/stats/events' });
   assert.equal(all.statusCode, 200);
   const allBody = JSON.parse(all.body);
@@ -326,4 +326,27 @@ test('GET /api/stats/events serves the flushed event history, paginated and kind
   assert.ok(row, 'expected the seeded watchlist row');
   assert.equal(row.matchedType, 'type');
   assert.equal(row.matchedValue, 'B738');
+});
+
+test('the whole Notifications tab (settings, ntfy topic, watch list) is gated behind requireSettingsAuth, widened from Smart Home only', async () => {
+  auth.setPassword('hunter2');
+
+  const unauthed = await Promise.all([
+    app.inject({ method: 'GET', url: '/api/notifications/settings' }),
+    app.inject({ method: 'PUT', url: '/api/notifications/settings', payload: { squawkEnabled: true } }),
+    app.inject({ method: 'GET', url: '/api/notifications/ntfy-topic' }),
+    app.inject({ method: 'POST', url: '/api/notifications/ntfy-topic/regenerate' }),
+    app.inject({ method: 'GET', url: '/api/notifications/watchlist' }),
+    app.inject({ method: 'POST', url: '/api/notifications/watchlist', payload: { matchType: 'type', matchValue: 'B738' } }),
+    app.inject({ method: 'DELETE', url: '/api/notifications/watchlist/none' }),
+  ]);
+  for (const response of unauthed) assert.equal(response.statusCode, 401);
+
+  const authHeader = await settingsToken();
+  const authedSettings = await app.inject({ method: 'GET', url: '/api/notifications/settings', headers: authHeader });
+  assert.equal(authedSettings.statusCode, 200);
+  const authedTopic = await app.inject({ method: 'GET', url: '/api/notifications/ntfy-topic', headers: authHeader });
+  assert.equal(authedTopic.statusCode, 200);
+  const authedWatchlist = await app.inject({ method: 'GET', url: '/api/notifications/watchlist', headers: authHeader });
+  assert.equal(authedWatchlist.statusCode, 200);
 });

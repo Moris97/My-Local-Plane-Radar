@@ -646,9 +646,13 @@ export async function buildServer({ logger = true } = {}) {
 
   app.get('/api/trails/:hex', async (request) => getTrail(request.params.hex));
 
-  app.get('/api/notifications/settings', async () => getNotificationSettings());
+  // The whole Notifications tab (settings, ntfy topic, watch list) is
+  // gated the same way the Server tab and the Smart Home subview already
+  // are -- on request, widening what was previously a narrower gate
+  // (Smart Home only, since broker credentials are a real infra secret).
+  app.get('/api/notifications/settings', { preHandler: requireSettingsAuth }, async () => getNotificationSettings());
 
-  app.put('/api/notifications/settings', async (request, reply) => {
+  app.put('/api/notifications/settings', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     const patch = {};
 
@@ -688,13 +692,15 @@ export async function buildServer({ logger = true } = {}) {
     return updateNotificationSettings(patch);
   });
 
-  app.get('/api/notifications/ntfy-topic', async () => ({ topic: getNtfyTopic() }));
+  app.get('/api/notifications/ntfy-topic', { preHandler: requireSettingsAuth }, async () => ({ topic: getNtfyTopic() }));
 
-  app.post('/api/notifications/ntfy-topic/regenerate', async () => ({ topic: regenerateNtfyTopic() }));
+  app.post('/api/notifications/ntfy-topic/regenerate', { preHandler: requireSettingsAuth }, async () => ({
+    topic: regenerateNtfyTopic(),
+  }));
 
-  app.get('/api/notifications/watchlist', async () => getWatchList());
+  app.get('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async () => getWatchList());
 
-  app.post('/api/notifications/watchlist', async (request, reply) => {
+  app.post('/api/notifications/watchlist', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const body = request.body ?? {};
     const error = validateWatchEntryInput(body);
     if (error) {
@@ -703,7 +709,7 @@ export async function buildServer({ logger = true } = {}) {
     return addWatchEntry(body);
   });
 
-  app.delete('/api/notifications/watchlist/:id', async (request, reply) => {
+  app.delete('/api/notifications/watchlist/:id', { preHandler: requireSettingsAuth }, async (request, reply) => {
     const removed = removeWatchEntry(request.params.id);
     if (!removed) {
       return reply.code(404).send({ error: 'No watch entry with that id' });
@@ -711,12 +717,9 @@ export async function buildServer({ logger = true } = {}) {
     return { removed: true };
   });
 
-  // Smart-home (MQTT) delivery -- gated behind requireSettingsAuth, same as
-  // /api/settings and /api/server/port, unlike the rest of this
-  // Notifications-tab-adjacent config above (ntfy topic, watch list):
-  // broker credentials are a real infrastructure secret, a different kind
-  // of sensitive than a random ntfy topic string. Deliberate decision, not
-  // an inconsistency.
+  // Smart-home (MQTT) delivery -- already behind requireSettingsAuth before
+  // the rest of this tab was (broker credentials are a real infrastructure
+  // secret), so this block needed no change when the gate widened above.
   app.get('/api/notifications/smart-home', { preHandler: requireSettingsAuth }, async () => ({
     ...getSmartHomeSettings(),
     // Runtime state, not a saved setting -- lets the UI show "enabled but

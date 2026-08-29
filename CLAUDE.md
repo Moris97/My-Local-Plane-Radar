@@ -919,20 +919,30 @@ where it is stored**:
 
 | Tab | Contents | Stored |
 |---|---|---|
-| General | units, language | `localStorage` |
+| General | units, language, notification sound | `localStorage` |
 | Map | basemap mode, map theme, trails | `localStorage` |
 | Aircraft | marker color mode, icon size, altitude filter | `localStorage` |
-| Notifications | notification rules, ntfy topic, watch list, smart home | SQLite (shared) |
-| Server | Settings password, server port, receiver location | SQLite (shared) |
+| Notifications | notification rules, ntfy topic, watch list, smart home | SQLite (shared), **password-gated** |
+| Server | Settings password, server port, receiver location | SQLite (shared), **password-gated** |
 
 Smart Home was folded into Notifications (was its own sixth tab, overflowed
 the tab row sized for five). The merged tab shows rule toggles plus two
 buttons — **Configure notifications** and **Configure smart home** — each
-opening a subview in place, with a Back button. **The access-control split
-is unchanged and is the thing to be careful about when touching this**:
-smart home still checks `passwordSet && !getStoredToken()` internally
-(broker credentials are a real infra secret), while rule toggles/ntfy
-topic/watch list stay ungated. Sharing a tab must not become sharing a gate.
+opening a subview in place, with a Back button. **The whole Notifications
+tab is now password-gated, on explicit request (2026-08-29) — widened from
+the original narrower split**, where only the Smart Home subview checked
+`passwordSet && !getStoredToken()` while rule toggles/ntfy topic/watch list
+stayed ungated. `renderNotificationsTab` now mirrors `renderServerTab`'s own
+status-check-then-gate-or-render shape exactly (see "Settings access
+control" below for the server-side route list). Smart Home's own internal
+gate check is now redundant with the outer one but harmless, left in place
+as defense in depth rather than threaded through as a "trust me" flag.
+**`notificationSound`** (which WebAudio tone from `notification-sound.js`
+plays on a live toast, `'none'` default) is per-browser like everything
+else on General — it moved there from an earlier draft that put it on
+Notifications, specifically so it stays reachable without a login even once
+this tab is gated; a login screen is not the place to make someone log in
+just to mute their speakers.
 
 - **Per-browser** settings live in `settings-state.js` (`localStorage`).
 - **Shared** settings live server-side in SQLite, reached over `/api/*`.
@@ -1093,9 +1103,11 @@ the same file without that section, for `curl -o backup.mlpr`. **Never set
 browser would save plain JSON under a `.mlpr` name. Import accepts both a
 `Buffer` (new binary path, `application/octet-stream` content-type parser,
 `bodyLimit` 16 MiB) and a JSON body (the pre-existing path, unchanged).
-Both routes stay behind `requireSettingsAuth` — a deliberate exception to
-the usual scope, since the bundle includes the password hash and
-smart-home credentials alongside normally-ungated notification settings.
+Both routes stay behind `requireSettingsAuth`, same as the Server and
+Notifications tabs the bundle's own contents span — the password hash and
+smart-home credentials are the most sensitive things in it, but the
+notification settings/watch list/ntfy topic bundled alongside them are
+gated the same way now too (2026-08-29), not a separate exception.
 
 **Per-browser settings are opt-in**, via a checkbox in the Backup
 fieldset (default on) — `localStorage` is invisible to the server, so only
@@ -1714,12 +1726,13 @@ field. Fields: `reason`, `timestamp`, `hex`, `flight`, `registration`,
 (`null` if unavailable); watch-list adds `matchedType`/`matchedValue`.
 Never retained — a discrete occurrence, not persistent state.
 
-**Settings**: a "Configure smart home" subview inside Notifications,
-behind `requireSettingsAuth` **like the Server tab**, unlike the rest of
-that tab — broker credentials are treated as a real infrastructure secret,
-same tier as the Settings password/home location/server port. Stored
-server-side (`smartHomeSettings` config key). PUT calls
-`reconfigureSmartHome()` immediately.
+**Settings**: a "Configure smart home" subview inside Notifications, behind
+`requireSettingsAuth` since before the rest of that tab was (2026-08-29) —
+broker credentials are treated as a real infrastructure secret, same tier
+as the Settings password/home location/server port. Its own internal gate
+check is now redundant with the outer Notifications-tab one but harmless,
+left as defense in depth. Stored server-side (`smartHomeSettings` config
+key). PUT calls `reconfigureSmartHome()` immediately.
 
 **`/dev/smart-home-test`**: a form to fire a real event through the
 **actual configured connection** without waiting for a genuine
@@ -2350,20 +2363,37 @@ client can't spend a guess waiting it out). Guards both
 `/api/settings-auth/login` and `/api/settings-auth/password`'s own
 `currentPassword` check.
 
-**Gates the Server tab only, not the whole Settings panel** — a deliberate
-narrowing (originally gated the entire panel before opening). Only
-server-level controls need a gate: the password itself, the home location,
-the listening port. `requireSettingsAuth` preHandler applied per-route to
-`/api/settings*` and `/api/server/port*` — **not** `/api/notifications/*`,
-`/api/settings-auth/*` itself, `/api/daylight`, or `/api/stats/history`.
-No-op when no password is set.
+**Gates the Server and Notifications tabs, not the whole Settings panel** —
+a deliberate narrowing from the original design (which gated the entire
+panel before opening). Originally just Server (password, home location,
+port) plus the Smart Home subview (broker credentials); **widened
+2026-08-29 on explicit request to cover the whole Notifications tab too**
+(rules, ntfy topic, watch list) — a LAN client reading/changing what
+notifies you or seeing the ntfy topic was judged worth the same login as
+the server-level controls. `requireSettingsAuth` preHandler applied
+per-route to `/api/settings*`, `/api/server/port*`,
+`/api/stats/antenna/{coverage,revision,reset}` (reveals home location, see
+the coverage section above), and every `/api/notifications/*` route —
+**not** `/api/settings-auth/*` itself, `/api/daylight`, `/api/stats/history`,
+or `/api/stats/events` (the notification/event-history log lives in Stats,
+not this tab, and was deliberately left ungated alongside
+`/api/stats/registrations`). No-op when no password is set.
 
-Frontend: `renderSettingsForm` always renders all five tabs; only
-`renderServerTab` checks `passwordSet && !getStoredToken()` and swaps in
-the login form. `authedFetch` takes an explicit `onUnauthorized` callback
-per call site, so a 401 only resets the Server tab's own content. Token
-lives in `sessionStorage` (`settings-auth.js`), attached via
-`X-MLPR-Settings-Token`.
+`notificationSound` (Settings → General) is the one Notifications-tab-
+*adjacent* setting that stays reachable with no login at all — it moved to
+General specifically so muting/picking a sound never requires
+authenticating first; see the Settings-scope table above.
+
+Frontend: `renderSettingsForm` always renders all five tabs; `renderServerTab`
+and `renderNotificationsTab` each independently check
+`passwordSet && !getStoredToken()` and swap in the login form via the same
+`renderGate(root, retry)` helper — two call sites, not a shared "gated tab"
+abstraction, since each tab's real content-render function already differs
+completely and the gate itself is three lines. `authedFetch` takes an
+explicit `onUnauthorized` callback per call site (each gated tab builds its
+own as `() => renderXTab(root)`), so a 401 only resets that tab's own
+content, not the sibling one. Token lives in `sessionStorage`
+(`settings-auth.js`), attached via `X-MLPR-Settings-Token`.
 
 Setting/changing/removing the password is **not** behind the token
 preHandler — changing requires the *current* password (checked inside the
