@@ -18,7 +18,7 @@
 // warns against repeatedly.
 import { t } from './i18n.js';
 import { requestSelect } from './radar-state.js';
-import { onPanelLayoutChange, isSidePanelLayout } from './panels.js';
+import { onPanelLayoutChange, isSidePanelLayout, openFullscreenModal } from './panels.js';
 import { escapeHtml } from './html-escape.js';
 import { buildContent } from './notification-content.js';
 import { getSettings } from './settings-state.js';
@@ -150,9 +150,22 @@ function renderToast(toast) {
       <p class="mlpr-toast-title">${escapeHtml(content.title)}</p>
       <p class="mlpr-toast-summary">${escapeHtml(content.body)}</p>
       ${content.detail ? `<p class="mlpr-toast-detail">${escapeHtml(content.detail)}</p>` : ''}
+      <button type="button" class="mlpr-toast-all-link">${escapeHtml(t('toastAllNotifications'))}</button>
     </div>
     <button type="button" class="mlpr-toast-close" aria-label="${escapeHtml(t('toastDismiss'))}">&times;</button>
   `;
+
+  // Requested alongside the click-to-select fix: a way to reach the full
+  // history (Stats -> "Historia zdarzeń") straight from whatever toast
+  // prompted the thought, not just from Stats itself. Its own
+  // stopPropagation, same reasoning as the close button -- otherwise this
+  // click would also bubble into the whole-card click handler below (select
+  // + dismiss) for any event that names an aircraft.
+  el.querySelector('.mlpr-toast-all-link').addEventListener('click', (domEvent) => {
+    domEvent.stopPropagation();
+    openFullscreenModal('stats', { autoLoadEvents: true });
+    dismiss(toast.id);
+  });
 
   el.querySelector('.mlpr-toast-close').addEventListener('click', (domEvent) => {
     domEvent.stopPropagation();

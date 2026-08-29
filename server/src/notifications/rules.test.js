@@ -101,6 +101,13 @@ test('squawk 7700 triggers a notification', () => {
   assert.equal(sent.filter((n) => n.payload.title.startsWith('Squawk')).length, 1);
 });
 
+test('the ntfy payload carries hex, for ntfy.js\'s click-to-select deep link', () => {
+  const aircraft = aircraftFixture({ hex: 'clickhex1', squawk: '7700' });
+  rules.evaluateAircraftRules(aircraft);
+  const payload = sent.find((n) => n.payload.title.startsWith('Squawk')).payload;
+  assert.equal(payload.hex, 'clickhex1');
+});
+
 test('notification message includes registration, type, flight, altitude and speed', () => {
   rules.evaluateAircraftRules(
     aircraftFixture({ squawk: '7700', registration: 'SP-TEST', typeCode: 'B738', altBaro: 5000, gs: 210.6 }),
@@ -847,6 +854,19 @@ test('a range record with no known aircraft (legacy call shape) still notifies b
   rules.evaluateRangeRecordRule(500);
   assert.equal(sent.some((n) => n.payload.title === 'New range record'), true);
   assert.equal(uiEvents.filter((e) => e.kind === 'range_record').length, 0);
+});
+
+test('a range record ntfy payload carries hex when the aircraft is known, and is undefined otherwise', () => {
+  rules.resetAllTimeMaxRangeKm();
+  const aircraft = aircraftFixture({ hex: 'rangeclick', registration: 'SP-FAR2' });
+  rules.evaluateRangeRecordRule(600, aircraft);
+  const withAircraft = sent.find((n) => n.payload.title === 'New range record').payload;
+  assert.equal(withAircraft.hex, 'rangeclick');
+
+  rules.resetAllTimeMaxRangeKm();
+  rules.evaluateRangeRecordRule(700);
+  const withoutAircraft = sent.find((n) => n.payload.message.includes('700 km')).payload;
+  assert.equal(withoutAircraft.hex, undefined);
 });
 
 test('receiver silence emits a UI event with no hex/aircraft', () => {

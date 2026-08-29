@@ -22,12 +22,20 @@ function detectLocalUrl() {
   return null;
 }
 
-const clickUrl = detectLocalUrl();
+const baseClickUrl = detectLocalUrl();
 
-export async function sendNtfyNotification(topic, { title, message, priority = 3, tags = [] }) {
+// hex (optional): when the notification is about a specific aircraft,
+// deep-links the click straight to it (app.js reads ?select=<hex> on load
+// and selects+centers once the aircraft actually shows up) instead of just
+// opening the app at whatever it happens to be looking at. Reported live as
+// missing -- tapping a push notification used to always land on the bare
+// app root regardless of which aircraft it was about. receiver_silence (no
+// aircraft at all) and any future hex-less rule still get the plain root
+// URL, same best-effort fallback as before.
+export async function sendNtfyNotification(topic, { title, message, priority = 3, tags = [], hex }) {
   try {
     const body = { topic, title, message, priority, tags };
-    if (clickUrl) body.click = clickUrl;
+    if (baseClickUrl) body.click = hex ? `${baseClickUrl}?select=${encodeURIComponent(hex)}` : baseClickUrl;
 
     const response = await fetch(NTFY_URL, {
       method: 'POST',

@@ -17,6 +17,23 @@ test('core tiles only include fields that are actually present', () => {
   assert.equal(findTile(core, 'typeCode'), undefined);
 });
 
+test('airlineName produces a tile when present (resolved externally by aircraft-panel.js)', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', flight: 'THY6508', airlineIcao: 'THY', airlineName: 'Turkish Airlines' });
+  assert.equal(findTile(core, 'airlineName').value, 'Turkish Airlines');
+});
+
+test('airlineName is absent when unresolved (military/private/unmatched prefix/no callsign)', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', flight: 'THY6508' });
+  assert.equal(findTile(core, 'airlineName'), undefined);
+});
+
+test('airlineName has its own pairId, not none -- reorderForPairing (aircraft-panel.js) only ever promotes an orphaned pairId to full-width, never a bare unpaired tile, so an unset pairId here would silently pair by array adjacency with whatever core tile comes next instead of rendering full-width', () => {
+  const { core } = buildAircraftDetailTiles({ hex: 'abc', flight: 'THY6508', airlineIcao: 'THY', airlineName: 'Turkish Airlines' });
+  const airlineTile = findTile(core, 'airlineName');
+  assert.ok(airlineTile.pairId, 'airlineName must carry a pairId (any truthy value) to be promoted full-width');
+  assert.equal(core.filter((t) => t.pairId === airlineTile.pairId).length, 1, 'its pairId must be unique -- nothing else may share it');
+});
+
 test('altitude shows the ground marker when onGround, ignoring altBaro', () => {
   const { core } = buildAircraftDetailTiles({ hex: 'abc', onGround: true, altBaro: 0 });
   assert.equal(findTile(core, 'altBaro').value, GROUND_MARKER);

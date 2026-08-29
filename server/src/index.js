@@ -76,6 +76,7 @@ async function pollOnce(broadcast) {
   if (raw === null) return;
 
   const { updated, removed } = applyRawSnapshot(raw);
+  const airlines = getAirlines();
 
   for (const aircraft of updated) {
     // Attached directly onto the (already-mutable, freshly-normalized)
@@ -91,6 +92,18 @@ async function pollOnce(broadcast) {
     // delta's own `removed` field already follows below).
     const alertKinds = evaluateAircraftRules(aircraft);
     if (alertKinds.length > 0) aircraft.alertKinds = alertKinds;
+    // Same attach-before-wire shape as alertKinds above -- airline-lookup.js
+    // already computed this per tick for stats-registrations.js's own sake
+    // (recordRangeAndRegistrationSightings below); reusing it here instead
+    // of leaving it stranded server-side is what actually lets the client
+    // (the aircraft details panel, the map popup) show an airline name at
+    // all, reported live as a real gap (no field in the wire payload, not
+    // just a missing UI tile). Omitted rather than null/undefined when
+    // unresolved (military/private/no callsign match/unknown prefix) --
+    // same reasoning as alertKinds, most aircraft on most ticks have no
+    // resolvable airline.
+    const airlineIcao = resolveAirlineIcao(aircraft, airlines);
+    if (airlineIcao) aircraft.airlineIcao = airlineIcao;
     if (typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number') {
       recordPosition(aircraft.hex, {
         lat: aircraft.lat,
@@ -108,7 +121,7 @@ async function pollOnce(broadcast) {
     }
   }
 
-  recordRangeAndRegistrationSightings();
+  recordRangeAndRegistrationSightings(airlines);
 
   broadcast({
     type: 'delta',
@@ -130,9 +143,8 @@ async function pollOnce(broadcast) {
 // today's unique aircraft/flight sets. All of this is folded into one loop
 // rather than four separate passes over the same (small) tracked-aircraft
 // list each second.
-function recordRangeAndRegistrationSightings() {
+function recordRangeAndRegistrationSightings(airlines) {
   const home = getEffectiveHome();
-  const airlines = getAirlines();
   let bestRangeKm = null;
   // Which aircraft actually achieved bestRangeKm -- purely for the range-
   // record UI event's click-to-select-on-the-map affordance (rules.js's

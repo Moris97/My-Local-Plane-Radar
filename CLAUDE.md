@@ -1464,6 +1464,25 @@ message body doesn't repeat it.
 **Click-to-open**: ntfy's `click` URL, auto-detected once at startup via
 `os.networkInterfaces()` (first non-internal IPv4) — must be a LAN address
 reachable from the phone, never `localhost`. Best-effort by design.
+**Deep-links to the specific aircraft since 2026-08-29** — reported live as
+a real gap (tapping a push notification always landed on the bare app
+root, never the aircraft it was about). `notify()`'s payload gained an
+optional `hex` (set at every call site with an aircraft in scope, i.e.
+every rule but `receiver_silence` and, deliberately, nothing added for
+`evaluateRangeRecordRule`'s hex-less legacy call shape either); `ntfy.js`'s
+`sendNtfyNotification` appends `?select=<hex>` (percent-encoded) to the
+click URL when present, else the bare root as before. `app.js` reads
+`?select=` once at script load into `pendingSelectHex`, and
+`applyAircraftUpdate` — which every hex already passes through on every
+snapshot/delta — clears it and calls the same `selectAndCenter` a marker
+click uses the moment that hex's data actually arrives (the first snapshot
+after connecting, if still in range) or never (already gone — same
+best-effort framing the click URL itself already carries), then strips the
+query param via `history.replaceState` so a later reload of the same tab
+doesn't re-jump. No separate polling/timeout needed. The in-app on-map
+toast's own click-to-select (`requestSelect(toast.event.hex)`,
+`notifications-ui.js`) already worked before this and was unaffected — this
+closes the gap specifically for a *native push* notification tap.
 
 **ntfy topic**: 8-char random string, auto-generated, persisted, regenerable.
 Charset excludes `0/o` and `1/l/i` (a real user mistyped a code with one) —
@@ -1663,14 +1682,28 @@ title badge.
   once it's actually in view. Clicking dismisses the card too (interacting
   with a notification consumes it, standard toast UX). The close button
   (`✕`) stops the click from reaching this handler.
+- **"All notifications" button** (2026-08-29, requested alongside the
+  ntfy click-to-select fix above): every toast also carries a small link to
+  Stats → "Historia zdarzeń" (`.mlpr-toast-all-link`, its own
+  `stopPropagation` for the same reason the close button has one — it would
+  otherwise also trigger the whole-card select-and-dismiss handler above).
+  `panels.js`'s `openFullscreenModal(name, options)` gained an optional
+  second parameter, forwarded verbatim to the entry's `render(el, options)`
+  — `FULLSCREEN_MODALS.stats.render` spreads it alongside its own
+  `closeModal` callback into `renderStatsPanel`, which reads
+  `autoLoadEvents` to skip the "Show event history" click and
+  `scrollIntoView` straight to that section instead of leaving the user to
+  find it. Callback-in, not an import, for the same cycle-avoidance reason
+  `closeModal` itself already is — see `stats.js`'s own comment on that.
 - Content is built entirely client-side from the event's own fields — squawk
   meaning and the watch-list matched-field label are translated via a small
-  code → i18n-key lookup (`SQUAWK_MEANING_KEYS`/`WATCH_FIELD_KEYS`,
-  reusing the watch-list tab's own `watchType`/`watchRegistration`/
-  `watchFlight` strings), not sent as server-formatted English text — ntfy's
-  messages are English-only by design, this is a real localized UI surface.
-  `escapeHtml`'d before insertion (same stored-XSS reasoning as the map
-  popup/List/Stats — `HttpSource` is plain unauthenticated LAN HTTP).
+  code → i18n-key lookup (`SQUAWK_MEANING_KEYS`/`WATCH_FIELD_KEYS`, now in
+  `notification-content.js`, reusing the watch-list tab's own
+  `watchType`/`watchRegistration`/`watchFlight` strings), not sent as
+  server-formatted English text — ntfy's messages are English-only by
+  design, this is a real localized UI surface. `escapeHtml`'d before
+  insertion (same stored-XSS reasoning as the map popup/List/Stats —
+  `HttpSource` is plain unauthenticated LAN HTTP).
 
 ## Smart home / MQTT integration
 
@@ -1948,6 +1981,37 @@ risk, and unneeded since doughnut charts use plain color swatches.
 only the first occurrence per process lifetime gets a `console.warn`
 (plain, not a pino logger — this module is a pure classifier several
 layers from Fastify).
+
+**Also shown live, not just in Stats (2026-08-29)** — reported live as a
+real gap: `resolveAirlineIcao` was already computed every poll tick for
+`stats-registrations.js`'s sake, but the result never reached the browser
+at all. `index.js`'s `pollOnce` now also attaches it (when resolved) as
+`aircraft.airlineIcao` onto each `updated` aircraft before
+`toWireAircraftList`, same "attach before wire, ride the existing delta"
+shape as `alertKinds` right above it in that loop — `getAirlines()` is
+called once per tick and passed into `recordRangeAndRegistrationSightings`
+too, rather than each computing its own copy. Client-side,
+`public/js/airlines-client.js` (a leaf module, no `panels.js`/`stats.js`
+dependency — see its own comment for why that matters) fetches
+`GET /api/airlines` once at startup (`app.js`'s `map.on('load')`, alongside
+`loadIconTypes`) and exposes a sync `getAirlineName(icao)`. Used in the map
+click popup (`app.js`'s `formatAircraftInfo`, a chip, only when resolved)
+and the aircraft details panel — the latter via a tile in
+`aircraft-details.js`'s `CORE_SPEC`, but resolved in `aircraft-panel.js`
+(a shallow-cloned aircraft object with `airlineName` merged on) rather than
+in `aircraft-details.js` itself, which stays pure/DOM-free by design. That
+tile's `pairId` is a value nothing else shares (`'p-airline'`), not `null`
+— `aircraft-panel.js`'s `reorderForPairing` only promotes a tile to
+full-width when it *had* a pairId whose partner is missing; a tile with no
+pairId at all is pushed through unpromoted and lands wherever plain array
+order puts it. Caught in verification (a real Playwright DOM check, not
+just reading the code): with no pairId the tile silently paired with
+whatever tile happened to sit next in `CORE_SPEC` (Flight, in testing) —
+harmless-looking there, but exactly the "shifts into the wrong half of a
+row" failure this file's own pairing mechanism exists to prevent, the
+moment some other field's presence changes. `stats.js`'s own airline map
+cache (`getAirlinesMap`) was folded into this same module rather than kept
+as a second, Stats-only copy.
 
 ### Chart rendering (`public/js/chart.js`)
 

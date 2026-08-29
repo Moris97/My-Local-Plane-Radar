@@ -18,9 +18,11 @@ const DICTIONARIES = {
     notificationSoundNone: 'None',
     notificationSoundChime: 'Chime',
     notificationSoundPing: 'Ping',
-    notificationSoundBeepBeep: 'Double beep',
+    // Swapped on request (2026-08-29) -- names only, the underlying
+    // SOUND_PRESETS implementation each id maps to is unchanged.
+    notificationSoundBeepBeep: 'Radar pulse',
     notificationSoundSweepUp: 'Rising tone',
-    notificationSoundRadarPulse: 'Radar pulse',
+    notificationSoundRadarPulse: 'Double beep',
     altitudeFilter: 'Altitude filter',
     showMoreDetails: 'Show more details',
     noAircraft: 'No aircraft in range',
@@ -154,6 +156,7 @@ const DICTIONARIES = {
     toastCirclingTitle: 'Aircraft circling',
     toastDismiss: 'Dismiss',
     toastMoreCount: '+{count} more',
+    toastAllNotifications: 'All notifications →',
     circlingAlert: 'Circling aircraft alert',
     circlingAlertHint:
       'Notifies when a large aircraft (airliner or business jet), a helicopter, or any military aircraft turns through a full circle or more while staying roughly in one place -- often overwatch, a survey flight, or a search. Light aircraft and gliders are excluded, since they are almost always routine training circuits or thermalling rather than something worth flagging.',
@@ -383,9 +386,11 @@ const DICTIONARIES = {
     notificationSoundNone: 'Brak',
     notificationSoundChime: 'Dzwonek',
     notificationSoundPing: 'Ping',
-    notificationSoundBeepBeep: 'Podwójny sygnał',
+    // Zamienione na życzenie (2026-08-29) -- tylko nazwy, dźwięk pod danym
+    // id (SOUND_PRESETS) się nie zmienił.
+    notificationSoundBeepBeep: 'Puls radaru',
     notificationSoundSweepUp: 'Narastający ton',
-    notificationSoundRadarPulse: 'Puls radaru',
+    notificationSoundRadarPulse: 'Podwójny sygnał',
     altitudeFilter: 'Filtr wysokości',
     showMoreDetails: 'Pokaż więcej szczegółów',
     noAircraft: 'Brak samolotów w zasięgu',
@@ -514,6 +519,7 @@ const DICTIONARIES = {
     toastCirclingTitle: 'Samolot krąży',
     toastDismiss: 'Zamknij',
     toastMoreCount: '+{count} więcej',
+    toastAllNotifications: 'Wszystkie powiadomienia →',
     circlingAlert: 'Alert krążącego samolotu',
     circlingAlertHint:
       'Powiadamia, gdy duży samolot (pasażerski albo biznesowy), śmigłowiec albo dowolny samolot wojskowy wykona pełny obrót (lub więcej), pozostając mniej więcej w jednym miejscu -- często obserwacja z powietrza, lot pomiarowy albo poszukiwania. Małe samoloty i szybowce są wykluczone, bo niemal zawsze to rutynowe kręgi treningowe albo krążenie w kominie termicznym, a nie coś wartego uwagi.',

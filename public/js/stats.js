@@ -19,6 +19,7 @@ import { rowsToCsv } from './csv.js';
 import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 import { escapeHtml } from './html-escape.js';
 import { buildContent as buildEventContent } from './notification-content.js';
+import { loadAirlines } from './airlines-client.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TREND_TOP_N = 5;
@@ -115,8 +116,6 @@ let rangeGeneration = 0;
 // need to survive a reload the way "which time range am I looking at" does.
 const chartView = { topType: 'doughnut', topAirline: 'doughnut' };
 
-let airlinesCache = null;
-
 // Caches the last-fetched /api/stats/types or /api/stats/airlines counts
 // per chart kind, keyed by the range they were fetched for -- the
 // doughnut<->line view toggle used to re-fetch from scratch on every click
@@ -144,12 +143,6 @@ async function fetchJson(url, fallback) {
   }
 }
 
-async function getAirlinesMap() {
-  if (airlinesCache) return airlinesCache;
-  const raw = await fetchJson('/api/airlines', {});
-  airlinesCache = new Map(Object.entries(raw));
-  return airlinesCache;
-}
 
 function legendItemHtml(color, label, value) {
   return `<span class="mlpr-chart-legend-item"><span class="mlpr-chart-legend-swatch" style="background:${color}"></span>${escapeHtml(label)}${value != null ? `: ${escapeHtml(value)}` : ''}</span>`;
@@ -489,7 +482,12 @@ function aircraftTileHtml(label, entry, units, emptyMessage) {
 // through it (a real, reproduced bug: it broke module evaluation order
 // elsewhere in this same cycle, see notification-content.js's own comment
 // for the full story). A plain callback avoids the cycle entirely.
-export function renderStatsPanel(container, { closeModal } = {}) {
+// autoLoadEvents (optional): skips the "Show event history" click and
+// scrolls straight to that section -- notifications-ui.js's toast "all
+// notifications" button asks for this via openFullscreenModal('stats',
+// { autoLoadEvents: true }) instead of leaving the user to find and click
+// the button themselves right after they already asked to see it.
+export function renderStatsPanel(container, { closeModal, autoLoadEvents } = {}) {
   container.innerHTML = `
     <section class="mlpr-stats-section">
       <h3 class="mlpr-stats-section-title">${t('statsNow')}</h3>
@@ -593,7 +591,7 @@ export function renderStatsPanel(container, { closeModal } = {}) {
       <div class="mlpr-pagination" id="mlpr-airlines-pagination"></div>
     </section>
 
-    <section class="mlpr-stat-chart">
+    <section class="mlpr-stat-chart" id="mlpr-events-section">
       <p class="mlpr-chart-label">${t('eventHistory')}</p>
       <button type="button" id="mlpr-load-events" class="mlpr-detail-expand">${t('showEventHistory')}</button>
       <div id="mlpr-events-controls" style="display:none">
@@ -844,7 +842,7 @@ export function renderStatsPanel(container, { closeModal } = {}) {
   }
 
   async function drawAirlineChart(forceRefresh = true) {
-    const airlines = await getAirlinesMap();
+    const airlines = await loadAirlines();
     await drawTopChart(
       'topAirline',
       '#mlpr-chart-top-airline',
@@ -1099,7 +1097,7 @@ export function renderStatsPanel(container, { closeModal } = {}) {
     loadBtn.remove();
     tableWrap.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
 
-    const airlines = await getAirlinesMap();
+    const airlines = await loadAirlines();
 
     let sortKey = defaultSortKey;
     let sortAsc = defaultSortAsc;
@@ -1277,6 +1275,11 @@ export function renderStatsPanel(container, { closeModal } = {}) {
   }
 
   container.querySelector('#mlpr-load-events').addEventListener('click', loadEventHistory, { once: true });
+
+  if (autoLoadEvents) {
+    loadEventHistory();
+    container.querySelector('#mlpr-events-section').scrollIntoView({ block: 'start' });
+  }
 
   container.querySelector('#mlpr-load-registrations').addEventListener(
     'click',

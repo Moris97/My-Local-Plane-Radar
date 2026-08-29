@@ -159,6 +159,25 @@ html, body {
   color: #7fa896;
 }
 
+.mlpr-toast-all-link {
+  display: block;
+  appearance: none;
+  -webkit-appearance: none;
+  background: none;
+  border: none;
+  margin: 6px 0 0;
+  padding: 0;
+  color: #7fa3b3;
+  font: 500 11px system-ui, sans-serif;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.mlpr-toast-all-link:hover {
+  color: #d8f3e6;
+}
+
 .mlpr-toast-close {
   position: absolute;
   top: 6px;

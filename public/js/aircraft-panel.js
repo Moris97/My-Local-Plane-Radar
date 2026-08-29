@@ -3,6 +3,7 @@ import { getInspectedHex, getAircraftByHex, onChange } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import { buildAircraftDetailTiles, FLAG_VALUE_MARKER, GROUND_MARKER } from './aircraft-details.js';
 import { getCachedPhoto, setCachedPhoto } from './photo-cache.js';
+import { getAirlineName } from './airlines-client.js';
 import { escapeHtml } from './html-escape.js';
 
 // A tile with a pairId is meant to sit side by side with its partner (e.g.
@@ -141,7 +142,12 @@ export function renderAircraftDetailsPanel(container) {
       return;
     }
 
-    const { core, extra } = buildAircraftDetailTiles(aircraft, getSettings().units);
+    // airlineName is resolved here, not in aircraft-details.js (which stays
+    // pure/DOM-free) -- see that file's own comment on the airlineName tile.
+    const { core, extra } = buildAircraftDetailTiles(
+      { ...aircraft, airlineName: getAirlineName(aircraft.airlineIcao) },
+      getSettings().units,
+    );
     let html = renderGroupHtml(core);
     if (extra.length > 0) {
       html += `

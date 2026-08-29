@@ -35,7 +35,11 @@ const FULLSCREEN_MODALS = {
   // without stats.js importing this module itself -- see stats.js's own
   // comment on renderStatsPanel's closeModal parameter for why that import
   // would cycle back through here.
-  stats: { title: () => t('stats'), render: (el) => renderStatsPanel(el, { closeModal: closeFullscreenModal }), fill: true },
+  stats: {
+    title: () => t('stats'),
+    render: (el, options) => renderStatsPanel(el, { closeModal: closeFullscreenModal, ...options }),
+    fill: true,
+  },
   listFull: { title: () => t('list'), render: (el) => renderListPanel(el, { fullscreen: true }), fill: true },
 };
 
@@ -364,7 +368,14 @@ function closePanel({ fromPopstate = false } = {}) {
   }
 }
 
-export async function openFullscreenModal(name) {
+// options (optional): forwarded verbatim to entry.render as its second
+// argument, alongside the content element -- e.g. the Stats entry's own
+// { autoLoadEvents } (notifications-ui.js's toast "all notifications"
+// button), threaded through rather than stats.js importing this module to
+// call something after the fact (same "callback in, not an import back"
+// shape as FULLSCREEN_MODALS.stats.render's own closeModal wiring, and for
+// the same cycle-avoidance reason -- see stats.js's own comment).
+export async function openFullscreenModal(name, options) {
   const entry = FULLSCREEN_MODALS[name];
   if (!entry) return;
 
@@ -397,7 +408,7 @@ export async function openFullscreenModal(name) {
     historyPushed = true;
   }
 
-  const result = await entry.render(modalContentEl);
+  const result = await entry.render(modalContentEl, options);
   if (myToken === renderToken) {
     disposeCurrent = result ?? null;
   } else if (typeof result === 'function') {

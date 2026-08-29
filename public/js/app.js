@@ -1,5 +1,6 @@
 import { createPlaneElement, setPlaneHeading, setPlaneColor, setPlaneKind, setPlaneLabel, refreshMarkerSize } from './aircraft-icon-live.js';
 import { loadIconTypes } from './icon-classify.js';
+import { loadAirlines, getAirlineName } from './airlines-client.js';
 import { applyBasemapMode, BLANK_STYLE } from './basemap.js';
 import { recordPosition, clearHistory, trailFeaturesFor, seedHistory, setShorterTrails, colorForAltitude } from './trail.js';
 import { colorForElapsed, colorForSpeed } from './aircraft-color.js';
@@ -157,6 +158,16 @@ function applyTimedAlert(hex) {
 
 let hasCentered = false;
 let mapReady = false;
+// A push notification's ntfy.js click URL deep-links here as ?select=<hex>
+// (reported live as a real gap -- tapping one used to always land on the
+// bare app root regardless of which aircraft it was about). Read once at
+// script load; applyAircraftUpdate below clears it and selects+centers the
+// moment that hex's data actually arrives -- the very first snapshot after
+// connecting if it's still in range, or never if it's already gone, same
+// best-effort framing ntfy's click URL itself already carries. No separate
+// polling/timeout needed: this reuses the exact same per-aircraft update
+// path every hex already goes through on every snapshot/delta.
+let pendingSelectHex = new URLSearchParams(location.search).get('select');
 let selectedHex = null;
 // Which marker currently has the .mlpr-plane-hover class applied *because
 // the list asked for it* (requestHover, see setHoverRequestHandler below)
@@ -557,6 +568,14 @@ map.on('load', async () => {
   // ADS-B category fallback / 'unknown'), but every real type-table hit
   // would be missed for whichever aircraft happen to arrive in the gap.
   await loadIconTypes();
+  // Same fetch-once-before-first-use shape as loadIconTypes above -- an
+  // aircraft's airline name (map popup, details panel) needs this loaded
+  // before the first real popup/panel could ever open, not on-demand per
+  // click. Not awaited as strictly as the icon table (a missing airline
+  // name for the first tick or two just means one tile briefly absent,
+  // not a wrong-looking marker), but still kicked off here rather than
+  // lazily on first popup open.
+  loadAirlines();
   const initialSettings = getSettings();
   setShorterTrails(initialSettings.shorterTrails);
   applyIconSize(initialSettings.aircraftIconSize);
@@ -848,6 +867,12 @@ function formatAircraftInfo(aircraft) {
 
   const chips = [];
   if (aircraft.typeCode) chips.push(popupChip(t('type'), escapeHtml(aircraft.typeCode)));
+  // Only when resolved -- airlineIcao (server/src/airline-lookup.js, riding
+  // the wire per-aircraft since this popup itself was reported live to be
+  // missing it) frequently has no name at all (military, private/GA, an
+  // unmatched prefix) and this is not a field to show blank/dashed for.
+  const airlineName = getAirlineName(aircraft.airlineIcao);
+  if (airlineName) chips.push(popupChip(t('colAirline'), escapeHtml(airlineName)));
   if (aircraft.onGround) {
     // A standalone badge, not a labeled chip -- "on ground" isn't a value
     // for some other field, it's its own flag, same "flag" treatment
@@ -1205,6 +1230,14 @@ function applyAircraftUpdate(aircraft) {
     // reference point with no home location to go on.
     map.jumpTo({ center: lngLat, zoom: INITIAL_ZOOM });
     hasCentered = true;
+  }
+
+  if (pendingSelectHex && aircraft.hex === pendingSelectHex) {
+    pendingSelectHex = null;
+    // Strips ?select=... so a later reload of this same tab doesn't
+    // re-trigger the jump every time -- the notification has been acted on.
+    history.replaceState(null, '', location.pathname + location.hash);
+    selectAndCenter(aircraft.hex);
   }
 
   return trailChanged;

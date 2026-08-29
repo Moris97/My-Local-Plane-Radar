@@ -289,6 +289,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
         message: aircraftLabel(aircraft),
         priority: 5,
         tags: ['rotating_light'],
+        hex: aircraft.hex,
       });
       // Smart-home (MQTT): originally scoped to only first-seen/watchlist
       // (see those two call sites below); squawk emergencies were the one
@@ -319,6 +320,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           message: aircraftLabel(aircraft),
           priority: 3,
           tags: ['eye'],
+          hex: aircraft.hex,
         });
         // Smart-home (MQTT) is a separate, independent delivery channel --
         // wired to first-seen, watchlist, and squawk (see that block
@@ -350,6 +352,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           message: aircraftLabel(aircraft),
           priority: 4,
           tags: ['eyes'],
+          hex: aircraft.hex,
         });
         publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
         const watchlistEventDetail = {
@@ -396,6 +399,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           message: aircraftLabel(aircraft),
           priority: 3,
           tags: ['repeat'],
+          hex: aircraft.hex,
         });
         publishSmartHomeEvent({ reason: 'circling', aircraft });
         const circlingEventDetail = { hex: aircraft.hex, aircraft: aircraftFields(aircraft) };
@@ -428,6 +432,7 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           message: overheadDetail(aircraft, overheadInfo),
           priority: 4,
           tags: ['airplane'],
+          hex: aircraft.hex,
         });
         publishSmartHomeEvent({ reason: 'overhead', aircraft, overheadInfo });
         // Deliberately NOT emitUiEvent('overhead', ...) -- the on-map
@@ -598,12 +603,12 @@ export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
 // fires immediately either way -- only the persistence is batched.
 // `aircraft` (optional) is whichever tracked aircraft happened to set the
 // new record on this tick (index.js's recordRangeAndRegistrationSightings
-// tracks it alongside the bare distance) -- used only for the UI event's
-// click-to-select-on-the-map affordance, not for the ntfy message (which
-// stays a bare distance, unchanged, since ntfy already has no way to link
-// a click back into a specific browser tab's map). `undefined` (no known
-// aircraft, e.g. a future caller that only has the number) still records
-// and notifies exactly as before, just without a UI event to emit.
+// tracks it alongside the bare distance) -- used for the UI event's
+// click-to-select-on-the-map affordance, and (since ntfy.js's hex-aware
+// click URL) the ntfy notification's own deep link too. `undefined` (no
+// known aircraft, e.g. a future caller that only has the number) still
+// records and notifies exactly as before, just with a bare click URL and
+// no UI event.
 export function evaluateRangeRecordRule(maxRangeKm, aircraft) {
   if (typeof maxRangeKm !== 'number') return;
 
@@ -619,6 +624,7 @@ export function evaluateRangeRecordRule(maxRangeKm, aircraft) {
       message: `${maxRangeKm.toFixed(0)} km (previous: ${record.toFixed(0)} km)`,
       priority: 4,
       tags: ['dash'],
+      hex: aircraft?.hex,
     });
     if (aircraft) {
       const rangeRecordEventDetail = {

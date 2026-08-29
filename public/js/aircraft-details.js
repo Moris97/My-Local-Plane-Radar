@@ -144,6 +144,26 @@ const CORE_SPEC = [
   // at all on installs without --db-file).
   tile('registration', 'detailRegistration', (a) => a.registration ?? null, 'p-database'),
   tile('typeCode', 'detailType', (a) => a.typeCode ?? null, 'p-database'),
+  // airlineName, unlike every other field here, isn't read straight off the
+  // wire aircraft object -- it's resolved client-side from
+  // aircraft.airlineIcao via airlines-client.js's getAirlineName(), which
+  // touches an external cache (fetched once at startup). Keeping that
+  // resolution out of this deliberately pure/DOM-free module: aircraft-
+  // panel.js merges the resolved name onto its own shallow copy of the
+  // aircraft object before calling buildAircraftDetailTiles, so this file
+  // still only ever reads a plain field, same as everything else in this
+  // spec. A pairId unique to itself ('p-airline', shared with nothing else
+  // here) rather than none at all -- aircraft-panel.js's reorderForPairing
+  // only promotes a tile to full-width when it HAD a pairId whose partner
+  // turned out missing (an orphaned survivor); a tile with no pairId at all
+  // is pushed through unpromoted and just lands wherever plain array
+  // adjacency puts it, which silently paired it with Flight in testing
+  // (harmless-looking, but the exact "shifts into the wrong half of a row"
+  // failure mode this file's own pairId mechanism exists to prevent, the
+  // moment some other field's presence/absence changes the array). Giving
+  // it a pairId nothing else uses guarantees "partner missing" every time,
+  // i.e. always full-width, deterministically.
+  tile('airlineName', 'colAirline', (a) => a.airlineName ?? null, 'p-airline'),
   tile('flight', 'detailFlight', (a) => a.flight ?? null, 'p-identity'),
   tile('squawk', 'detailSquawk', (a) => a.squawk ?? null, 'p-identity'),
   tile('category', 'detailCategory', (a) => (a.category ? (CATEGORY_LABELS[a.category] ?? a.category) : null), 'p-broadcast'),
