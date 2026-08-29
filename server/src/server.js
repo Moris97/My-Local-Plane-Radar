@@ -35,7 +35,7 @@ import { getAircraftTrackedCount } from './aircraft-tracked.js';
 import { getAirlines } from './airlines-data.js';
 import { isDaylight } from './daylight.js';
 import { validatePort, resolvePort, setConfiguredPort } from './server-config.js';
-import { getAllAirlinesSummary } from './db.js';
+import { getAllAirlinesSummary, getEventsPage } from './db.js';
 import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor, buildOverheadInfo } from './notifications/rules.js';
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats, getAntennaStatsRevision } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
@@ -456,6 +456,14 @@ export async function buildServer({ logger = true } = {}) {
 
   app.get('/api/stats/all-airlines', async (request) =>
     queryTable(getAllAirlinesSummary(), AIRLINES_TABLE_SPEC(airlineNameFor), request.query ?? {}));
+
+  // The notification/event history log (Stats -> "Historia zdarzeń").
+  // SQL-level pagination (db.js's getEventsPage), not queryTable -- events
+  // are naturally time-ordered and don't need column-click sorting or
+  // free-text search the way the two tables above do. Ungated, same tier
+  // as /api/stats/registrations and /api/notifications/* -- nothing here is
+  // more sensitive than a watch-list entry.
+  app.get('/api/stats/events', async (request) => getEventsPage(request.query ?? {}));
 
   // One summary for whichever range the Stats panel's own selector is
   // currently on (same 24h/7d/31d/1y/all as every other stats endpoint,

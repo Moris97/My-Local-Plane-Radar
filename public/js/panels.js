@@ -400,7 +400,11 @@ export async function openFullscreenModal(name) {
   }
 }
 
-function closeFullscreenModal({ fromPopstate = false } = {}) {
+// Exported for stats.js's event-history row click: selecting an aircraft
+// from inside the Stats modal needs to close it first so the map (which the
+// modal fully covers) is actually visible again -- same close path as the
+// modal's own X button, not a second, ad-hoc history.back().
+export function closeFullscreenModal({ fromPopstate = false } = {}) {
   if (!currentModal) return;
 
   renderToken += 1;

@@ -41,6 +41,7 @@ const PRIMARY_KEYS = {
   allSeenAircraft: 'hex',
   seenFlights: 'flight',
   registrations: 'registration',
+  events: 'occurredAt',
 };
 
 function normalize(dump) {
@@ -96,6 +97,12 @@ test('a full backup survives export -> a brand new empty database -> import', as
         lastSeenAt: 5000 + i,
         timesSeen: (i % 17) + 1,
       })),
+      events: Array.from({ length: ROWS }, (_, i) => ({
+        kind: ['squawk', 'first_seen', 'watchlist', 'circling', 'range_record', 'receiver_silence'][i % 6],
+        occurredAt: 2_000_000 + i,
+        hex: i % 6 === 5 ? null : `a${String(i).padStart(5, '0')}`, // receiver_silence has no aircraft
+        detail: JSON.stringify({ note: `event ${i}` }),
+      })),
     },
   });
 
@@ -142,6 +149,7 @@ test('a full backup survives export -> a brand new empty database -> import', as
     allSeenAircraft: ROWS,
     seenFlights: ROWS,
     registrations: ROWS,
+    events: ROWS,
   });
 
   const restored = normalize(dump);
@@ -153,4 +161,6 @@ test('a full backup survives export -> a brand new empty database -> import', as
   assert.equal(JSON.parse(restored.config.antennaStats).cells[7][0][1], 'hex7');
   assert.equal(restored.tables.registrations[0].typeCode, null, 'a null type stays null, not ""');
   assert.equal(restored.tables.registrations[1].timesSeen, 2);
+  const receiverSilenceEvent = restored.tables.events.find((row) => row.kind === 'receiver_silence');
+  assert.equal(receiverSilenceEvent.hex, null, 'a hex-less event (receiver_silence) stays null, not ""');
 });

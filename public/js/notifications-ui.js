@@ -152,7 +152,10 @@ const WATCH_FIELD_KEYS = { type: 'watchType', registration: 'watchRegistration',
 // tags: CSS hooks (mlpr-toast-<tag>) for the accent color per kind -- see
 // style.css. { title, body } are plain strings, already translated;
 // dangerous parts (aircraft identity) are escaped by renderToast, not here.
-function buildContent(event) {
+// Exported so stats.js's event-history table can render the exact same
+// title/body/detail/accent-tag per kind as the live toast -- one kind ->
+// label mapping, not a second copy that could drift from this one.
+export function buildContent(event) {
   const { units } = getSettings();
   switch (event.kind) {
     case 'squawk': {

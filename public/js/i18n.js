@@ -336,6 +336,10 @@ const DICTIONARIES = {
     airlinesSearchPlaceholder: 'Search airline, ICAO code...',
     colAirlineIcao: 'ICAO code',
     colRegistrationsCount: 'Registrations',
+    eventHistory: 'Event history',
+    showEventHistory: 'Show event history',
+    eventKindAll: 'All events',
+    noEventHistory: 'No events recorded yet',
     coverage: 'Coverage',
     showCoverage: 'Show reception coverage',
     showCoverageHint:
@@ -684,6 +688,10 @@ const DICTIONARIES = {
     airlinesSearchPlaceholder: 'Szukaj linii, kodu ICAO...',
     colAirlineIcao: 'Kod ICAO',
     colRegistrationsCount: 'Rejestracje',
+    eventHistory: 'Historia zdarzeń',
+    showEventHistory: 'Pokaż historię zdarzeń',
+    eventKindAll: 'Wszystkie zdarzenia',
+    noEventHistory: 'Brak zarejestrowanych zdarzeń',
     coverage: 'Zasięg',
     showCoverage: 'Pokaż zasięg odbioru',
     showCoverageHint:

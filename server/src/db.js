@@ -111,6 +111,30 @@ db.exec(`
   )
 `);
 
+// The notification/event history CLAUDE.md's architecture diagram has
+// promised since day one ("events + daily aggregates only") -- one row per
+// occurrence, not per position, so this fits hard rule 4 the same way
+// seen_aircraft/registrations already do. `detail` is a JSON blob holding
+// exactly the same object notifications/rules.js already builds for
+// emitUiEvent(kind, detail) -- hex/kind pulled out as real columns for
+// filtering, everything else (aircraft summary, squawk meaning, matched
+// watch-list field, ...) stays inside the blob so a new per-kind field
+// never needs a schema change. UNIQUE(occurred_at, kind, hex) is not for
+// normal writes (a fresh Date.now() per real occurrence never collides) --
+// it's the ON CONFLICT target `importRowWriters.events` needs so importing
+// the same .mlpr backup twice doesn't duplicate rows.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    occurred_at INTEGER NOT NULL,
+    kind TEXT NOT NULL,
+    hex TEXT,
+    detail TEXT NOT NULL,
+    UNIQUE(occurred_at, kind, hex)
+  )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_events_occurred_at ON events(occurred_at)');
+
 // Migration: installs from before the advanced-stats feature have a
 // daily_stats table without these columns. CREATE TABLE IF NOT EXISTS above
 // is a no-op on an existing table, so missing columns need an explicit
@@ -343,6 +367,70 @@ export function upsertAircraftSeenRaw(entries) {
   });
 }
 
+// Batched insert for notifications/event-history.js's in-memory buffer --
+// `entries` are already `{occurredAt, kind, hex, detail}` (detail already
+// JSON.stringify'd by the caller). `OR IGNORE` only ever matters on the
+// backup-import path in practice (a fresh Date.now() per real occurrence
+// never collides at write time) but costs nothing on the normal path.
+const insertEventStmt = db.prepare(`
+  INSERT OR IGNORE INTO events (occurred_at, kind, hex, detail) VALUES (?, ?, ?, ?)
+`);
+
+export function insertEvents(entries) {
+  if (entries.length === 0) return;
+  runBatch(() => {
+    for (const entry of entries) insertEventStmt.run(entry.occurredAt, entry.kind, entry.hex ?? null, entry.detail);
+  });
+}
+
+const EVENTS_DEFAULT_PAGE_SIZE = 20;
+const EVENTS_MAX_PAGE_SIZE = 200;
+
+// SQL-level pagination, not stats-table.js's queryTable (in-memory array +
+// column-click sort + free-text search) -- events are naturally
+// time-ordered and the Stats history table doesn't need either of those,
+// so a plain WHERE/ORDER BY/LIMIT keeps this cheap even as the table grows
+// toward its 90-day retention cap. Each row is reshaped to
+// {id, occurredAt, kind, hex, ...JSON.parse(detail)} -- the exact shape
+// notifications-ui.js's buildContent(event) already knows how to render,
+// so the Stats history table can call it unmodified.
+export function getEventsPage({ kind, page, pageSize } = {}) {
+  const resolvedPageSize = Number.isFinite(Number(pageSize)) && Number(pageSize) > 0
+    ? Math.min(EVENTS_MAX_PAGE_SIZE, Math.floor(Number(pageSize)))
+    : EVENTS_DEFAULT_PAGE_SIZE;
+  const kindFilter = kind || null;
+
+  const total = db.prepare('SELECT COUNT(*) AS count FROM events WHERE (:kind IS NULL OR kind = :kind)').get({ kind: kindFilter }).count;
+  const totalPages = Math.max(1, Math.ceil(total / resolvedPageSize));
+  const resolvedPage = Number.isFinite(Number(page)) && Number(page) > 0 ? Math.min(totalPages, Math.floor(Number(page))) : 1;
+  const offset = (resolvedPage - 1) * resolvedPageSize;
+
+  const rows = db
+    .prepare(`
+      SELECT id, occurred_at, kind, hex, detail FROM events
+      WHERE (:kind IS NULL OR kind = :kind)
+      ORDER BY occurred_at DESC
+      LIMIT :limit OFFSET :offset
+    `)
+    .all({ kind: kindFilter, limit: resolvedPageSize, offset })
+    .map((row) => ({ id: row.id, occurredAt: row.occurred_at, kind: row.kind, hex: row.hex, ...JSON.parse(row.detail) }));
+
+  return { rows, total, page: resolvedPage, pageSize: resolvedPageSize, totalPages };
+}
+
+export function pruneEventsOlderThan(cutoffMs) {
+  db.prepare('DELETE FROM events WHERE occurred_at < ?').run(cutoffMs);
+}
+
+// Full, unpaginated read for the .mlpr backup export path -- same shape
+// (raw rows, SQL column names, no camelCase mapping -- that's
+// config-backup.js's toJsonRow's job) as getAllRegistrations() etc. `detail`
+// stays a raw JSON string here (the backup format round-trips table values
+// byte-for-byte); JSON.parse only happens for the live API response above.
+export function getAllEvents() {
+  return db.prepare('SELECT occurred_at, kind, hex, detail FROM events ORDER BY id').all();
+}
+
 const upsertRegistrationStmt = db.prepare(`
   INSERT INTO registrations (registration, type_code, airline_icao, first_seen_at, last_seen_at, times_seen)
   VALUES (?, ?, ?, ?, ?, ?)
@@ -494,6 +582,19 @@ const importRowWriters = {
       row.lastSeenAt,
       row.timesSeen,
     ],
+  },
+  // No min/max/coalesce merge here, unlike every table above -- an events
+  // row isn't a per-key accumulator, it's an independent occurrence, so
+  // importing is a plain insert. ON CONFLICT targets the same
+  // UNIQUE(occurred_at, kind, hex) the live insertEvents() above relies on
+  // for its own no-op OR IGNORE, so re-importing the same backup twice (or
+  // merging two installs with overlapping history) can't duplicate rows.
+  events: {
+    stmt: db.prepare(`
+      INSERT INTO events (occurred_at, kind, hex, detail) VALUES (?, ?, ?, ?)
+      ON CONFLICT(occurred_at, kind, hex) DO NOTHING
+    `),
+    bind: (row) => [row.occurredAt, row.kind, row.hex ?? null, row.detail],
   },
 };
 

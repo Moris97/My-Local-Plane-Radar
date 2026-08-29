@@ -23,6 +23,7 @@ import { noteAircraftSeen } from './aircraft-seen.js';
 import { touchAircraftTracked } from './aircraft-tracked.js';
 import { evaluateAircraftRules, evaluateRangeRecordRule, evaluateReceiverSilenceRule, prunePendingFirstSeen, setUiEventSender } from './notifications/rules.js';
 import { pruneCooldowns } from './notifications/cooldown.js';
+import { pruneOldEvents } from './notifications/event-history.js';
 import { reconfigureSmartHome, shutdownSmartHome } from './notifications/smart-home.js';
 import { pruneTokens, pruneLoginAttempts } from './settings-auth.js';
 import { recordPosition, evictStaleTrails } from './trail-history.js';
@@ -326,6 +327,11 @@ async function main() {
     pruneTokens();
     pruneLoginAttempts();
     prunePendingFirstSeen();
+    try {
+      pruneOldEvents();
+    } catch (err) {
+      app.log.error(err, 'event history prune failed');
+    }
   }, COOLDOWN_PRUNE_INTERVAL_MS);
   setInterval(() => {
     // Shared between trail history and the circling detector's own per-hex

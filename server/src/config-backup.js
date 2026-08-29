@@ -10,20 +10,25 @@ import {
   getAllAircraftSeenRaw,
   getAllSeenFlights,
   getAllRegistrations,
+  getAllEvents,
 } from './db.js';
 
 // A full backup/restore of this install: everything in SQLite's `config`
 // table (notification settings, watch list, smart-home broker settings,
 // ntfy topic, receiver home override, server port override, the Settings
-// password hash, the antenna coverage blob) *plus* the five history tables
+// password hash, the antenna coverage blob) *plus* the six history tables
 // that hold months of accumulated observations and cannot be recreated from
 // anything else -- daily stats, every aircraft/callsign/registration ever
-// seen.
+// seen, and the notification/event history log.
 //
 // The point is a real "move the SD card" story: export, reinstall the OS,
 // import, and the install is where it was. That is also why import merges
 // by primary key rather than replacing tables: restoring an older backup
-// must never delete rows or move a live "last seen" backwards.
+// must never delete rows or move a live "last seen" backwards. The one
+// exception is `events`, an independent occurrence log rather than a
+// per-key accumulator -- its own TABLE_SPECS entry below merges by plain
+// insert-with-dedup instead (see db.js's importRowWriters.events), but the
+// "never delete" promise still holds.
 //
 // The two halves of this file have deliberately different maintenance
 // costs, and it matters to keep them apart:
@@ -184,6 +189,25 @@ const TABLE_SPECS = [
       ['timesSeen', 'number'],
     ],
     columns: ['registration', 'type_code', 'airline_icao', 'first_seen_at', 'last_seen_at', 'times_seen'],
+  },
+  {
+    name: 'events',
+    sqlTable: 'events',
+    read: getAllEvents,
+    // Unlike every spec above, fields[0] isn't a real per-row primary key --
+    // events has no natural one (its SQL PK is an autoincrement id, never
+    // exported since it isn't portable across installs; dedup on import
+    // instead relies on the UNIQUE(occurred_at, kind, hex) constraint, see
+    // db.js's importRowWriters.events). `kind` is used here only because
+    // validateRow requires fields[0] to be a non-empty string, which it
+    // always is -- occurredAt (a number) can't fill that slot.
+    fields: [
+      ['kind', 'string'],
+      ['occurredAt', 'number'],
+      ['hex', 'string?'],
+      ['detail', 'string'],
+    ],
+    columns: ['kind', 'occurred_at', 'hex', 'detail'],
   },
 ];
 

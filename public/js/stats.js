@@ -1,5 +1,5 @@
 import { t } from './i18n.js';
-import { getLiveStats, getLiveAircraft, onChange, isPositionStale } from './radar-state.js';
+import { getLiveStats, getLiveAircraft, onChange, isPositionStale, requestSelect } from './radar-state.js';
 import { getSettings, onSettingsChange } from './settings-state.js';
 import {
   renderLineChartSvg,
@@ -18,6 +18,8 @@ import { findNearestFarthest } from './geo.js';
 import { rowsToCsv } from './csv.js';
 import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 import { escapeHtml } from './html-escape.js';
+import { buildContent as buildEventContent } from './notifications-ui.js';
+import { closeFullscreenModal } from './panels.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TREND_TOP_N = 5;
@@ -31,6 +33,21 @@ const TREND_TOP_N = 5;
 const ROSE_DISPLAY_SECTORS = 12;
 
 const RANGES = ['24h', '7d', '31d', '1y', 'all'];
+
+// The event-history kind filter (Stats -> "Historia zdarzeń") reuses the
+// exact same rule labels already shown as checkboxes on the Notifications
+// settings tab (squawkAlerts/firstSeen/watchlist/circlingAlert/rangeRecord/
+// receiverSilenceAlert) -- no new kind-label strings to keep in sync with
+// those. overhead is deliberately absent: it's never recorded in the
+// history table either (see server/src/notifications/rules.js).
+const EVENT_KIND_OPTIONS = [
+  { kind: 'squawk', labelKey: 'squawkAlerts' },
+  { kind: 'first_seen', labelKey: 'firstSeen' },
+  { kind: 'watchlist', labelKey: 'watchlist' },
+  { kind: 'circling', labelKey: 'circlingAlert' },
+  { kind: 'range_record', labelKey: 'rangeRecord' },
+  { kind: 'receiver_silence', labelKey: 'receiverSilenceAlert' },
+];
 const RANGE_LABEL_KEYS = {
   '24h': 'statsRange24h',
   '7d': 'statsRange7d',
@@ -569,6 +586,19 @@ export function renderStatsPanel(container) {
       </div>
       <div id="mlpr-airlines-table-wrap"></div>
       <div class="mlpr-pagination" id="mlpr-airlines-pagination"></div>
+    </section>
+
+    <section class="mlpr-stat-chart">
+      <p class="mlpr-chart-label">${t('eventHistory')}</p>
+      <button type="button" id="mlpr-load-events" class="mlpr-detail-expand">${t('showEventHistory')}</button>
+      <div id="mlpr-events-controls" style="display:none">
+        <select id="mlpr-events-kind-filter" class="mlpr-events-kind-filter">
+          <option value="">${t('eventKindAll')}</option>
+          ${EVENT_KIND_OPTIONS.map((o) => `<option value="${o.kind}">${t(o.labelKey)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="mlpr-events-list-wrap"></div>
+      <div class="mlpr-pagination" id="mlpr-events-pagination"></div>
     </section>
   `;
 
@@ -1163,6 +1193,85 @@ export function renderStatsPanel(container) {
     controlsEl.style.display = '';
     draw();
   }
+
+  // Notification/event history (Stats -> "Historia zdarzeń"). Deliberately
+  // not loadLazyTable above: events are naturally time-ordered (newest
+  // first, server-side) and have no column-click sort or free-text search,
+  // just a kind filter -- reusing that helper's search box/sort-by-header
+  // wiring would be dead weight here.
+  function eventRowHtml(row) {
+    const content = buildEventContent(row);
+    if (!content) return '';
+    const time = new Date(row.occurredAt).toLocaleString();
+    const detailLine = content.detail ? `<div class="mlpr-event-detail">${content.detail}</div>` : '';
+    const clickable = row.hex ? ' mlpr-event-row-clickable' : '';
+    return `
+      <div class="mlpr-event-row mlpr-toast-${content.tag}${clickable}" data-hex="${row.hex ? escapeHtml(row.hex) : ''}">
+        <div class="mlpr-event-time">${escapeHtml(time)}</div>
+        <div class="mlpr-event-title">${escapeHtml(content.title)}</div>
+        ${content.body ? `<div class="mlpr-event-body">${escapeHtml(content.body)}</div>` : ''}
+        ${detailLine}
+      </div>`;
+  }
+
+  function loadEventHistory() {
+    const loadBtn = container.querySelector('#mlpr-load-events');
+    const controlsEl = container.querySelector('#mlpr-events-controls');
+    const kindSelect = container.querySelector('#mlpr-events-kind-filter');
+    const listWrap = container.querySelector('#mlpr-events-list-wrap');
+    const paginationEl = container.querySelector('#mlpr-events-pagination');
+    loadBtn.remove();
+    listWrap.innerHTML = `<p class="mlpr-empty">${t('loadingStats')}</p>`;
+
+    let kind = '';
+    let page = 1;
+    let latestRequest = 0;
+
+    async function draw() {
+      const requestId = ++latestRequest;
+      const params = new URLSearchParams({ page: String(page) });
+      if (kind) params.set('kind', kind);
+      const result = await fetchJson(`/api/stats/events?${params}`, null);
+      if (requestId !== latestRequest) return;
+
+      if (!result || result.total === 0) {
+        listWrap.innerHTML = `<p class="mlpr-empty">${t('noEventHistory')}</p>`;
+        paginationEl.innerHTML = '';
+        return;
+      }
+
+      page = result.page;
+      listWrap.innerHTML = result.rows.map(eventRowHtml).join('');
+
+      for (const el of listWrap.querySelectorAll('.mlpr-event-row-clickable')) {
+        el.addEventListener('click', () => {
+          const hex = el.dataset.hex;
+          if (!hex) return;
+          closeFullscreenModal();
+          requestSelect(hex);
+        });
+      }
+
+      paginationEl.innerHTML = paginationHtml(result.page, result.totalPages);
+      for (const btn of paginationEl.querySelectorAll('.mlpr-page-btn:not([disabled])')) {
+        btn.addEventListener('click', () => {
+          page = Number(btn.dataset.page);
+          draw();
+        });
+      }
+    }
+
+    kindSelect.addEventListener('change', () => {
+      kind = kindSelect.value;
+      page = 1;
+      draw();
+    });
+
+    controlsEl.style.display = '';
+    draw();
+  }
+
+  container.querySelector('#mlpr-load-events').addEventListener('click', loadEventHistory, { once: true });
 
   container.querySelector('#mlpr-load-registrations').addEventListener(
     'click',

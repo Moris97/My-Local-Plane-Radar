@@ -12,6 +12,7 @@ import { flushDirtyAircraftTracked, resetAircraftTrackedCache } from './aircraft
 import { flushDirtyRegistrations, resetRegistrationsCache } from './stats-registrations.js';
 import { flushAntennaStatsIfDirty, reloadAntennaStatsFromDb } from './antenna-stats.js';
 import { flushAllTimeMaxRangeKmIfDirty, invalidateAllTimeMaxRangeKmCache } from './notifications/rules.js';
+import { flushPendingEventsIfDirty } from './notifications/event-history.js';
 
 // The bridge between "what is currently in RAM" and "what is in SQLite".
 //
@@ -80,6 +81,11 @@ export function flushDailyStats() {
     // evaluateRangeRecordRule in rules.js for why that write was moved off
     // the per-second poll loop.
     flushAllTimeMaxRangeKmIfDirty();
+    // ...and the notification/event history buffer, same reasoning: rare
+    // enough writes that a straight per-event INSERT would have been fine
+    // too, but sharing this tick means one fewer timer and one fewer thing
+    // to remember for the export/shutdown flush paths.
+    flushPendingEventsIfDirty();
   });
 }
 

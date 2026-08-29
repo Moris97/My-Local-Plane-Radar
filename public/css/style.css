@@ -207,6 +207,63 @@ html, body {
   border-left-color: #b07fdc;
 }
 
+/* Stats -> "Historia zdarzeń" (stats.js's loadEventHistory). Each row
+   reuses the .mlpr-toast-<tag> accent-color classes above for its left
+   border -- same six colors as the live toasts, one palette, not a second
+   copy -- but is its own card shape (no toast animation/positioning
+   baggage) since these are static rows in a list, not floating alerts. */
+.mlpr-events-kind-filter {
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  color: #d8f3e6;
+  border-radius: 6px;
+  padding: 5px 7px;
+  font-size: 13px;
+  margin-bottom: 10px;
+}
+
+#mlpr-events-list-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mlpr-event-row {
+  background: #0e161c;
+  border: 1px solid #1c2e3a;
+  border-left: 3px solid #3d8bdc;
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.mlpr-event-row-clickable {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.mlpr-event-row-clickable:hover {
+  background: #142029;
+}
+
+.mlpr-event-time {
+  color: #7fa3b3;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.mlpr-event-title {
+  font-weight: 600;
+  color: #d8f3e6;
+  font-size: 13px;
+}
+
+.mlpr-event-body,
+.mlpr-event-detail {
+  color: #9fb7c4;
+  font-size: 12.5px;
+  margin-top: 2px;
+}
+
 .mlpr-toast-overflow {
   pointer-events: none;
   align-self: center;

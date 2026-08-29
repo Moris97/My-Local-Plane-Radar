@@ -114,7 +114,7 @@ test('a backup from a future version is refused rather than partially understood
 // The tables half
 // ---------------------------------------------------------------------------
 
-test('exportBackup carries all five history tables with camelCase field names', () => {
+test('exportBackup carries all six history tables with camelCase field names', () => {
   importBackup({
     config: {},
     tables: {
@@ -125,12 +125,13 @@ test('exportBackup carries all five history tables with camelCase field names', 
       registrations: [
         { registration: 'SP-TST1', typeCode: 'B738', airlineIcao: 'TST', firstSeenAt: 13, lastSeenAt: 23, timesSeen: 4 },
       ],
+      events: [{ kind: 'squawk', occurredAt: 14, hex: 'aa0001', detail: '{"squawk":"7700"}' }],
     },
   });
 
   const dump = exportBackup();
   assert.deepEqual(Object.keys(dump.tables).sort(), [
-    'allSeenAircraft', 'dailyStats', 'registrations', 'seenAircraft', 'seenFlights',
+    'allSeenAircraft', 'dailyStats', 'events', 'registrations', 'seenAircraft', 'seenFlights',
   ]);
 
   const day = dump.tables.dailyStats.find((row) => row.date === '2026-01-05');
@@ -145,6 +146,23 @@ test('exportBackup carries all five history tables with camelCase field names', 
   assert.deepEqual(reg, {
     registration: 'SP-TST1', typeCode: 'B738', airlineIcao: 'TST', firstSeenAt: 13, lastSeenAt: 23, timesSeen: 4,
   });
+
+  const event = dump.tables.events.find((row) => row.occurredAt === 14);
+  assert.deepEqual(event, { kind: 'squawk', occurredAt: 14, hex: 'aa0001', detail: '{"squawk":"7700"}' });
+});
+
+test('importing the same events backup twice does not duplicate rows', () => {
+  const backup = { config: {}, tables: { events: [{ kind: 'squawk', occurredAt: 99, hex: 'bb0001', detail: '{"squawk":"7500"}' }] } };
+  const first = importBackup(backup);
+  assert.equal(first.ok, true);
+  assert.equal(first.counts.events, 1);
+
+  const second = importBackup(backup);
+  assert.equal(second.ok, true);
+  assert.equal(second.counts.events, 0);
+
+  const dump = exportBackup();
+  assert.equal(dump.tables.events.filter((row) => row.occurredAt === 99).length, 1);
 });
 
 test('backupChunks concatenates into exactly the object exportBackup returns', () => {

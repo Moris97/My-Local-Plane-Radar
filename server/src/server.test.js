@@ -11,6 +11,7 @@ const { buildServer } = await import('./server.js');
 const auth = await import('./settings-auth.js');
 const { decodeBackupFile, looksGzipped } = await import('./backup-file.js');
 const { gzipSync } = await import('node:zlib');
+const { recordEvent, flushPendingEventsIfDirty } = await import('./notifications/event-history.js');
 
 async function settingsToken() {
   auth.setPassword('hunter2');
@@ -213,7 +214,7 @@ test('a gzipped .mlpr uploaded as octet-stream restores, and is echoed back with
   assert.equal(body.ok, true);
   assert.deepEqual(body.skippedTables, []);
   assert.deepEqual(Object.keys(body.counts).sort(), [
-    'allSeenAircraft', 'dailyStats', 'registrations', 'seenAircraft', 'seenFlights',
+    'allSeenAircraft', 'dailyStats', 'events', 'registrations', 'seenAircraft', 'seenFlights',
   ]);
   // Echoed back so the browser never has to decompress the file it just sent.
   assert.deepEqual(body.browserSettings, { settings: { aircraftIconSize: 52 } });
@@ -303,4 +304,26 @@ test('an oversized upload is refused by the route body limit rather than buffere
     payload: padded,
   });
   assert.equal(response.statusCode, 413);
+});
+
+test('GET /api/stats/events serves the flushed event history, paginated and kind-filterable, ungated', async () => {
+  recordEvent('squawk', { hex: 'e2e0001', squawk: '7700', squawkMeaning: 'Emergency' });
+  recordEvent('watchlist', { hex: 'e2e0002', matchedType: 'type', matchedValue: 'B738' });
+  flushPendingEventsIfDirty();
+
+  // No auth header at all -- same tier as /api/stats/registrations and
+  // /api/notifications/*, not the Server tab's requireSettingsAuth gate.
+  const all = await app.inject({ method: 'GET', url: '/api/stats/events' });
+  assert.equal(all.statusCode, 200);
+  const allBody = JSON.parse(all.body);
+  assert.ok(allBody.total >= 2);
+  assert.ok(Array.isArray(allBody.rows));
+
+  const filtered = await app.inject({ method: 'GET', url: '/api/stats/events?kind=watchlist' });
+  const filteredBody = JSON.parse(filtered.body);
+  assert.ok(filteredBody.rows.every((r) => r.kind === 'watchlist'));
+  const row = filteredBody.rows.find((r) => r.hex === 'e2e0002');
+  assert.ok(row, 'expected the seeded watchlist row');
+  assert.equal(row.matchedType, 'type');
+  assert.equal(row.matchedValue, 'B738');
 });

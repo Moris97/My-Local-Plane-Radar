@@ -8,6 +8,7 @@ import { publishSmartHomeEvent, aircraftFields } from './smart-home.js';
 import { distanceKm, bearingDegrees, destinationPoint, closestApproach, roundKm } from '../range.js';
 import { getEffectiveHome } from '../home.js';
 import { recordAndCheckCircling, isCirclingRelevant } from './circling-detector.js';
+import { recordEvent } from './event-history.js';
 
 // Exported as a function rather than the raw table so the "unknown code"
 // fallback lives in one place -- /dev/smart-home-test needs the same
@@ -299,7 +300,9 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
       // question distinct from "is the condition true" (unlike watchlist
       // below, cooldown is the only gate) -- so this sits right where the
       // ntfy/MQTT sends already are, not up by the alertKinds.push above.
-      emitUiEvent('squawk', { hex: aircraft.hex, aircraft: aircraftFields(aircraft), squawk: aircraft.squawk, squawkMeaning });
+      const squawkEventDetail = { hex: aircraft.hex, aircraft: aircraftFields(aircraft), squawk: aircraft.squawk, squawkMeaning };
+      emitUiEvent('squawk', squawkEventDetail);
+      recordEvent('squawk', squawkEventDetail);
     }
   }
 
@@ -322,7 +325,9 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
         // above); range-record is still deliberately out of scope. No-ops
         // on its own if smart-home isn't enabled/configured.
         publishSmartHomeEvent({ reason: 'first_seen', aircraft });
-        emitUiEvent('first_seen', { hex: aircraft.hex, aircraft: aircraftFields(aircraft) });
+        const firstSeenEventDetail = { hex: aircraft.hex, aircraft: aircraftFields(aircraft) };
+        emitUiEvent('first_seen', firstSeenEventDetail);
+        recordEvent('first_seen', firstSeenEventDetail);
       }
     }
   }
@@ -347,12 +352,14 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           tags: ['eyes'],
         });
         publishSmartHomeEvent({ reason: 'watchlist', aircraft, matchedEntry });
-        emitUiEvent('watchlist', {
+        const watchlistEventDetail = {
           hex: aircraft.hex,
           aircraft: aircraftFields(aircraft),
           matchedType: matchedEntry.matchType,
           matchedValue: matchedEntry.matchValue,
-        });
+        };
+        emitUiEvent('watchlist', watchlistEventDetail);
+        recordEvent('watchlist', watchlistEventDetail);
       }
     }
   }
@@ -391,7 +398,9 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
           tags: ['repeat'],
         });
         publishSmartHomeEvent({ reason: 'circling', aircraft });
-        emitUiEvent('circling', { hex: aircraft.hex, aircraft: aircraftFields(aircraft) });
+        const circlingEventDetail = { hex: aircraft.hex, aircraft: aircraftFields(aircraft) };
+        emitUiEvent('circling', circlingEventDetail);
+        recordEvent('circling', circlingEventDetail);
       }
     }
   }
@@ -574,7 +583,9 @@ export function evaluateReceiverSilenceRule(hasActivity, now = Date.now()) {
   // No hex/aircraft -- this is the one alert kind that isn't about a
   // specific aircraft at all (see app.js's kind registry: no click-to-
   // select, no glow, since there's nothing on the map to point at).
-  emitUiEvent('receiver_silence', { hours });
+  const receiverSilenceEventDetail = { hours };
+  emitUiEvent('receiver_silence', receiverSilenceEventDetail);
+  recordEvent('receiver_silence', receiverSilenceEventDetail);
 }
 
 // The write side of the all-time record is deferred to
@@ -610,12 +621,14 @@ export function evaluateRangeRecordRule(maxRangeKm, aircraft) {
       tags: ['dash'],
     });
     if (aircraft) {
-      emitUiEvent('range_record', {
+      const rangeRecordEventDetail = {
         hex: aircraft.hex,
         aircraft: aircraftFields(aircraft),
         rangeKm: maxRangeKm,
         previousRangeKm: record,
-      });
+      };
+      emitUiEvent('range_record', rangeRecordEventDetail);
+      recordEvent('range_record', rangeRecordEventDetail);
     }
   }
 }

@@ -113,21 +113,23 @@ Added to as they come up; picked up in a later stage when relevant.
   see CLAUDE.md for how the three shapes divide up.
 
 
-- **Notification/event history (the `events` table CLAUDE.md's architecture
-  diagram already promises)** (effort: medium, impact: medium, priority:
-  deferred — user wants to think it over) — SQLite today only has `config`,
-  `daily_stats`, `seen_aircraft`, `registrations`, and `seen_flights`; there
-  is no table actually recording individual notification/event occurrences
-  (squawk, first-seen, watch-list match, range record, and now
-  receiver-silence), even though the architecture section at the top of
-  CLAUDE.md has said "events + daily aggregates only" from the start. Today
-  a notification fires over ntfy/MQTT and leaves no trace in the app itself
-  — no way to see what fired while you weren't looking, or to sanity-check
-  that a rule/trigger area is actually working. One row per event (not per
-  position) fits hard rule 4 fine, and the write can batch into the
-  existing 45s `daily_stats` flush rather than adding a new SD-writing path.
-  Would want a retention cap (e.g. 90 days) and a simple timeline view
-  somewhere in the UI. Proposed 2026-08-02.
+- ~~**Notification/event history (the `events` table CLAUDE.md's
+  architecture diagram already promises)**~~ **Done, 2026-08-29 (v2.2.8).**
+  Proposed 2026-08-02, picked up after the user chose where to surface it
+  (a new "Historia zdarzeń" section in the Stats panel, over three other
+  placement options with mockups). `server/src/notifications/rules.js`'s
+  `recordEvent(kind, detail)` is called at the same 6 call sites as the
+  existing `emitUiEvent`, storing the identical detail object -- so the
+  client's `notifications-ui.js#buildContent(event)` (now exported) renders
+  history rows with zero second kind→label mapping. In-memory buffer,
+  flushed on the existing 45s `flushDailyStats` tick (`event-history.js`'s
+  `flushPendingEventsIfDirty`), fixed 90-day retention pruned hourly.
+  `GET /api/stats/events` (kind filter + pagination, SQL-level not
+  `queryTable`, ungated like `/api/stats/registrations`). Also covered by
+  `.mlpr` backup/restore (insert-with-dedup via
+  `UNIQUE(occurred_at, kind, hex)`, not the per-key merge every other table
+  uses -- see `config-backup.js`). Deliberately excludes overhead-proximity,
+  matching that rule's existing exclusion from `emitUiEvent`.
 - ~~**Emergency squawk banner/marker on the live map**~~ **Done, 2026-08-08
   (v2.1.20) — and generalized well past the original ask.** Proposed
   2026-08-02 as squawk-only; when picked up, the user explicitly widened it

@@ -11,12 +11,13 @@ const rules = await import('./rules.js');
 const { resetCooldowns } = await import('./cooldown.js');
 const { updateNotificationSettings } = await import('./settings.js');
 const { addWatchEntry, getWatchList, removeWatchEntry } = await import('./watchlist.js');
-const { setConfigJSON, getConfig, setConfig } = await import('../db.js');
+const { setConfigJSON, getConfig, setConfig, getEventsPage } = await import('../db.js');
 const { hasSeenAircraft } = await import('../aircraft-tracked.js');
 const { setManualHome, clearManualHome } = await import('../home.js');
 const { destinationPoint } = await import('../range.js');
 const { resetCirclingHistory } = await import('./circling-detector.js');
 const smartHome = await import('./smart-home.js');
+const { flushPendingEventsIfDirty, resetPendingEventsForTests } = await import('./event-history.js');
 
 after(() => {
   rmSync(tmpDir, { recursive: true, force: true });
@@ -66,6 +67,7 @@ beforeEach(async () => {
   sent = [];
   uiEvents = [];
   resetCooldowns();
+  resetPendingEventsForTests();
   rules.resetReceiverSilenceState();
   updateNotificationSettings({
     squawkEnabled: true,
@@ -864,6 +866,77 @@ test('overhead does not emit a UI event, even though it publishes to ntfy/smart-
   assert.equal(uiEvents.filter((e) => e.kind === 'overhead').length, 0);
 });
 
+// Event history (Stats -> "Historia zdarzeń"): recordEvent is called right
+// alongside emitUiEvent at every one of rules.js's call sites, with the
+// identical detail object -- these mirror the "emits a UI event" tests
+// above one for one, just reading the (flushed) SQLite table instead of the
+// in-memory uiEvents array. overhead is deliberately excluded, same as it
+// is from emitUiEvent.
+function historyRows(kind) {
+  flushPendingEventsIfDirty();
+  return getEventsPage({ kind }).rows;
+}
+
+test('squawk 7700 is recorded in the event history', () => {
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'histsquawk', squawk: '7700' }));
+  const rows = historyRows('squawk');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, 'histsquawk');
+  assert.equal(rows[0].squawk, '7700');
+});
+
+test('first-seen is recorded in the event history after the 3s confirmation delay', () => {
+  const aircraft = aircraftFixture({ hex: 'histfirstseen' });
+  const start = Date.now();
+  rules.evaluateAircraftRules(aircraft, start);
+  rules.evaluateAircraftRules(aircraft, start + 3000);
+  const rows = historyRows('first_seen');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, 'histfirstseen');
+});
+
+test('a watch-list match is recorded in the event history', () => {
+  addWatchEntry({ matchType: 'type', matchValue: 'B738' });
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'histwatched', typeCode: 'B738' }));
+  const rows = historyRows('watchlist');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].matchedType, 'type');
+  assert.equal(rows[0].matchedValue, 'B738');
+});
+
+test('a range record with a known aircraft is recorded in the event history', () => {
+  rules.resetAllTimeMaxRangeKm();
+  const aircraft = aircraftFixture({ hex: 'histrange', registration: 'SP-FAR' });
+  rules.evaluateRangeRecordRule(500, aircraft);
+  const rows = historyRows('range_record');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, 'histrange');
+  assert.equal(rows[0].rangeKm, 500);
+});
+
+test('a range record with no known aircraft is not recorded (matches the UI-event scope)', () => {
+  rules.resetAllTimeMaxRangeKm();
+  const before = historyRows('range_record').length;
+  rules.evaluateRangeRecordRule(500);
+  assert.equal(historyRows('range_record').length, before);
+});
+
+test('receiver silence is recorded in the event history with no hex', () => {
+  const start = Date.now();
+  rules.evaluateReceiverSilenceRule(false, start + ONE_HOUR_MS + 1);
+  const rows = historyRows('receiver_silence');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, null);
+  assert.equal(typeof rows[0].hours, 'number');
+});
+
+test('overhead-proximity is NOT recorded in the event history (deliberately out of scope, see plan)', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  rules.evaluateAircraftRules(aircraftFixture({ hex: 'histoverhead', lat: 50.01, lon: 20.0 }));
+  assert.equal(historyRows('overhead').length, 0);
+});
+
 // Circling detector, run through the real rule (circling-detector.test.js
 // covers the pure geometry directly). Placeholder coordinates, same
 // AREA_CENTRE/HOME convention as above.
@@ -904,6 +977,13 @@ function feedOrbit(
 test('a sustained orbit fires a notification (circlingEnabled defaults true)', () => {
   feedOrbit('orbit-notify');
   assert.equal(circlingNotifications().length, 1);
+});
+
+test('a sustained orbit is recorded in the event history', () => {
+  feedOrbit('orbit-history');
+  const rows = historyRows('circling');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, 'orbit-history');
 });
 
 test('alertKinds reports circling live, independent of the notification cooldown', () => {

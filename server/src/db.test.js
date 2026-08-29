@@ -299,3 +299,68 @@ test('getAllAirlinesSummary groups registrations by airline, excluding unmatched
   assert.equal(entry.lastSeenAt, 900);
   assert.equal(summary.some((s) => s.airlineIcao === null), false);
 });
+
+test('insertEvents/getEventsPage round-trip, newest first', () => {
+  db.insertEvents([
+    { occurredAt: 1000, kind: 'squawk', hex: 'aa1111', detail: JSON.stringify({ squawk: '7700' }) },
+    { occurredAt: 2000, kind: 'first_seen', hex: 'bb2222', detail: JSON.stringify({ note: 'x' }) },
+    { occurredAt: 3000, kind: 'receiver_silence', hex: null, detail: JSON.stringify({ hours: 1 }) },
+  ]);
+
+  const page = db.getEventsPage({});
+  assert.equal(page.total, 3);
+  assert.equal(page.rows.length, 3);
+  assert.deepEqual(page.rows.map((r) => r.occurredAt), [3000, 2000, 1000], 'newest first');
+  assert.equal(page.rows[0].hex, null);
+  assert.equal(page.rows[2].squawk, '7700', 'detail JSON is spread onto the row');
+});
+
+test('getEventsPage filters by kind', () => {
+  db.insertEvents([
+    { occurredAt: 4000, kind: 'watchlist', hex: 'cc3333', detail: '{}' },
+    { occurredAt: 4001, kind: 'circling', hex: 'dd4444', detail: '{}' },
+  ]);
+
+  const page = db.getEventsPage({ kind: 'watchlist' });
+  assert.ok(page.rows.every((r) => r.kind === 'watchlist'));
+  assert.ok(page.rows.some((r) => r.occurredAt === 4000));
+  assert.equal(page.rows.some((r) => r.occurredAt === 4001), false);
+});
+
+test('getEventsPage paginates and clamps an out-of-range page', () => {
+  for (let i = 0; i < 5; i += 1) {
+    db.insertEvents([{ occurredAt: 5000 + i, kind: 'range_record', hex: 'ee5555', detail: '{}' }]);
+  }
+  const firstPage = db.getEventsPage({ kind: 'range_record', pageSize: 2, page: 1 });
+  assert.equal(firstPage.rows.length, 2);
+  assert.equal(firstPage.totalPages, 3);
+
+  const pastTheEnd = db.getEventsPage({ kind: 'range_record', pageSize: 2, page: 99 });
+  assert.equal(pastTheEnd.page, 3, 'clamped to the last real page rather than returning nothing');
+});
+
+test('pruneEventsOlderThan deletes only rows before the cutoff', () => {
+  db.insertEvents([
+    { occurredAt: 100, kind: 'squawk', hex: 'ff6666', detail: '{}' },
+    { occurredAt: 9_999_999, kind: 'squawk', hex: 'ff6667', detail: '{}' },
+  ]);
+  db.pruneEventsOlderThan(1000);
+  const remaining = db.getEventsPage({ kind: 'squawk', pageSize: 200 }).rows;
+  assert.equal(remaining.some((r) => r.occurredAt === 100), false);
+  assert.ok(remaining.some((r) => r.occurredAt === 9_999_999));
+});
+
+test('getAllEvents returns raw SQL-column-named rows for the backup export path', () => {
+  db.insertEvents([{ occurredAt: 6000, kind: 'squawk', hex: 'aa7777', detail: '{"squawk":"7600"}' }]);
+  const row = db.getAllEvents().find((r) => r.occurred_at === 6000);
+  assert.ok(row, 'expected snake_case occurred_at, not camelCase occurredAt');
+  assert.equal(row.detail, '{"squawk":"7600"}', 'detail stays a raw JSON string, not parsed');
+});
+
+test('importRowWriters.events dedupes on (occurred_at, kind, hex) via importRows', () => {
+  const entry = { occurredAt: 7000, kind: 'squawk', hex: 'aa8888', detail: '{}' };
+  const first = db.importRows('events', [entry]);
+  assert.equal(first, 1);
+  const second = db.importRows('events', [entry]);
+  assert.equal(second, 0, 'the exact same row imported twice must not duplicate');
+});
