@@ -18,10 +18,11 @@
 // warns against repeatedly.
 import { t } from './i18n.js';
 import { requestSelect } from './radar-state.js';
-import { formatAltitude, formatSpeed, formatDistance } from './units.js';
-import { getSettings } from './settings-state.js';
 import { onPanelLayoutChange, isSidePanelLayout } from './panels.js';
 import { escapeHtml } from './html-escape.js';
+import { buildContent } from './notification-content.js';
+import { getSettings } from './settings-state.js';
+import { playNotificationSound } from './notification-sound.js';
 
 const TOAST_LIFETIME_MS = 30000;
 // Caps how many render at once -- TODO.md's own known rough edge ("on a
@@ -127,78 +128,6 @@ document.addEventListener('visibilitychange', () => {
     }
   }
 });
-
-// ---- Content per kind ---------------------------------------------------
-
-function aircraftSummaryLine(aircraft, units) {
-  if (!aircraft) return '';
-  const parts = [aircraft.flight?.trim() || aircraft.hex];
-  if (aircraft.registration) parts.push(aircraft.registration);
-  if (aircraft.typeCode) parts.push(aircraft.typeCode);
-  if (aircraft.onGround) {
-    parts.push(t('onGround'));
-  } else {
-    const alt = formatAltitude(aircraft.altitude, units);
-    if (alt) parts.push(alt);
-  }
-  const speed = formatSpeed(aircraft.speed, units);
-  if (speed) parts.push(speed);
-  return parts.join(' · ');
-}
-
-const SQUAWK_MEANING_KEYS = { 7500: 'squawkMeaningHijack', 7600: 'squawkMeaningRadioFailure', 7700: 'squawkMeaningEmergency' };
-const WATCH_FIELD_KEYS = { type: 'watchType', registration: 'watchRegistration', flight: 'watchFlight' };
-
-// tags: CSS hooks (mlpr-toast-<tag>) for the accent color per kind -- see
-// style.css. { title, body } are plain strings, already translated;
-// dangerous parts (aircraft identity) are escaped by renderToast, not here.
-// Exported so stats.js's event-history table can render the exact same
-// title/body/detail/accent-tag per kind as the live toast -- one kind ->
-// label mapping, not a second copy that could drift from this one.
-export function buildContent(event) {
-  const { units } = getSettings();
-  switch (event.kind) {
-    case 'squawk': {
-      const meaningKey = SQUAWK_MEANING_KEYS[event.squawk];
-      const meaning = meaningKey ? t(meaningKey) : event.squawkMeaning;
-      return {
-        tag: 'squawk',
-        title: `${t('toastSquawkTitle').replace('{code}', event.squawk)} — ${meaning}`,
-        body: aircraftSummaryLine(event.aircraft, units),
-      };
-    }
-    case 'first_seen':
-      return { tag: 'first-seen', title: t('toastFirstSeenTitle'), body: aircraftSummaryLine(event.aircraft, units) };
-    case 'circling':
-      return { tag: 'circling', title: t('toastCirclingTitle'), body: aircraftSummaryLine(event.aircraft, units) };
-    case 'watchlist':
-      return {
-        tag: 'watched',
-        title: t('toastWatchedTitle'),
-        body: aircraftSummaryLine(event.aircraft, units),
-        detail: t('toastWatchedMatch')
-          .replace('{field}', t(WATCH_FIELD_KEYS[event.matchedType] ?? 'watchType'))
-          .replace('{value}', event.matchedValue ?? ''),
-      };
-    case 'range_record':
-      return {
-        tag: 'range-record',
-        title: t('toastRangeRecordTitle'),
-        body: aircraftSummaryLine(event.aircraft, units),
-        detail: t('toastRangeRecordBody')
-          .replace('{km}', formatDistance(event.rangeKm, units) ?? `${event.rangeKm} km`)
-          .replace('{previous}', formatDistance(event.previousRangeKm, units) ?? `${event.previousRangeKm} km`),
-      };
-    case 'receiver_silence':
-      return {
-        tag: 'receiver-silence',
-        title: t('toastReceiverSilenceTitle'),
-        body: t('toastReceiverSilenceBody').replace('{hours}', String(event.hours)),
-      };
-    default:
-      return null;
-  }
-}
 
 // ---- Rendering ------------------------------------------------------
 
@@ -318,7 +247,18 @@ function dismiss(id) {
 export function handleNotificationEvent(event) {
   const toast = { id: nextId++, event, el: null, timerId: null, remainingMs: TOAST_LIFETIME_MS, resumedAt: 0 };
 
-  if (document.hidden) unseenCount += 1;
+  if (document.hidden) {
+    unseenCount += 1;
+  } else {
+    // Same-tab-only, deliberately (TODO.md's own note on this feature): a
+    // tab backgrounded/minimized is a fundamentally different situation
+    // from "recover my attention right now", which is the one thing a
+    // sound is for. 'none' (the default) isn't a key in notification-
+    // sound.js's own SOUND_PRESETS map, and playNotificationSound already
+    // no-ops for any id it doesn't recognize -- no extra off-state check
+    // needed here.
+    playNotificationSound(getSettings().notificationSound);
+  }
   updateTitleBadge();
 
   pending.push(toast);

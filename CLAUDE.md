@@ -266,6 +266,32 @@ falls back to "first aircraft," deliberately out of scope for this fix.
 - Storage: built-in `node:sqlite` — zero native compilation.
 - Frontend: plain JavaScript (ES modules) + MapLibre GL JS. **No framework,
   no build step.** Static files served directly by Fastify.
+- **`panels.js` sits at a hub position (imports `list.js`/`stats.js`/
+  `settings.js`/`aircraft-panel.js` to render each panel/modal) — a new
+  import from any of those back into `panels.js` (or into something that
+  itself imports `panels.js`) creates a real, live-breaking bug, not just a
+  lint smell.** Reported live 2026-08-29 as a totally blank map with dead
+  bottom-bar buttons: `stats.js` importing `notifications-ui.js` (itself an
+  existing `panels.js` importer) closed a cycle back through `panels.js`,
+  which changed ES module evaluation order enough that
+  `notifications-ui.js`'s own top-level `onPanelLayoutChange(...)` call ran
+  *before* `panels.js` had reached its own `const panelLayoutListeners =
+  new Set()` — a `ReferenceError` (TDZ) that halted all script execution on
+  the page. A pre-existing cycle (`list.js` already imports back from
+  `panels.js`) is harmless because `list.js` never calls a `panels.js`
+  function at its own top level, only from inside functions invoked later
+  — the failure mode is specifically a top-level call into a
+  not-yet-initialized module, not the cycle shape itself. Fixed by pulling
+  the shared piece (`buildContent`, the kind→label mapping) out into
+  `notification-content.js`, a leaf module with no `panels.js`/`stats.js`
+  dependency at all, and by having `panels.js` pass `closeFullscreenModal`
+  into `renderStatsPanel` as a plain callback instead of `stats.js`
+  importing it — see that file's own comment for the full story. If
+  something in this hub ever needs to reach back into `panels.js` again,
+  prefer a callback/leaf-module extraction over a new import edge, and
+  verify with a real page load (this sandbox's Playwright can attach to an
+  already-running dev server), not just `node --check` (which only parses
+  one file in isolation and cannot see this class of bug at all).
 - Basemap: two modes, switchable in Settings → Map (`basemapMode`,
   `public/js/settings-state.js`), **online is the default**:
   - **Online**: OpenFreeMap (`https://tiles.openfreemap.org`) vector tiles —

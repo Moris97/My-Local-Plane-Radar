@@ -8,6 +8,7 @@ import { authorizedFetch, storeToken, clearStoredToken, getStoredToken } from '.
 import { isOnlineFallbackActive } from './basemap.js';
 import { formatDistance, distanceUnitLabel, kmToDisplayDistance, displayDistanceToKm } from './units.js';
 import { openAreaEditor } from './area-editor.js';
+import { SOUND_PRESETS, playNotificationSound } from './notification-sound.js';
 
 // Mirrors server/src/antenna-stats.js's ALTITUDE_BANDS, index for index --
 // only the translated label text lives here, the actual band boundaries are
@@ -17,6 +18,24 @@ const COVERAGE_BAND_LABEL_KEYS = [
   'coverageBand0', 'coverageBand1', 'coverageBand2', 'coverageBand3', 'coverageBand4',
   'coverageBand5', 'coverageBand6', 'coverageBand7', 'coverageBand8',
 ];
+
+// One entry per notification-sound.js preset, plus 'none' first (the
+// default -- TODO.md's own note on this feature: "a home radar app making
+// unexpected sounds is exactly the kind of thing that should default off").
+// Values must match SOUND_PRESETS' own keys exactly (validated against them
+// in the render below, so a rename in one place can't silently drift from
+// the other).
+const SOUND_OPTIONS = [
+  { value: 'none', labelKey: 'notificationSoundNone' },
+  { value: 'chime', labelKey: 'notificationSoundChime' },
+  { value: 'ping', labelKey: 'notificationSoundPing' },
+  { value: 'beepBeep', labelKey: 'notificationSoundBeepBeep' },
+  { value: 'sweepUp', labelKey: 'notificationSoundSweepUp' },
+  { value: 'radarPulse', labelKey: 'notificationSoundRadarPulse' },
+];
+for (const { value } of SOUND_OPTIONS) {
+  console.assert(value === 'none' || Object.hasOwn(SOUND_PRESETS, value), `SOUND_OPTIONS references an unknown preset: ${value}`);
+}
 
 // Used only within the Server tab (see renderServerTab) -- everything else
 // no longer requires a token, so nothing else needs to react to a 401.
@@ -238,6 +257,24 @@ function renderSettingsForm(container) {
           <div class="mlpr-checkbox-row">
             <label><input type="checkbox" id="mlpr-notif-circling"> ${t('circlingAlert')}</label>
             <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('circlingAlertHint')}</span></button>
+          </div>
+        </fieldset>
+
+        <!-- notificationSound is per-browser (settings-state.js/localStorage),
+             unlike the rest of this tab -- lives here anyway because it's
+             about notifications, same "grouped by what it's about" reasoning
+             the watch list below already uses. The info icon says so, since
+             this tab's own scope-note banner above says "shared". -->
+        <fieldset class="mlpr-settings-group">
+          <legend>${t('notificationSound')}</legend>
+          <div class="mlpr-checkbox-row">
+            <select id="mlpr-notif-sound">
+              ${SOUND_OPTIONS.map(
+                (o) => `<option value="${o.value}" ${settings.notificationSound === o.value ? 'selected' : ''}>${t(o.labelKey)}</option>`,
+              ).join('')}
+            </select>
+            <button type="button" id="mlpr-notif-sound-play" class="mlpr-range-btn">▶ ${t('notificationSoundPlay')}</button>
+            <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('notificationSoundHint')}</span></button>
           </div>
         </fieldset>
 
@@ -772,6 +809,18 @@ function wireDisplaySettings(container) {
 
   container.querySelector('#mlpr-fetch-photos').addEventListener('change', (event) => {
     updateSettings({ fetchAircraftPhotos: event.target.checked });
+  });
+
+  // Lives visually on the Notifications tab (that's what it's about), but
+  // stored per-browser like every other setting this function wires --
+  // which sound plays on *this* device is not something the rest of the
+  // LAN should share, unlike the rule toggles/watch list that tab also
+  // holds. See the fieldset's own scope-note tooltip in the markup above.
+  container.querySelector('#mlpr-notif-sound').addEventListener('change', (event) => {
+    updateSettings({ notificationSound: event.target.value });
+  });
+  container.querySelector('#mlpr-notif-sound-play').addEventListener('click', () => {
+    playNotificationSound(container.querySelector('#mlpr-notif-sound').value);
   });
 }
 

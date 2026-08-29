@@ -18,8 +18,7 @@ import { findNearestFarthest } from './geo.js';
 import { rowsToCsv } from './csv.js';
 import { debounce, SEARCH_DEBOUNCE_MS } from './debounce.js';
 import { escapeHtml } from './html-escape.js';
-import { buildContent as buildEventContent } from './notifications-ui.js';
-import { closeFullscreenModal } from './panels.js';
+import { buildContent as buildEventContent } from './notification-content.js';
 
 const HISTORY_REFRESH_MS = 20000;
 const TREND_TOP_N = 5;
@@ -484,7 +483,13 @@ function aircraftTileHtml(label, entry, units, emptyMessage) {
     </div>`;
 }
 
-export function renderStatsPanel(container) {
+// closeModal (optional): panels.js passes its own closeFullscreenModal in
+// directly, rather than stats.js importing it -- stats.js is already
+// imported BY panels.js, so an import the other way round would cycle back
+// through it (a real, reproduced bug: it broke module evaluation order
+// elsewhere in this same cycle, see notification-content.js's own comment
+// for the full story). A plain callback avoids the cycle entirely.
+export function renderStatsPanel(container, { closeModal } = {}) {
   container.innerHTML = `
     <section class="mlpr-stats-section">
       <h3 class="mlpr-stats-section-title">${t('statsNow')}</h3>
@@ -1247,7 +1252,7 @@ export function renderStatsPanel(container) {
         el.addEventListener('click', () => {
           const hex = el.dataset.hex;
           if (!hex) return;
-          closeFullscreenModal();
+          closeModal?.();
           requestSelect(hex);
         });
       }

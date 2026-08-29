@@ -30,7 +30,12 @@ const PANELS = {
 // PANELS.list, just with more screen real estate -- not a separate
 // column/sort configuration.
 const FULLSCREEN_MODALS = {
-  stats: { title: () => t('stats'), render: renderStatsPanel, fill: true },
+  // Wrapped (not the bare function reference) so renderStatsPanel gets a
+  // direct closeFullscreenModal callback for its event-history row clicks,
+  // without stats.js importing this module itself -- see stats.js's own
+  // comment on renderStatsPanel's closeModal parameter for why that import
+  // would cycle back through here.
+  stats: { title: () => t('stats'), render: (el) => renderStatsPanel(el, { closeModal: closeFullscreenModal }), fill: true },
   listFull: { title: () => t('list'), render: (el) => renderListPanel(el, { fullscreen: true }), fill: true },
 };
 
@@ -400,11 +405,12 @@ export async function openFullscreenModal(name) {
   }
 }
 
-// Exported for stats.js's event-history row click: selecting an aircraft
-// from inside the Stats modal needs to close it first so the map (which the
-// modal fully covers) is actually visible again -- same close path as the
+// Passed directly into renderStatsPanel (see FULLSCREEN_MODALS.stats above)
+// rather than exported for stats.js to import -- selecting an aircraft from
+// inside the Stats modal needs to close it first so the map (which the
+// modal fully covers) is actually visible again, same close path as the
 // modal's own X button, not a second, ad-hoc history.back().
-export function closeFullscreenModal({ fromPopstate = false } = {}) {
+function closeFullscreenModal({ fromPopstate = false } = {}) {
   if (!currentModal) return;
 
   renderToken += 1;

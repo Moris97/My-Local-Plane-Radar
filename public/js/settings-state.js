@@ -69,6 +69,16 @@ const defaults = {
   // panels.js's drag-to-resize handle). Matches the old fixed CSS value, so
   // nobody who hasn't dragged the handle sees any visual change.
   sidePanelWidth: 440,
+  // Which WebAudio tone (notification-sound.js's SOUND_PRESETS keys, or
+  // 'none') plays when a live on-map toast fires -- see
+  // notifications-ui.js's handleNotificationEvent. Displayed on the
+  // Notifications tab (it's about notifications) but still per-browser like
+  // every other setting in this file: what sound *this device* makes is not
+  // something the rest of the LAN should share. Defaults off -- a home
+  // radar app making unexpected sounds should not surprise an existing
+  // install the moment it upgrades (same reasoning overheadEnabled's
+  // server-side default already documents).
+  notificationSound: 'none',
 };
 
 function load() {
@@ -132,6 +142,7 @@ const VALIDATORS = {
   aircraftIconSize: (v) => isInt(v, ICON_SIZE_MIN, ICON_SIZE_MAX),
   sidePanelWidth: (v) => isInt(v, 320, 2000),
   coverageBand: (v) => v === 'all' || v === 'stacked' || isInt(v, 0, 8),
+  notificationSound: (v) => ['none', 'chime', 'ping', 'beepBeep', 'sweepUp', 'radarPulse'].includes(v),
   // Non-empty, all strings -- an empty list renders a column-less table,
   // a state the Configure UI itself refuses to produce.
   listColumns: (v) => Array.isArray(v) && v.length > 0 && v.every((k) => typeof k === 'string'),

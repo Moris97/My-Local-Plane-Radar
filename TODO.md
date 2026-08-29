@@ -144,16 +144,29 @@ Added to as they come up; picked up in a later stage when relevant.
   own 30s for first-seen/range-record) — see CLAUDE.md's Notification
   engine section for the full design. **Not done**: the WebAudio-generated
   tone from the original proposal — still open, see below.
-- **Audio alert tone for on-map notifications** (effort: small, impact:
-  low, priority: low) — the WebAudio-generated-tone half of the toast
-  notification idea above, deliberately left out of the 2026-08-08 build
-  (not requested when the toast feature was scoped). No audio file, no
-  dependency, consistent with this app's "hand-write it, it's a few dozen
-  lines" bias -- would need its own enabled/disabled setting (a home radar
-  app making unexpected sounds is exactly the kind of thing that should
-  default off or at least be easy to mute) and almost certainly a
-  same-tab-only guard (a browser tab left open in the background is a very
-  different situation from "recover attention right now").
+- ~~**Audio alert tone for on-map notifications**~~ **Done, 2026-08-29
+  (v2.2.9).** The WebAudio-generated-tone half of the toast notification
+  idea, picked up as a follow-on. `public/js/notification-sound.js` hand-
+  writes five candidate tones (oscillator + gain-envelope, no audio file,
+  no dependency) -- five were built for local audition rather than guessing
+  one, and the user picked "leave the choice to the listener" over settling
+  on a single default, so all five shipped as real options rather than four
+  being deleted. `settings-state.js`'s `notificationSound` (default
+  `'none'`, per this bullet's own note that a home radar app making
+  unexpected sounds should default off) is per-browser like every other
+  display preference, but its control lives on the Notifications tab (a
+  `.mlpr-info-icon` hint explains the scope, since that tab's own banner
+  otherwise says "shared") rather than General, since the user felt sound
+  choice belongs with "what notifies me". `notifications-ui.js`'s
+  `handleNotificationEvent` plays it, gated on `!document.hidden` -- the
+  same-tab-only guard this bullet already called for.
+  **Caught and fixed during this work, not a feature of it**: an
+  unrelated-looking change (stats.js importing `buildContent` from
+  notifications-ui.js, for the event-history table above) created a real
+  module-evaluation-order bug -- a cycle back through panels.js broke a
+  live install with a blank map and dead buttons, reported live. Root
+  cause and fix are documented in `notification-content.js`'s own header
+  comment; the practical lesson is in CLAUDE.md now too.
 - **Major airports shown on the offline basemap** (effort: small, impact:
   medium, priority: low) — offline mode's Natural Earth layer
   (`scripts/fetch-mapdata.sh`, coastlines/borders/rivers/major cities) has
