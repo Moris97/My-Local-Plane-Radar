@@ -510,9 +510,13 @@ html, body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   color: #d8f3e6;
   font: 13px/1.5 system-ui, sans-serif;
-  /* Extra right padding clears the enlarged close button below -- it now
-     floats inside the card rather than sitting flush in the corner. */
-  padding: 14px 40px 14px 16px;
+  /* Symmetric on purpose -- an earlier version reserved extra padding-right
+     here for the close button, which shifted the *entire* content column
+     (chips row, the now-full-width button) off-center in the card, reported
+     live 2026-08-29 as an uneven left/right margin. Close-button clearance
+     is handled locally on .mlpr-popup-callsign instead, since that's the
+     only row actually near the button. */
+  padding: 14px 16px;
 }
 
 /* Redraws the little triangle "tip" that points from the popup card to
@@ -595,6 +599,11 @@ html, body {
   font-weight: 600;
   letter-spacing: 0.2px;
   color: #d8f3e6;
+  /* Clears the floating close button (top:7/right:7, 26px wide, positioned
+     against .maplibregl-popup-content's own padding box) -- only this row
+     sits at the same height as the button, so only this row needs the
+     extra room; a long callsign would otherwise run under it. */
+  padding-right: 28px;
   /* A thin divider under the header, like a card title, so the identity
      row reads as separate from the value chips below it rather than just
      the first line of a paragraph. */
