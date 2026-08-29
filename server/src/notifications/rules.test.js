@@ -879,19 +879,47 @@ test('receiver silence emits a UI event with no hex/aircraft', () => {
   assert.equal(typeof events[0].hours, 'number');
 });
 
-test('overhead does not emit a UI event, even though it publishes to ntfy/smart-home', () => {
+test('overhead emits a UI event alongside ntfy/smart-home (extended 2026-08-29 to reach the browser too)', () => {
   updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  const aircraft = aircraftFixture({ hex: 'uioverhead', lat: 50.01, lon: 20.0, track: 180, gs: 100 });
+  rules.evaluateAircraftRules(aircraft);
+  const events = uiEvents.filter((e) => e.kind === 'overhead');
+  assert.equal(events.length, 1);
+  assert.equal(events[0].hex, 'uioverhead');
+  assert.equal(typeof events[0].overheadInfo.azimuthDeg, 'number');
+});
+
+test('overheadEnabled=false suppresses the overhead UI event too', () => {
   setManualHome(HOME.lat, HOME.lon);
   rules.evaluateAircraftRules(aircraftFixture({ lat: 50.01, lon: 20.0 }));
   assert.equal(uiEvents.filter((e) => e.kind === 'overhead').length, 0);
+});
+
+test('alertKinds includes overhead every tick the aircraft stays in range, even on cooldown', () => {
+  updateNotificationSettings({ overheadEnabled: true });
+  setManualHome(HOME.lat, HOME.lon);
+  const aircraft = aircraftFixture({ lat: 50.01, lon: 20.0 });
+  const first = rules.evaluateAircraftRules(aircraft);
+  const second = rules.evaluateAircraftRules(aircraft); // notification on cooldown now
+  assert.deepEqual(first, ['overhead']);
+  assert.deepEqual(second, ['overhead']);
+  // The underlying restructuring point, same as watched above: only one
+  // notification/UI event fired even though alertKinds reported true twice.
+  assert.equal(overheadNotifications().length, 1);
+  assert.equal(uiEvents.filter((e) => e.kind === 'overhead').length, 1);
+});
+
+test('overheadEnabled=false means never in alertKinds, even directly over home', () => {
+  setManualHome(HOME.lat, HOME.lon);
+  assert.deepEqual(rules.evaluateAircraftRules(aircraftFixture({ lat: HOME.lat, lon: HOME.lon })), []);
 });
 
 // Event history (Stats -> "Historia zdarzeń"): recordEvent is called right
 // alongside emitUiEvent at every one of rules.js's call sites, with the
 // identical detail object -- these mirror the "emits a UI event" tests
 // above one for one, just reading the (flushed) SQLite table instead of the
-// in-memory uiEvents array. overhead is deliberately excluded, same as it
-// is from emitUiEvent.
+// in-memory uiEvents array.
 function historyRows(kind) {
   flushPendingEventsIfDirty();
   return getEventsPage({ kind }).rows;
@@ -950,11 +978,13 @@ test('receiver silence is recorded in the event history with no hex', () => {
   assert.equal(typeof rows[0].hours, 'number');
 });
 
-test('overhead-proximity is NOT recorded in the event history (deliberately out of scope, see plan)', () => {
+test('overhead-proximity is recorded in the event history (extended 2026-08-29, same as every other rule)', () => {
   updateNotificationSettings({ overheadEnabled: true });
   setManualHome(HOME.lat, HOME.lon);
   rules.evaluateAircraftRules(aircraftFixture({ hex: 'histoverhead', lat: 50.01, lon: 20.0 }));
-  assert.equal(historyRows('overhead').length, 0);
+  const rows = historyRows('overhead');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].hex, 'histoverhead');
 });
 
 // Circling detector, run through the real rule (circling-detector.test.js

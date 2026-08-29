@@ -1577,32 +1577,55 @@ alongside `bestRangeKm`, passed through as the rule's second (optional)
 argument; omitting it (an old/hypothetical caller) still notifies exactly as
 before, just with no UI event. `receiver_silence` carries no hex/aircraft at
 all — the one alert kind not about a specific aircraft. **Overhead-proximity
-(v2.1.19) deliberately does not participate** — shipped one release earlier,
-wasn't in the user's explicit list when this was scoped; nothing structural
-blocks adding it later (the client's kind registry is a plain lookup table).
+(v2.1.19) originally did not participate** — shipped one release earlier,
+wasn't in the user's explicit list when this was scoped — **extended
+2026-08-29 on direct request** ("wszystkie typy powiadomień na
+przeglądarkę", i.e. every notification type the user has enabled should
+reach the browser too), same shape as the other five: `alertKinds` gets the
+live "aircraft currently within `overheadRadiusKm`" answer every tick
+regardless of cooldown (a standing condition, same category as
+squawk/watched/circling below, not a one-shot event — see that split's own
+reasoning), while `emitUiEvent('overhead', ...)`/`recordEvent('overhead',
+...)` fire only when the notification itself does. The UI event's detail
+carries `overheadInfo` (the same `{distanceKm, azimuthDeg, elevationDeg,
+etaSeconds, cpaDistanceKm}` shape as the ntfy message and the smart-home
+payload — `buildOverheadInfo` computed once, shared by all three) so the
+toast can show azimuth/elevation/ETA translated, rather than ntfy's raw
+English " · "-joined string. Also now recorded in the event history
+(`recordEvent`) and in Stats' "Historia zdarzeń" kind filter
+(`EVENT_KIND_OPTIONS`, reusing the existing `overheadAlert` label) —
+nothing structural ever blocked any of this, it was scope, not a
+limitation, as the original note already said.
 
 **Live marker glow vs. one-shot marker glow — two different mechanisms,
 because the underlying facts have two different shapes.** Squawk,
-watch-list, and (since v2.2.1) circling are *standing conditions* an
-aircraft can currently satisfy or not (still squawking an emergency code,
-still inside a watched trigger area, still turning through its orbit);
-first-seen and range-record are *one-shot events* (an aircraft is only
-ever "first seen" for one tick). Gating the glow by the same 30-minute
-cooldown that throttles the *notification* would leave a plane glowing red
-for up to half an hour after its squawk cleared (or its orbit ended) —
-wrong for a live radar.
+watch-list, (since v2.2.1) circling, and (since 2026-08-29) overhead-
+proximity are *standing conditions* an aircraft can currently satisfy or
+not (still squawking an emergency code, still inside a watched trigger
+area, still turning through its orbit, still within `overheadRadiusKm` of
+home); first-seen and range-record are *one-shot events* (an aircraft is
+only ever "first seen" for one tick). Gating the glow by the same
+30-minute cooldown that throttles the *notification* would leave a plane
+glowing red for up to half an hour after its squawk cleared (or it flew
+back out of the radius) — wrong for a live radar.
 - **`evaluateAircraftRules` now returns `alertKinds`** (any combination of
-  `'squawk'`/`'watched'`/`'circling'`, or `[]`) — the live, cooldown-
-  independent truth,
-  computed unconditionally alongside (but separately from) the
-  cooldown-gated notify calls. **Watch-list matching had to be restructured**
-  (v2.1.20): it used to check `!isOnCooldown('watched', hex)` *before* ever
-  scanning `getWatchList()`, a fine micro-optimisation when all that
-  mattered was "should I notify now" but it meant "is this aircraft
-  currently watched" had no answer at all while on cooldown — silently
-  wrong for the glow, which needs an honest answer every tick regardless.
-  Now the match is always evaluated when `watchedEnabled`; only the
-  *notification* is still cooldown-gated.
+  `'squawk'`/`'watched'`/`'circling'`/`'overhead'`, or `[]`) — the live,
+  cooldown-independent truth, computed unconditionally alongside (but
+  separately from) the cooldown-gated notify calls. **Watch-list matching
+  had to be restructured** (v2.1.20): it used to check
+  `!isOnCooldown('watched', hex)` *before* ever scanning `getWatchList()`,
+  a fine micro-optimisation when all that mattered was "should I notify
+  now" but it meant "is this aircraft currently watched" had no answer at
+  all while on cooldown — silently wrong for the glow, which needs an
+  honest answer every tick regardless. Now the match is always evaluated
+  when `watchedEnabled`; only the *notification* is still cooldown-gated.
+  Overhead-proximity needed the identical restructuring when it joined this
+  list (2026-08-29): the cooldown check used to sit *before* even fetching
+  the home location, so `alertKinds` would go quietly wrong (never say
+  `'overhead'`) for as long as the notification itself was on cooldown —
+  now the distance-vs-radius check always runs when `overheadEnabled` and a
+  position/home are available, and only the notify/smart-home/UI-event
+  trio stays behind `isOnCooldown('overhead', hex)`.
 - `index.js`'s `pollOnce` attaches `alertKinds` directly onto each aircraft
   in `updated` before `toWireAircraftList` — `wire.js` spreads the whole
   object rather than picking a fixed field list, so this rides the existing
@@ -1614,7 +1637,8 @@ wrong for a live radar.
   input `alertKinds` depends on (squawk, lat, lon, altBaro, onGround) is
   already in `state.js`'s `CHANGE_FIELDS`, so anything that could actually
   change the answer already forces a resend on its own — the one narrow gap
-  is the watch-list *configuration itself* changing while the affected
+  is a *configuration* change (the watch list's own entries; the home
+  location or `overheadRadiusKm` for the overhead rule) while the affected
   aircraft's own fields happen to stay frozen that exact tick, which goes
   stale until its next real update. Accepted, consistent with this app's
   existing eventual-consistency tolerance elsewhere.

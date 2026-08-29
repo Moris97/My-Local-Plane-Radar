@@ -80,6 +80,30 @@ export function buildContent(event) {
         title: t('toastReceiverSilenceTitle'),
         body: t('toastReceiverSilenceBody').replace('{hours}', String(event.hours)),
       };
+    case 'overhead': {
+      // Same azimuth/elevation/eta shape rules.js's own ntfy message uses
+      // (overheadDetail), translated for the UI rather than the raw
+      // English " · "-joined string ntfy gets -- this is a real localized
+      // surface, same reasoning as squawk's meaning/watchlist's field name
+      // above. elevationDeg/etaSeconds are null exactly when rules.js's own
+      // overheadDetail would have omitted them (no altitude data; no
+      // track/speed, stationary, or already receding), never a stale/zero
+      // placeholder.
+      const { overheadInfo } = event;
+      const parts = [t('toastOverheadAzimuth').replace('{deg}', String(overheadInfo.azimuthDeg))];
+      if (overheadInfo.elevationDeg !== null) {
+        parts.push(t('toastOverheadElevation').replace('{deg}', String(overheadInfo.elevationDeg)));
+      }
+      if (overheadInfo.etaSeconds !== null) {
+        parts.push(t('toastOverheadEta').replace('{seconds}', String(overheadInfo.etaSeconds)));
+      }
+      return {
+        tag: 'overhead',
+        title: t('toastOverheadTitle'),
+        body: aircraftSummaryLine(event.aircraft, units),
+        detail: parts.join(' · '),
+      };
+    }
     default:
       return null;
   }

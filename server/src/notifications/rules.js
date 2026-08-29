@@ -409,39 +409,48 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
     }
   }
 
-  // Presence-based like squawk/watchlist above (fires once per cooldown
-  // while the condition holds), but the condition is plain distance from
-  // home rather than a flagged/watched aircraft -- so this is gated first
-  // on the position actually being known (a Mode-S-only contact can't be
-  // "nearby" in any sense this rule can measure) and on a home location
-  // being configured at all, before paying for a distance calculation.
+  // Standing condition, same restructuring as watchlist/circling above:
+  // alertKinds gets the live "is this aircraft nearby right now" answer
+  // every tick the rule is on, regardless of cooldown, so the map glow
+  // tracks actual presence in the radius rather than freezing for 30
+  // minutes after the first notification. Gated first on the position
+  // actually being known (a Mode-S-only contact can't be "nearby" in any
+  // sense this rule can measure) and on a home location being configured
+  // at all -- home is required for alertKinds too, since without it there
+  // is no distance to measure in the first place.
+  //
+  // Originally shipped (v2.1.19) with no emitUiEvent/recordEvent at all --
+  // deliberately out of scope at the time, since the on-map toast/glow
+  // feature (v2.1.20) came one release later and only covered the five
+  // rules explicitly asked for then. Extended 2026-08-29 on direct request
+  // ("wszystkie typy powiadomień na przeglądarkę", i.e. every notification
+  // type the user has enabled should also reach the browser) -- nothing
+  // structural ever blocked this, it was scope, not a limitation.
   if (
     settings.overheadEnabled &&
     typeof aircraft.lat === 'number' &&
-    typeof aircraft.lon === 'number' &&
-    !isOnCooldown('overhead', aircraft.hex)
+    typeof aircraft.lon === 'number'
   ) {
     const home = getEffectiveHome();
     if (home) {
       const distanceKmValue = distanceKm(home.lat, home.lon, aircraft.lat, aircraft.lon);
       if (distanceKmValue <= settings.overheadRadiusKm) {
-        markNotified('overhead', aircraft.hex);
-        const overheadInfo = buildOverheadInfo(home, aircraft);
-        notify({
-          title: 'Nearby aircraft',
-          message: overheadDetail(aircraft, overheadInfo),
-          priority: 4,
-          tags: ['airplane'],
-          hex: aircraft.hex,
-        });
-        publishSmartHomeEvent({ reason: 'overhead', aircraft, overheadInfo });
-        // Deliberately NOT emitUiEvent('overhead', ...) -- the on-map
-        // toast/glow feature (v2.1.20) covers the five rules the user
-        // actually asked for (squawk, first-seen, watchlist, range-record,
-        // receiver-silence); overhead-proximity was shipped one release
-        // earlier and wasn't in that list. Nothing structural stops adding
-        // it later -- the kind registry on the client is a plain lookup
-        // table -- this is scope, not a limitation.
+        alertKinds.push('overhead');
+        if (!isOnCooldown('overhead', aircraft.hex)) {
+          markNotified('overhead', aircraft.hex);
+          const overheadInfo = buildOverheadInfo(home, aircraft);
+          notify({
+            title: 'Nearby aircraft',
+            message: overheadDetail(aircraft, overheadInfo),
+            priority: 4,
+            tags: ['airplane'],
+            hex: aircraft.hex,
+          });
+          publishSmartHomeEvent({ reason: 'overhead', aircraft, overheadInfo });
+          const overheadEventDetail = { hex: aircraft.hex, aircraft: aircraftFields(aircraft), overheadInfo };
+          emitUiEvent('overhead', overheadEventDetail);
+          recordEvent('overhead', overheadEventDetail);
+        }
       }
     }
   }

@@ -37,14 +37,15 @@ const RANGES = ['24h', '7d', '31d', '1y', 'all'];
 // The event-history kind filter (Stats -> "Historia zdarzeń") reuses the
 // exact same rule labels already shown as checkboxes on the Notifications
 // settings tab (squawkAlerts/firstSeen/watchlist/circlingAlert/rangeRecord/
-// receiverSilenceAlert) -- no new kind-label strings to keep in sync with
-// those. overhead is deliberately absent: it's never recorded in the
-// history table either (see server/src/notifications/rules.js).
+// receiverSilenceAlert/overheadAlert) -- no new kind-label strings to keep
+// in sync with those. overhead was recorded here starting 2026-08-29,
+// alongside every other rule (see server/src/notifications/rules.js).
 const EVENT_KIND_OPTIONS = [
   { kind: 'squawk', labelKey: 'squawkAlerts' },
   { kind: 'first_seen', labelKey: 'firstSeen' },
   { kind: 'watchlist', labelKey: 'watchlist' },
   { kind: 'circling', labelKey: 'circlingAlert' },
+  { kind: 'overhead', labelKey: 'overheadAlert' },
   { kind: 'range_record', labelKey: 'rangeRecord' },
   { kind: 'receiver_silence', labelKey: 'receiverSilenceAlert' },
 ];

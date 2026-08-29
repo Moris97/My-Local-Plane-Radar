@@ -200,7 +200,7 @@ html, body {
 
 /* Accent per kind (the left border) -- squawk is the one genuinely urgent
    case and is the only toast (alongside #mlpr-connection-status) to use
-   this app's reserved "alarm" red; the other four each get a distinct,
+   this app's reserved "alarm" red; the other kinds each get a distinct,
    non-red color so squawk still reads as the odd one out at a glance. */
 .mlpr-toast-squawk {
   border-left-color: #e02a2a;
@@ -224,6 +224,10 @@ html, body {
 
 .mlpr-toast-circling {
   border-left-color: #b07fdc;
+}
+
+.mlpr-toast-overhead {
+  border-left-color: #dc8a3d;
 }
 
 /* Stats -> "Historia zdarzeń" (stats.js's loadEventHistory). Each row

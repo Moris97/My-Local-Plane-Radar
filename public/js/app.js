@@ -1330,10 +1330,10 @@ function handleSnapshot(snapshot) {
     // lifecycle/title badge -- that module has no map knowledge at all);
     // the *map*-side half of this feature (the one-shot red glow) is
     // handled right here, since it needs aircraftState. Only first-seen
-    // and range-record use it -- squawk/watchlist already get a live glow
-    // from their own alertKinds wire field (see applyAircraftUpdate),
-    // driven by the underlying condition rather than a timer, and
-    // receiver-silence has no aircraft to glow at all.
+    // and range-record use it -- squawk/watchlist/circling/overhead already
+    // get a live glow from their own alertKinds wire field (see
+    // applyAircraftUpdate), driven by the underlying condition rather than
+    // a timer, and receiver-silence has no aircraft to glow at all.
     handleNotificationEvent(snapshot);
     if ((snapshot.kind === 'first_seen' || snapshot.kind === 'range_record') && snapshot.hex) {
       applyTimedAlert(snapshot.hex);
