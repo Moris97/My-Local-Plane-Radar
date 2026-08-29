@@ -622,6 +622,33 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   OpenFreeMap attribution div and the polygon-editor's config window), so
   always set explicit `color` on anything that could sit against an
   unstyled/white background.
+  **Redesigned 2026-08-29** (rounded card, ~26px circular close button,
+  rounded pill chips, a full-width "show more details" button, symmetric
+  `14px 16px` card padding after an earlier version briefly shipped
+  asymmetric padding reserved for the close button that shifted the whole
+  content column off-center). One consequence took two rounds of live
+  reports to fully track down, worth remembering if the popup is touched
+  again: **MapLibre's own `.maplibregl-popup-anchor-*` rules zero exactly
+  one corner of `.maplibregl-popup-content` per anchor direction** (so the
+  tip reads as flush against the card, not floating with a rounded gap at
+  its own corner) — invisible with a small, centered button, but once the
+  "show more details" button went full-width its own near-full-pill
+  `border-radius` sat right next to that one sharp square corner, reading
+  as lopsided even though the button's actual left/right inset from the
+  card is exactly equal (verified directly: `boundingBox()` on a real
+  popup measured 17px/17px both times, matching the CSS's own symmetric
+  padding — the asymmetry was real but visual, not a padding bug at all).
+  Fixed by giving `#mlpr-more-details` a modest `border-radius: 10px`
+  (close to the card's own 14px) instead of a full `999px` pill — softens
+  the corner contrast in every anchor direction without touching
+  MapLibre's own tip-alignment mechanism. The chip pills/badge keep their
+  full `999px` radius since they sit in the middle of the card, nowhere
+  near a corner. Confirmed by rendering the same markup under
+  `anchor-bottom`, `anchor-bottom-left` and `anchor-bottom-right`
+  explicitly and comparing corner crops side by side — the first
+  "symmetric" verification pass had measured a mockup that never applied
+  any anchor class at all, so it never exercised this case; don't repeat
+  that shortcut if this needs re-checking.
 - **Aircraft icon shapes and classification** (`public/js/plane-icons.js` +
   `icon-classify.js`): 17 hand-drawn top-down silhouettes
   (`PLANE_ICON_IDS`), each a single `<path fill="currentColor">` in a shared

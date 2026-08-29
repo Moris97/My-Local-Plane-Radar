@@ -724,7 +724,16 @@ html, body {
   background: #123423;
   color: #7fd8a8;
   border: 1px solid #245c3c;
-  border-radius: 999px;
+  /* Not a full pill (999px) -- reported live 2026-08-29 as visibly lopsided
+     once this button went full-width: MapLibre zeros exactly one bottom
+     corner of .maplibregl-popup-content per anchor direction (so the tip
+     reads as flush against the card, see that rule's own comment above),
+     and a perfect semicircle pill-end sitting right next to a perfectly
+     sharp square corner is the starkest possible version of that contrast.
+     A softer, smaller radius (close to the card's own 14px) still reads as
+     a rounded button but no longer visually clashes with whichever corner
+     happens to be squared off for a given popup. */
+  border-radius: 10px;
   padding: 8px 14px;
   font-size: 12px;
   font-weight: 500;
