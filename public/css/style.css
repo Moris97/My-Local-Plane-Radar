@@ -581,8 +581,13 @@ html, body {
 .mlpr-popup {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  min-width: 170px;
+  gap: 8px;
+  /* Wide enough that a typical 2-3 short chips (type/altitude/speed) pack
+     two per row instead of each wrapping onto its own line -- reported
+     live 2026-08-29 as wasted vertical space with the card visibly wider
+     than its own content. Still wraps (mlpr-popup-chips keeps flex-wrap)
+     for a longer combination on a narrow phone screen. */
+  min-width: 220px;
 }
 
 .mlpr-popup-callsign {
@@ -635,11 +640,15 @@ html, body {
   color: #7fd8a8;
   border: 1px solid #245c3c;
   border-radius: 999px;
-  padding: 6px 14px;
+  padding: 8px 14px;
   font-size: 12px;
   font-weight: 500;
+  text-align: center;
   cursor: pointer;
-  align-self: flex-start;
+  /* No align-self override -- .mlpr-popup's default align-items: stretch
+     (a plain flex column, nothing opts out) already fills the card's full
+     width, requested live 2026-08-29 instead of the old flex-start-sized
+     button leaving empty space beside it. */
   transition:
     background-color 0.15s ease,
     transform 0.1s ease;
