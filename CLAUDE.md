@@ -649,6 +649,25 @@ falls back to "first aircraft," deliberately out of scope for this fix.
   "symmetric" verification pass had measured a mockup that never applied
   any anchor class at all, so it never exercised this case; don't repeat
   that shortcut if this needs re-checking.
+  **Reported again the same day, and that time the padding really was
+  uneven** — a genuinely different cause from the corner-radius one above,
+  measured at **17px left / 3px right**. `.maplibregl-popup-content` is
+  `content-box` (this app sets no global `border-box`) and MapLibre applies
+  its own `maxWidth` default as an inline `max-width: 240px` on the popup
+  *container*, so the content box offered 240 − 32 padding − 2 border =
+  **206px** against `.mlpr-popup`'s `min-width: 220px` — the whole content
+  column overflowed its own padding box by 14px, which only became visible
+  once the "show more details" button went full-width. **`app.js` now
+  passes `maxWidth: 'none'` and `.mlpr-popup` owns the width outright**
+  (`min-width: 220px`, `max-width: min(260px, calc(100vw - 54px))` — the
+  viewport term replaces what MapLibre's cap used to do for phones). The
+  card sizes to its content, so the padding is symmetric by construction
+  whatever those numbers become later; **don't reintroduce a width cap on
+  MapLibre's side** — two owners of one width is what produced this.
+  The earlier "17px/17px, symmetric" measurement was not wrong so much as
+  taken on a mockup with no inline `max-width` on the container, i.e. the
+  one property that caused this — a reconstructed popup must carry
+  MapLibre's inline container styles too, not just its class names.
 - **Aircraft icon shapes and classification** (`public/js/plane-icons.js` +
   `icon-classify.js`): 17 hand-drawn top-down silhouettes
   (`PLANE_ICON_IDS`), each a single `<path fill="currentColor">` in a shared

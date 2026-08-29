@@ -934,8 +934,21 @@ function showInfoPopup(hex) {
   // opens into -- so disabling MapLibre's focus grab entirely here, for
   // both the initial open and every refresh, is correct, not just a
   // workaround.
+  // maxWidth: 'none' hands the popup's width entirely to style.css's own
+  // .mlpr-popup min-width/max-width. MapLibre defaults this to '240px' and
+  // applies it as an inline style on the popup *container*, which our own
+  // .mlpr-popup could not fit inside: the content box is content-box with
+  // 16px padding and a 1px border per side, leaving 206px, while
+  // .mlpr-popup's min-width is 220px -- so the content column overflowed
+  // its own padding box by 14px, measured as a 17px/3px left/right inset on
+  // the full-width "show more details" button (reported live 2026-08-29 as
+  // the button looking off-centre; the earlier round of that report was a
+  // genuinely different, corner-radius issue, see #mlpr-more-details in
+  // style.css). With the cap removed the card sizes to its content, so the
+  // padding is symmetric by construction whatever those values become.
   activePopup = new maplibregl.Popup({
     closeButton: true, closeOnClick: false, offset: popupOffset, focusAfterOpen: false,
+    maxWidth: 'none',
   })
     .setLngLat(state.lastLngLat)
     .setHTML(html)

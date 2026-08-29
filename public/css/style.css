@@ -666,8 +666,21 @@ html, body {
      two per row instead of each wrapping onto its own line -- reported
      live 2026-08-29 as wasted vertical space with the card visibly wider
      than its own content. Still wraps (mlpr-popup-chips keeps flex-wrap)
-     for a longer combination on a narrow phone screen. */
+     for a longer combination on a narrow phone screen.
+     This pair is the *only* thing deciding the popup's width: app.js passes
+     maxWidth: 'none' to the Popup so MapLibre's own inline 240px cap on the
+     container can't clip it. That cap left 206px of content box against
+     this 220px floor, so the whole column overflowed 14px to the right and
+     the full-width button below sat 17px from the card's left edge but 3px
+     from its right -- reported live 2026-08-29. Sizing the card from its
+     content instead keeps the padding symmetric whatever these values are
+     set to later; don't reintroduce a width cap on MapLibre's side. */
   min-width: 220px;
+  /* The viewport term replaces what MapLibre's own 240px cap used to do for
+     small screens: 34px of card chrome (padding + border) plus a 20px
+     margin, so the whole card still fits a phone in portrait. It only bites
+     below a ~314px viewport; everything wider gets the flat 260px. */
+  max-width: min(260px, calc(100vw - 54px));
 }
 
 .mlpr-popup-callsign {
