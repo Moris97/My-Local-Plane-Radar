@@ -986,9 +986,13 @@ where it is stored**:
 | Server | Settings password, server port, receiver location | SQLite (shared), **password-gated** |
 
 Smart Home was folded into Notifications (was its own sixth tab, overflowed
-the tab row sized for five). The merged tab shows rule toggles plus two
-buttons — **Configure notifications** and **Configure smart home** — each
-opening a subview in place, with a Back button. **The whole Notifications
+the tab row sized for five). The merged tab shows the two buttons —
+**Configure notifications** and **Configure smart home** — at the very top
+(v2.3.10, on request: delivery setup comes first), each opening a subview
+in place with a Back button; below them the rule toggles, then the watch
+list and circling-alert sections, **each carrying its own master toggle**
+(`watchedEnabled`/`circlingEnabled`) rather than in the rule list. The
+ntfy subview links the ntfy app on Google Play, F-Droid and the App Store. **The whole Notifications
 tab is now password-gated, on explicit request (2026-08-29) — widened from
 the original narrower split**, where only the Smart Home subview checked
 `passwordSet && !getStoredToken()` while rule toggles/ntfy topic/watch list

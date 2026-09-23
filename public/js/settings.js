@@ -306,6 +306,12 @@ async function renderNotificationsTab(root, onUnlock) {
          here is what brings the tab row back to five, which is what the
          .mlpr-settings-tabs layout was sized for in the first place. -->
     <div id="mlpr-notif-main">
+      <!-- Delivery setup first (moved to the top on request): without a
+           configured ntfy app nothing below reaches a phone at all. -->
+      <div class="mlpr-notif-config-actions">
+        <button type="button" id="mlpr-notif-configure">${t('configureNotifications')}</button>
+        <button type="button" id="mlpr-smarthome-configure">${t('configureSmartHome')}</button>
+      </div>
       <fieldset class="mlpr-settings-group">
         <legend>${t('notifications')}</legend>
         <label><input type="checkbox" id="mlpr-notif-squawk"> ${t('squawkAlerts')}</label>
@@ -315,7 +321,6 @@ async function renderNotificationsTab(root, onUnlock) {
           <label><input type="checkbox" id="mlpr-notif-squawk-7700"> 7700</label>
         </div>
         <label><input type="checkbox" id="mlpr-notif-firstseen"> ${t('firstSeen')}</label>
-        <label><input type="checkbox" id="mlpr-notif-watched"> ${t('watchlist')}</label>
         <label><input type="checkbox" id="mlpr-notif-rangerecord"> ${t('rangeRecord')}</label>
         <label><input type="checkbox" id="mlpr-notif-receiversilence"> ${t('receiverSilenceAlert')}</label>
         <div class="mlpr-checkbox-row">
@@ -330,13 +335,15 @@ async function renderNotificationsTab(root, onUnlock) {
         </div>
       </fieldset>
 
-      <!-- Directly under the "Watched aircraft" toggle it configures,
-           deliberately on this main view rather than behind "Configure
-           notifications" (which holds ntfy *delivery* settings only) --
-           the list is what that checkbox actually means, so hiding it a
-           click away separated a toggle from its own subject. -->
+      <!-- The watch list, with its own master "Watched aircraft" toggle
+           at the top (moved here out of the rule list on request, same as
+           the circling alert below) -- deliberately on this main view
+           rather than behind "Configure notifications" (which holds ntfy
+           *delivery* settings only): the list is what that checkbox
+           actually means. -->
       <fieldset class="mlpr-settings-group">
         <legend>${t('watchlist')}</legend>
+        <label><input type="checkbox" id="mlpr-notif-watched"> ${t('watchlist')}</label>
         <div id="mlpr-watchlist-items"></div>
         <div class="mlpr-watch-form">
           <select id="mlpr-watch-type">
@@ -397,10 +404,6 @@ async function renderNotificationsTab(root, onUnlock) {
         </table>
       </fieldset>
 
-      <div class="mlpr-notif-config-actions">
-        <button type="button" id="mlpr-notif-configure">${t('configureNotifications')}</button>
-        <button type="button" id="mlpr-smarthome-configure">${t('configureSmartHome')}</button>
-      </div>
     </div>
     <div id="mlpr-notif-subview" style="display:none"></div>
   `;
@@ -466,6 +469,11 @@ function renderNotificationsConfig(root, onUnauthorized) {
       <legend>ntfy</legend>
       <p class="mlpr-home-status">${t('ntfyInstructions')}</p>
       <p class="mlpr-ntfy-topic" id="mlpr-ntfy-topic">…</p>
+      <p class="mlpr-ntfy-apps">${t('ntfyGetApp')}
+        <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener noreferrer">Google Play</a> ·
+        <a href="https://f-droid.org/packages/io.heckel.ntfy/" target="_blank" rel="noopener noreferrer">F-Droid</a> ·
+        <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener noreferrer">App Store</a>
+      </p>
       <div class="mlpr-home-actions">
         <button type="button" id="mlpr-ntfy-regenerate">${t('regenerateTopic')}</button>
       </div>
