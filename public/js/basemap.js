@@ -10,6 +10,9 @@ const OFFLINE_PALETTES = {
     rivers: '#1f4f73',
     cityFill: '#bcd7e8',
     cityStroke: '#05070a',
+    airport: '#e0b84a',
+    airportText: '#e8e2cc',
+    airportHalo: '#05070a',
   },
   light: {
     background: '#eef1ec',
@@ -18,6 +21,9 @@ const OFFLINE_PALETTES = {
     rivers: '#1f4f73',
     cityFill: '#1f3d52',
     cityStroke: '#eef1ec',
+    airport: '#9a6a00',
+    airportText: '#3a2f14',
+    airportHalo: '#eef1ec',
   },
 };
 
@@ -94,6 +100,105 @@ export function addOfflineLayers(map, theme) {
       paint: layer.paint,
     });
   }
+  addOfflineAirportLayer(map, theme);
+}
+
+// Major/mid airports from Natural Earth (scripts/fetch-mapdata.mjs), offline
+// mode only -- online mode already gets airports from OpenFreeMap's tiles.
+// The offline style has no glyph server (and must not reach for one), so a
+// plain text-field is out: each label is drawn onto a canvas by the
+// browser's own font stack and handed to MapLibre as an *icon*
+// (`styleimagemissing`, generated lazily the first time MapLibre needs a
+// given id). An icon-only symbol layer never requests glyphs, and still
+// gets MapLibre's own collision handling, so a dense region thins out to
+// the most important airports (symbol-sort-key = Natural Earth's rank)
+// rather than piling labels on top of each other. The IATA code alone
+// until AIRPORT_NAME_ZOOM, code plus name after.
+const AIRPORT_LAYER_ID = 'ne-airports';
+const AIRPORT_IMAGE_PREFIX = 'mlpr-apt|';
+const AIRPORT_MIN_ZOOM = 5;
+const AIRPORT_NAME_ZOOM = 8;
+const airportImageWatchArmed = new WeakSet();
+
+function addOfflineAirportLayer(map, theme) {
+  if (!airportImageWatchArmed.has(map)) {
+    airportImageWatchArmed.add(map);
+    map.on('styleimagemissing', (event) => {
+      if (!event.id.startsWith(AIRPORT_IMAGE_PREFIX) || map.hasImage(event.id)) return;
+      const image = drawAirportImage(event.id);
+      if (image) map.addImage(event.id, image.data, { pixelRatio: image.pixelRatio });
+    });
+  }
+
+  const idFor = (withName) => [
+    'concat',
+    `${AIRPORT_IMAGE_PREFIX}${theme}|`,
+    ['to-string', ['get', 'major']],
+    '|',
+    ['coalesce', ['get', 'code'], ''],
+    '|',
+    withName ? ['coalesce', ['get', 'name'], ''] : '',
+  ];
+
+  map.addSource(AIRPORT_LAYER_ID, { type: 'geojson', data: '/mapdata/airports.geojson' });
+  map.addLayer({
+    id: AIRPORT_LAYER_ID,
+    type: 'symbol',
+    source: AIRPORT_LAYER_ID,
+    minzoom: AIRPORT_MIN_ZOOM,
+    layout: {
+      'icon-image': ['step', ['zoom'], idFor(false), AIRPORT_NAME_ZOOM, idFor(true)],
+      // The dot is at the image's left edge, not its centre -- anchor
+      // there so it sits on the airport's real coordinate.
+      'icon-anchor': 'left',
+      'icon-offset': [-AIRPORT_DOT_RADIUS_PX - 1, 0],
+      'symbol-sort-key': ['get', 'rank'],
+    },
+  });
+}
+
+const AIRPORT_DOT_RADIUS_PX = 4;
+
+// Parses the id built by idFor above: prefix, theme, major, code, name.
+function drawAirportImage(id) {
+  if (typeof document === 'undefined') return null;
+  const [, theme, major, code, name] = id.split('|');
+  const palette = OFFLINE_PALETTES[theme] ?? OFFLINE_PALETTES.dark;
+  const label = name ? `${code} · ${name}` : code;
+  const pixelRatio = Math.max(1, Math.round(globalThis.devicePixelRatio || 1));
+  const font = `${major === 'true' ? 600 : 500} 11px system-ui, sans-serif`;
+
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.font = font;
+  const dotBox = AIRPORT_DOT_RADIUS_PX * 2 + 2;
+  const textX = dotBox + 3;
+  const width = Math.ceil(textX + ctx.measureText(label).width + 3);
+  const height = 16;
+
+  canvas.width = width * pixelRatio;
+  canvas.height = height * pixelRatio;
+  ctx.scale(pixelRatio, pixelRatio);
+
+  const radius = major === 'true' ? AIRPORT_DOT_RADIUS_PX : AIRPORT_DOT_RADIUS_PX - 1;
+  ctx.beginPath();
+  ctx.arc(dotBox / 2, height / 2, radius, 0, Math.PI * 2);
+  ctx.fillStyle = palette.airport;
+  ctx.fill();
+  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = palette.airportHalo;
+  ctx.stroke();
+
+  ctx.font = font;
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = palette.airportHalo;
+  ctx.strokeText(label, textX, height / 2);
+  ctx.fillStyle = palette.airportText;
+  ctx.fillText(label, textX, height / 2);
+
+  return { data: ctx.getImageData(0, 0, canvas.width, canvas.height), pixelRatio };
 }
 
 // Set once per page load the first time the online basemap fails (preflight

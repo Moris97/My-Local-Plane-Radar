@@ -301,6 +301,20 @@ falls back to "first aircraft," deliberately out of scope for this fix.
     schema — it intentionally does not inherit from their ready-made styles.
   - **Offline**: Natural Earth 1:10m GeoJSON, ~20 MB, public domain. Fetched
     by `scripts/fetch-mapdata.sh` at install time — never committed.
+    Includes **major/mid airports** (`airports.geojson`, Natural Earth's own
+    `ne_10m_airports`, ~870 worldwide, v2.3.8) — chosen over the Overpass/
+    OSM export `TODO.md` originally proposed because it's public domain
+    (OSM is ODbL and would have brought an attribution requirement into
+    offline mode) and needs no flaky query service. **The offline style has
+    no glyph server**, so labels can't be a `text-field`: `basemap.js`
+    draws each label (dot + IATA code, plus the name from zoom 8) onto a
+    canvas with the browser's own fonts and supplies it as an *icon* via
+    `styleimagemissing` (image id encodes theme/major/code/name, parsed
+    back by `drawAirportImage`). An icon-only symbol layer never requests
+    glyphs and still gets MapLibre's collision handling, ordered by
+    `symbol-sort-key` = Natural Earth rank. `install.sh` fetches just this
+    layer (`fetch-mapdata.sh --only airports`) on installs whose basemap
+    predates it.
   - **Map theme** (`mapTheme`, default `light`, values `light`/`dark`/
     `auto`): independent of `basemapMode`. `auto` follows sunrise/sunset at
     the receiver — `app.js`'s `resolveMapTheme` resolves it before anything

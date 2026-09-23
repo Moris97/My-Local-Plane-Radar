@@ -36,6 +36,9 @@ npm ci --omit=dev
 if [ ! -d "$REPO_ROOT/data/naturalearth" ]; then
   echo "Fetching basemap data..."
   ./scripts/fetch-mapdata.sh
+elif [ ! -f "$REPO_ROOT/data/naturalearth/airports.geojson" ]; then
+  echo "Fetching offline airport layer..."
+  ./scripts/fetch-mapdata.sh --only airports || echo "Could not fetch the airport layer (offline?) -- skipping, the offline map just won't show airports until this is re-run." >&2
 fi
 
 if [ ! -f "$REPO_ROOT/data/airlines.json" ]; then

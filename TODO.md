@@ -167,7 +167,10 @@ Added to as they come up; picked up in a later stage when relevant.
   live install with a blank map and dead buttons, reported live. Root
   cause and fix are documented in `notification-content.js`'s own header
   comment; the practical lesson is in CLAUDE.md now too.
-- **Major airports shown on the offline basemap** (effort: small, impact:
+- ~~**Major airports shown on the offline basemap**~~ **Done, 2026-09-23
+  (v2.3.8)** — built from Natural Earth's own airport set instead of an
+  Overpass query (public domain, no attribution needed offline); see
+  CLAUDE.md's Basemap section. Original note: (effort: small, impact:
   medium, priority: low) — offline mode's Natural Earth layer
   (`scripts/fetch-mapdata.sh`, coastlines/borders/rivers/major cities) has
   no airports at all; online mode already gets them for free from

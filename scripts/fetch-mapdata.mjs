@@ -27,6 +27,27 @@ const LAYERS = [
     keepProps: ['name', 'nameascii'],
     filter: (props) => (props.scalerank ?? 99) <= 4,
   },
+  {
+    // Natural Earth's own airport set -- public domain like everything
+    // else here, so the offline map still needs no data attribution (an
+    // OSM/Overpass export would have been ODbL and brought an attribution
+    // requirement into offline mode). Already curated to notable airports
+    // (~900 worldwide); 'small', 'spaceport' and military-only fields are
+    // dropped, keeping the 'major'/'mid' ones (including joint civil/
+    // military, e.g. "major and military").
+    name: 'airports',
+    url: `${NE_BASE}/cultural/ne_10m_airports.json`,
+    keepProps: ['name', 'code', 'major', 'rank'],
+    filter: (props) => /\b(major|mid)\b/.test(props.type ?? '') && props.type !== 'military mid' && props.type !== 'military major',
+    // Shorter property names the offline layer reads directly: the label
+    // is the IATA code, falling back to ICAO for the few without one.
+    transform: (props) => ({
+      name: props.name,
+      code: props.iata_code || props.gps_code || props.abbrev,
+      major: /\bmajor\b/.test(props.type),
+      rank: props.scalerank ?? 9,
+    }),
+  },
 ];
 
 function roundCoordinates(coords, precision) {
@@ -48,10 +69,11 @@ async function processLayer(layer) {
     .filter((feature) => feature.geometry !== null)
     .filter((feature) => !layer.filter || layer.filter(feature.properties))
     .map((feature) => {
+      const source = layer.transform ? layer.transform(feature.properties) : feature.properties;
       const properties = {};
       for (const key of layer.keepProps) {
-        if (feature.properties[key] !== undefined) {
-          properties[key] = feature.properties[key];
+        if (source[key] !== undefined) {
+          properties[key] = source[key];
         }
       }
       return {
@@ -70,7 +92,13 @@ async function processLayer(layer) {
 async function main() {
   await mkdir(OUTPUT_DIR, { recursive: true });
 
-  for (const layer of LAYERS) {
+  // `--only airports` fetches just the named layer(s) -- lets install.sh
+  // add a layer introduced after an install's basemap was first fetched
+  // without re-downloading the rest.
+  const onlyIndex = process.argv.indexOf('--only');
+  const only = onlyIndex >= 0 ? new Set(process.argv.slice(onlyIndex + 1)) : null;
+
+  for (const layer of LAYERS.filter((l) => !only || only.has(l.name))) {
     const geojson = await processLayer(layer);
     const outPath = new URL(`${layer.name}.geojson`, OUTPUT_DIR);
     await writeFile(outPath, JSON.stringify(geojson));

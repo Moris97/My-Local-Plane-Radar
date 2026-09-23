@@ -177,6 +177,7 @@ For working on MLPR itself, or trying it out without a real receiver
 ```
 npm install
 ./scripts/fetch-mapdata.sh   # one-time: downloads the offline basemap (~12 MB) into data/naturalearth/
+./scripts/fetch-mapdata.sh --only airports   # existing installs: adds just the offline airport layer (v2.3.8+)
 npm start                    # MLPR_PORT (default 1090), MLPR_SOURCE=file|http|replay
 ```
 
