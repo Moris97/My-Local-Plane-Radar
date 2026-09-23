@@ -1,4 +1,5 @@
 import { normalizeAircraft } from './normalize.js';
+import { sanitizeAircraft, forgetAircraftSanity, resetSanityState } from './position-sanity.js';
 
 const EVICTION_MS = 5 * 60 * 1000;
 
@@ -59,6 +60,10 @@ export function applyRawSnapshot(rawSnapshot) {
   for (const raw of rawAircraft) {
     const aircraft = normalizeAircraft(raw);
     if (!aircraft) continue;
+    // Before change detection: a rejected impossible jump is swapped for
+    // the last accepted value here, so it never forces a resend and never
+    // reaches the map, trails, statistics or rules (position-sanity.js).
+    sanitizeAircraft(aircraft, now);
 
     const entry = tracked.get(aircraft.hex);
     // An aircraft that was announced as removed is re-announced on its
@@ -74,6 +79,7 @@ export function applyRawSnapshot(rawSnapshot) {
   for (const [hex, entry] of tracked) {
     if (now - entry.lastPolledAt > EVICTION_MS) {
       tracked.delete(hex);
+      forgetAircraftSanity(hex);
       continue;
     }
     // Announced once, on the tick readsb first stops offering it, rather
@@ -96,4 +102,5 @@ export function getTrackedAircraft() {
 
 export function resetTrackedState() {
   tracked.clear();
+  resetSanityState();
 }

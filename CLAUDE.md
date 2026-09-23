@@ -136,6 +136,27 @@ targets, alert/spi/emergency) are tracked; receiver/signal-quality metrics
 and computed secondary stats (rssi, messages, seen, nic/rc/nac/sil/gva/sda,
 wd/ws/oat/tat) are volatile.
 
+### Implausible-reading filter (`server/src/position-sanity.js`, v2.3.11)
+
+`state.js` runs `sanitizeAircraft` on every aircraft every poll, **before**
+change detection, so a physically impossible jump never reaches the map,
+the server trail, range/antenna statistics or the rules. Position: rejected
+if it implies more than 1500 kt plus 3 km slack (MLAT noise), with elapsed
+time taken from readsb's `seen_pos` (decode time), not poll time. Altitude:
+rejected beyond 40,000 ft/min plus 500 ft slack, `onGround` counting as 0.
+**A rejected value is replaced by the last accepted one, not deleted**
+(deleting lat/lon would read downstream as "position lost"), and the
+substituted position's `seenPos` is re-aged to that fix's real decode time
+so the browser's `REMOVE_MS` ageing still sees the true age. **Recovery**:
+consecutive rejects that agree with each other take over as the new
+reference (2 distinct decodes for position, 3 readings for altitude), so a
+bad *first* fix can't lock an aircraft out forever; readsb re-reporting one
+glitched fix with a growing `seen_pos` resolves to the same decode instant
+and never confirms itself. Each rejection logs one `implausible_reading`
+line (rare by nature — the way to see it working on a live receiver).
+Note for dev: a looping `ReplaySource` fixture set will trip this at the
+wrap-around point; that's expected.
+
 ### `receiver.json` and `stats.json` (siblings of `aircraft.json`)
 
 Each `Source` exposes `fetchReceiverInfo()` and `fetchStats()`, resolved as
