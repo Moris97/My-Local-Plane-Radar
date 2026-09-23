@@ -398,16 +398,18 @@ export function evaluateAircraftRules(aircraft, now = Date.now()) {
   // a disabled rule doing per-tick position/heading bookkeeping for every
   // moving aircraft on the off chance it gets re-enabled later isn't worth
   // the always-on cost on a Pi 3 for a feature nobody asked to keep warm.
-  // isCirclingRelevant is checked at the same gate, for the same reason --
-  // a light aircraft doing routine circuit training (reported live as the
-  // overwhelming majority of what this rule was firing on before this
-  // check existed) gets no window built for it at all, not just no
-  // notification once one's detected.
+  // isCirclingRelevant (the user's per-class military/civil table) is
+  // checked at the same gate, for the same reason -- an excluded class
+  // (by default light aircraft doing routine circuit training, reported
+  // live as the overwhelming majority of what this rule fired on before
+  // the filter existed) gets no window built for it at all, not just no
+  // notification once one's detected. Last in the chain because it's the
+  // one check here that isn't a plain field test (type-table lookup).
   if (
     settings.circlingEnabled &&
-    isCirclingRelevant(aircraft) &&
     typeof aircraft.lat === 'number' &&
-    typeof aircraft.lon === 'number'
+    typeof aircraft.lon === 'number' &&
+    isCirclingRelevant(aircraft, settings.circlingTypes)
   ) {
     const circling = recordAndCheckCircling(aircraft.hex, aircraft, now);
     if (circling) {

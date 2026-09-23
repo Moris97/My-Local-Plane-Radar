@@ -2804,3 +2804,48 @@ a:focus-visible,
     opacity: 0.85;
   }
 }
+
+/* Circling alert's per-class military/non-military table (Settings ->
+   Notifications). Explicit colors throughout -- see the color-scheme: dark
+   note in CLAUDE.md about inherited text defaulting to light-on-light. */
+.mlpr-circling-types-hint {
+  margin: 0 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #9fc0b1;
+}
+
+.mlpr-circling-types {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: #d8e6df;
+}
+
+.mlpr-circling-types th,
+.mlpr-circling-types td {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(61, 220, 132, 0.12);
+}
+
+.mlpr-circling-types thead th {
+  font-weight: 600;
+  color: #8fb3a2;
+  text-align: center;
+}
+
+.mlpr-circling-types thead th:first-child,
+.mlpr-circling-types tbody th {
+  text-align: left;
+  font-weight: normal;
+}
+
+.mlpr-circling-types td {
+  text-align: center;
+  width: 28%;
+}
+
+.mlpr-circling-types input[type='checkbox'] {
+  margin: 0;
+  cursor: pointer;
+}

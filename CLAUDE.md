@@ -1329,6 +1329,22 @@ periodic sweep as trail history (`index.js`, one shared `activeHexes` set,
 same "still in `state.js`'s tracked set" definition of stale
 `evictStaleTrails` already uses).
 
+**Since v2.3.7 the allowlist below is user-editable**: Settings →
+Notifications has its own "Circling aircraft alert" section (same shape as
+the watch list — toggle stays with the other rules, config gets a
+fieldset) with a table of aircraft classes × military/non-military
+checkboxes. `public/js/circling-types.js` is a pure leaf module shared by
+the browser (renders rows) and the server (`isCirclingRelevant(aircraft,
+settings.circlingTypes)`), mapping `icon-classify.js`'s `classifyIconKind`
+result onto 9 classes (narrowbody, widebody, bizjet, cargo, helicopter,
+light, fighter, glider, other) — built on the icon chain rather than raw
+`category` because category has no notion of "cargo". The server loads
+`public/data/icon-types.json` itself on first use. Stored as
+`circlingTypes` in `notificationSettings`, merged per class on PUT (like
+`squawkCodes`), missing classes/columns filled from defaults that
+reproduce the v2.2.3 allowlist described next. Checked last in the rule's
+gate (after position), since it's a type-table lookup, not a field test.
+
 **`isCirclingRelevant(aircraft)` (v2.2.3) — an allowlist by aircraft
 category/military status, gating whether the geometry above is even
 checked at all.** The glider false-positive documented when this shipped

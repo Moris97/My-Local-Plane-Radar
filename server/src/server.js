@@ -40,6 +40,7 @@ import { getAllTimeMaxRangeKm, resetAllTimeMaxRangeKm, squawkMeaningFor, buildOv
 import { ALTITUDE_BANDS, getAltitudeBandStats, getSectorStats, getLatestSignal, clearAntennaStats, getAntennaStatsRevision } from './antenna-stats.js';
 import { destinationPoint, distanceKm, roundKm } from './range.js';
 import { clearRangeSamples } from './stats-history.js';
+import { CIRCLING_TYPE_CLASSES } from '../../public/js/circling-types.js';
 
 const VALID_STATS_RANGES = new Set(['24h', '7d', '31d', '1y', 'all']);
 
@@ -675,6 +676,27 @@ export async function buildServer({ logger = true } = {}) {
         return reply.code(400).send({ error: 'overheadRadiusKm must be a positive number' });
       }
       patch.overheadRadiusKm = body.overheadRadiusKm;
+    }
+
+    if ('circlingTypes' in body) {
+      const value = body.circlingTypes;
+      if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+        return reply.code(400).send({ error: 'circlingTypes must be an object of class -> {military, civil}' });
+      }
+      for (const [cls, columns] of Object.entries(value)) {
+        if (!CIRCLING_TYPE_CLASSES.includes(cls)) {
+          return reply.code(400).send({ error: `unknown circling type class: ${cls}` });
+        }
+        if (typeof columns !== 'object' || columns === null) {
+          return reply.code(400).send({ error: 'circlingTypes values must be objects' });
+        }
+        for (const [column, flag] of Object.entries(columns)) {
+          if ((column !== 'military' && column !== 'civil') || typeof flag !== 'boolean') {
+            return reply.code(400).send({ error: 'circlingTypes columns must be military/civil booleans' });
+          }
+        }
+      }
+      patch.circlingTypes = value;
     }
 
     if ('squawkCodes' in body) {

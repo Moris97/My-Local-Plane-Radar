@@ -215,3 +215,34 @@ test('any military aircraft is relevant, even a light one that would otherwise b
 test('a high-performance category (A6) alone is not relevant -- an unreliable proxy for military', () => {
   assert.equal(isCirclingRelevant({ category: 'A6' }), false);
 });
+
+// The per-class military/civil table (public/js/circling-types.js) that
+// replaced the fixed allowlist -- the tests above cover its defaults, these
+// cover a user-edited table.
+const CARGO_ONLY = Object.fromEntries(
+  ['narrowbody', 'widebody', 'bizjet', 'cargo', 'helicopter', 'light', 'fighter', 'glider', 'other'].map((cls) => [
+    cls,
+    { military: cls === 'cargo', civil: cls === 'cargo' },
+  ]),
+);
+
+test('a cargo-only table keeps cargo types (by type code) and drops everything else', () => {
+  assert.equal(isCirclingRelevant({ typeCode: 'C130', military: true }, CARGO_ONLY), true);
+  assert.equal(isCirclingRelevant({ typeCode: 'IL76' }, CARGO_ONLY), true);
+  assert.equal(isCirclingRelevant({ typeCode: 'B738', category: 'A3' }, CARGO_ONLY), false);
+  assert.equal(isCirclingRelevant({ typeCode: 'F16', military: true }, CARGO_ONLY), false);
+  assert.equal(isCirclingRelevant({ category: 'A7' }, CARGO_ONLY), false);
+});
+
+test('military and civil columns are independent for the same class', () => {
+  const table = { helicopter: { military: false, civil: true } };
+  assert.equal(isCirclingRelevant({ category: 'A7' }, table), true);
+  assert.equal(isCirclingRelevant({ category: 'A7', military: true }, table), false);
+});
+
+test('a partial table falls back to defaults for every class it leaves out', () => {
+  const table = { light: { civil: true } };
+  assert.equal(isCirclingRelevant({ typeCode: 'C172' }, table), true);
+  assert.equal(isCirclingRelevant({ category: 'A3' }, table), true); // narrowbody default on
+  assert.equal(isCirclingRelevant({ category: 'B1' }, table), false); // glider default off
+});

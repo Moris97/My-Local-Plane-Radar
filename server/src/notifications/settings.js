@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import { DEFAULT_CIRCLING_TYPES, resolveCirclingTypes } from '../../../public/js/circling-types.js';
 import { getConfig, setConfig, getConfigJSON, setConfigJSON } from '../db.js';
 
 const SETTINGS_KEY = 'notificationSettings';
@@ -49,10 +50,15 @@ const DEFAULT_SETTINGS = {
   // circling-detector.js's own doc comment for why that isn't solved
   // algorithmically).
   circlingEnabled: true,
+  // Per-class military/civil checkboxes for whose circling notifies
+  // (public/js/circling-types.js). Merged per class on update, like
+  // squawkCodes, so one checkbox click never resets the rest of the table.
+  circlingTypes: DEFAULT_CIRCLING_TYPES,
 };
 
 export function getNotificationSettings() {
-  return { ...DEFAULT_SETTINGS, ...getConfigJSON(SETTINGS_KEY, {}) };
+  const stored = getConfigJSON(SETTINGS_KEY, {});
+  return { ...DEFAULT_SETTINGS, ...stored, circlingTypes: resolveCirclingTypes(stored.circlingTypes) };
 }
 
 export function updateNotificationSettings(patch) {
@@ -61,8 +67,17 @@ export function updateNotificationSettings(patch) {
     ...current,
     ...patch,
     squawkCodes: { ...current.squawkCodes, ...(patch.squawkCodes ?? {}) },
+    circlingTypes: mergeCirclingTypes(current.circlingTypes, patch.circlingTypes),
   };
   setConfigJSON(SETTINGS_KEY, next);
+  return next;
+}
+
+function mergeCirclingTypes(current, patch) {
+  const next = { ...current };
+  for (const [cls, columns] of Object.entries(patch ?? {})) {
+    next[cls] = { ...current[cls], ...columns };
+  }
   return next;
 }
 

@@ -1163,3 +1163,15 @@ test('a military aircraft with no useful category still fires -- the military fl
   assert.equal(circlingNotifications().length, 1);
   assert.ok(kinds.includes('circling'));
 });
+
+test('the circling type table from notification settings reaches through the full rule', () => {
+  updateNotificationSettings({ circlingTypes: { light: { civil: true }, narrowbody: { civil: false } } });
+  try {
+    feedOrbit('cessna-allowed', { aircraft: { category: 'A1' } });
+    assert.equal(circlingNotifications().length, 1);
+    feedOrbit('airliner-blocked', { aircraft: { category: 'A3' } });
+    assert.equal(circlingNotifications().length, 1);
+  } finally {
+    updateNotificationSettings({ circlingTypes: { light: { civil: false }, narrowbody: { civil: true } } });
+  }
+});

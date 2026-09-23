@@ -1,4 +1,11 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { distanceKm } from '../range.js';
+import { classifyIconKind, setIconTypes } from '../../../public/js/icon-classify.js';
+import { isCirclingTypeEnabled } from '../../../public/js/circling-types.js';
+
+const ICON_TYPES_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'public', 'data', 'icon-types.json');
 
 // An aircraft that keeps turning through more than a full circle while
 // staying roughly in the same *region* of sky is usually doing something
@@ -60,42 +67,40 @@ const MAX_RADIUS_KM = 75;
 // that rate (20 min * 60 = 1200), with margin.
 const MAX_SAMPLES_PER_HEX = 1500;
 
-// ADS-B emitter category values (readsb's own `category` field, e.g.
-// 'A2', 'B1' -- see icon-classify.js's CATEGORY_MAP for the full table
-// this project already relies on elsewhere) that this rule considers
-// worth flagging when circling. Requested explicitly after the first
-// version of this rule shipped and turned out to fire constantly on
-// routine light-aircraft circuit training (a Cessna 172 and similar,
-// category A1) -- not just gliders (B1, already excluded by the same
-// mechanism). Rather than a denylist of "known uninteresting" categories
-// (which would need updating every time a new uninteresting category came
-// up -- balloons, parachutists, ultralights, drones...), this is the
-// opposite: an allowlist of what *is* interesting, so anything not
-// explicitly recognised is excluded by default.
+// Whose circling is worth a notification at all is the user's call, per
+// aircraft class and military/civil status -- the table in Settings ->
+// Notifications (public/js/circling-types.js, shared with the browser so
+// both read the same rows). It replaced a fixed allowlist (v2.2.3: A2-A5,
+// A7, or military) that had been requested after this rule first fired
+// constantly on routine light-aircraft circuit training; the table's
+// defaults reproduce that allowlist, so an install that never opens it
+// behaves as before. The class comes from icon-classify.js's
+// classifyIconKind, the same chain that picks the marker's silhouette --
+// type code first (which is what makes "cargo" answerable at all; the
+// ADS-B category field has no such notion), category as its fallback.
 //
-// A2-A5 (small/large/high-vortex-large/heavy) covers regional turboprops,
-// business jets, and airliners of every size the category standard
-// distinguishes -- it does not split "airliner" from "bizjet" any finer
-// than by weight, and neither does this. A7 (rotorcraft) is unconditional
-// -- every helicopter, any size -- since a police/air-ambulance helicopter
-// orbiting a scene is the original, flagship use case this whole rule was
-// built for. A1 (light) and A6 (high performance -- aerobatic aircraft as
-// much as fast jets, an unreliable proxy for "military") are deliberately
-// left out of this set; a genuinely military aircraft of any size or
-// category is still caught by the separate military check below, which
-// doesn't depend on the category value at all.
-const RELEVANT_CATEGORIES = new Set(['A2', 'A3', 'A4', 'A5', 'A7']);
-
 // aircraft.military comes from the type/registration database (dbFlags
 // bit 1, see normalize.js), not the live ADS-B broadcast -- it only
 // resolves at all if the receiver has readsb's --db-file configured (see
-// CLAUDE.md's Production deployment section); an install without it never
-// sees this flag set for anyone, military or not, same pre-existing
-// dependency the aircraft details panel's registration/type tiles already
-// have.
-export function isCirclingRelevant(aircraft) {
-  if (aircraft.military) return true;
-  return RELEVANT_CATEGORIES.has(aircraft.category);
+// CLAUDE.md's Production deployment section); without it every aircraft
+// reads as non-military and only that column of the table applies.
+let iconTypesLoaded = false;
+
+function ensureIconTypesLoaded() {
+  if (iconTypesLoaded) return;
+  iconTypesLoaded = true;
+  try {
+    setIconTypes(JSON.parse(readFileSync(ICON_TYPES_PATH, 'utf8')));
+  } catch {
+    // Missing/corrupt table -- classification falls back to the category
+    // link alone, same as the browser does when its fetch fails.
+  }
+}
+
+export function isCirclingRelevant(aircraft, circlingTypes) {
+  ensureIconTypesLoaded();
+  const { icon } = classifyIconKind(aircraft);
+  return isCirclingTypeEnabled(circlingTypes, icon, Boolean(aircraft.military));
 }
 
 const history = new Map(); // hex -> [{ t, trackDeg, lat, lon }, ...]

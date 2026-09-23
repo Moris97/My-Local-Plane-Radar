@@ -9,6 +9,19 @@ import { isOnlineFallbackActive } from './basemap.js';
 import { formatDistance, distanceUnitLabel, kmToDisplayDistance, displayDistanceToKm } from './units.js';
 import { openAreaEditor } from './area-editor.js';
 import { SOUND_PRESETS, playNotificationSound } from './notification-sound.js';
+import { CIRCLING_TYPE_CLASSES } from './circling-types.js';
+
+const CIRCLING_CLASS_LABEL_KEYS = {
+  narrowbody: 'circlingClassNarrowbody',
+  widebody: 'circlingClassWidebody',
+  bizjet: 'circlingClassBizjet',
+  cargo: 'circlingClassCargo',
+  helicopter: 'circlingClassHelicopter',
+  light: 'circlingClassLight',
+  fighter: 'circlingClassFighter',
+  glider: 'circlingClassGlider',
+  other: 'circlingClassOther',
+};
 
 // Mirrors server/src/antenna-stats.js's ALTITUDE_BANDS, index for index --
 // only the translated label text lives here, the actual band boundaries are
@@ -350,6 +363,36 @@ async function renderNotificationsTab(root, onUnlock) {
         </div>
         <p id="mlpr-watch-area-summary" class="mlpr-home-status"></p>
         <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
+      </fieldset>
+
+      <!-- Same shape as the watch list above: the rule's on/off stays with
+           the other toggles, its configuration gets its own section. One
+           row per aircraft class (circling-types.js, shared with the
+           server's rule so both read the same rows), one checkbox per
+           military/non-military column. -->
+      <fieldset class="mlpr-settings-group">
+        <legend>${t('circlingAlert')}</legend>
+        <p class="mlpr-circling-types-hint">${t('circlingTypesHint')}</p>
+        <table class="mlpr-circling-types">
+          <thead>
+            <tr>
+              <th scope="col">${t('circlingTypeColumn')}</th>
+              <th scope="col">${t('circlingMilitaryColumn')}</th>
+              <th scope="col">${t('circlingCivilColumn')}</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${CIRCLING_TYPE_CLASSES.map((cls) => {
+              const label = t(CIRCLING_CLASS_LABEL_KEYS[cls]);
+              return `
+            <tr>
+              <th scope="row">${label}</th>
+              <td><input type="checkbox" data-circling-class="${cls}" data-circling-column="military" aria-label="${label} -- ${t('circlingMilitaryColumn')}"></td>
+              <td><input type="checkbox" data-circling-class="${cls}" data-circling-column="civil" aria-label="${label} -- ${t('circlingCivilColumn')}"></td>
+            </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </fieldset>
 
       <div class="mlpr-notif-config-actions">
@@ -1020,6 +1063,7 @@ function wireNotificationToggles(container, onUnauthorized) {
   const notifOverheadRadiusEl = container.querySelector('#mlpr-notif-overhead-radius');
   container.querySelector('#mlpr-notif-overhead-radius-unit').textContent = distanceUnitLabel(getSettings().units);
   const notifCirclingEl = container.querySelector('#mlpr-notif-circling');
+  const circlingTypeInputs = container.querySelectorAll('input[data-circling-class]');
 
   async function loadNotificationSettings() {
     const response = await authedFetch('/api/notifications/settings', undefined, onUnauthorized);
@@ -1042,6 +1086,9 @@ function wireNotificationToggles(container, onUnauthorized) {
     const displayRadius = kmToDisplayDistance(data.overheadRadiusKm, getSettings().units);
     notifOverheadRadiusEl.value = String(Math.round(displayRadius * 100) / 100);
     notifCirclingEl.checked = data.circlingEnabled;
+    for (const input of circlingTypeInputs) {
+      input.checked = Boolean(data.circlingTypes?.[input.dataset.circlingClass]?.[input.dataset.circlingColumn]);
+    }
   }
 
   async function putNotificationSettings(patch) {
@@ -1084,6 +1131,14 @@ function wireNotificationToggles(container, onUnauthorized) {
   notifCirclingEl.addEventListener('change', (event) =>
     putNotificationSettings({ circlingEnabled: event.target.checked }),
   );
+  // One class/column per PUT -- the server merges it into the stored
+  // table, so a click never overwrites the rest of it.
+  for (const input of circlingTypeInputs) {
+    input.addEventListener('change', (event) => {
+      const { circlingClass, circlingColumn } = event.target.dataset;
+      putNotificationSettings({ circlingTypes: { [circlingClass]: { [circlingColumn]: event.target.checked } } });
+    });
+  }
 
   loadNotificationSettings();
 }
