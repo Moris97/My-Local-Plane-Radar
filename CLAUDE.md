@@ -1344,10 +1344,10 @@ same "still in `state.js`'s tracked set" definition of stale
 `evictStaleTrails` already uses).
 
 **Since v2.3.7 the allowlist below is user-editable**: Settings →
-Notifications has its own "Circling aircraft alert" section (same shape as
-the watch list — toggle stays with the other rules, config gets a
-fieldset) with a table of aircraft classes × military/non-military
-checkboxes. `public/js/circling-types.js` is a pure leaf module shared by
+Notifications has its own "Circling aircraft alert" section (like the
+watch list, but the rule's master `circlingEnabled` checkbox lives inside
+it, moved out of the rule list on request in v2.3.9) with a table of
+aircraft classes × military/civil checkboxes. `public/js/circling-types.js` is a pure leaf module shared by
 the browser (renders rows) and the server (`isCirclingRelevant(aircraft,
 settings.circlingTypes)`), mapping `icon-classify.js`'s `classifyIconKind`
 result onto 9 classes (narrowbody, widebody, bizjet, cargo, helicopter,

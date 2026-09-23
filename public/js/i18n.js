@@ -163,12 +163,12 @@ const DICTIONARIES = {
     toastAllNotifications: 'All notifications →',
     circlingAlert: 'Circling aircraft alert',
     circlingAlertHint:
-      'Notifies when an aircraft turns through a full circle or more while staying roughly in one place -- often overwatch, a survey flight, or a search. Which aircraft types count is set in the "Circling aircraft alert" section below.',
+      'Notifies when an aircraft turns through a full circle or more while staying roughly in one place -- often overwatch, a survey flight, or a search. Which aircraft types count is set in the table below.',
     circlingTypesHint:
-      'Choose which aircraft types a circling alert is sent for, separately for military and non-military aircraft. By default light aircraft and gliders are off -- they are almost always routine training circuits or thermalling. Military status needs readsb\'s aircraft database (--db-file); without it every aircraft counts as non-military.',
+      'Choose which aircraft types a circling alert is sent for, separately for military and civil aircraft. By default light aircraft and gliders are off -- they are almost always routine training circuits or thermalling. Military status needs readsb\'s aircraft database (--db-file); without it every aircraft counts as civil.',
     circlingTypeColumn: 'Type',
     circlingMilitaryColumn: 'Military',
-    circlingCivilColumn: 'Non-military',
+    circlingCivilColumn: 'Civil',
     circlingClassNarrowbody: 'Airliner (narrow-body)',
     circlingClassWidebody: 'Airliner (wide-body)',
     circlingClassBizjet: 'Business jet',
@@ -544,12 +544,12 @@ const DICTIONARIES = {
     toastAllNotifications: 'Wszystkie powiadomienia →',
     circlingAlert: 'Alert krążącego samolotu',
     circlingAlertHint:
-      'Powiadamia, gdy samolot wykona pełny obrót (lub więcej), pozostając mniej więcej w jednym miejscu -- często obserwacja z powietrza, lot pomiarowy albo poszukiwania. Których typów to dotyczy, ustawisz w sekcji „Alert krążącego samolotu” poniżej.',
+      'Powiadamia, gdy samolot wykona pełny obrót (lub więcej), pozostając mniej więcej w jednym miejscu -- często obserwacja z powietrza, lot pomiarowy albo poszukiwania. Których typów to dotyczy, ustawisz w tabeli poniżej.',
     circlingTypesHint:
-      'Wybierz, dla jakich typów samolotów wysyłać alert o krążeniu, osobno dla wojskowych i niewojskowych. Domyślnie małe samoloty i szybowce są wyłączone -- to niemal zawsze rutynowe kręgi treningowe albo krążenie w kominie termicznym. Rozpoznanie wojskowych wymaga bazy samolotów readsb (--db-file); bez niej każdy samolot liczy się jako niewojskowy.',
+      'Wybierz, dla jakich typów samolotów wysyłać alert o krążeniu, osobno dla wojskowych i cywilnych. Domyślnie małe samoloty i szybowce są wyłączone -- to niemal zawsze rutynowe kręgi treningowe albo krążenie w kominie termicznym. Rozpoznanie wojskowych wymaga bazy samolotów readsb (--db-file); bez niej każdy samolot liczy się jako cywilny.',
     circlingTypeColumn: 'Typ',
     circlingMilitaryColumn: 'Wojskowy',
-    circlingCivilColumn: 'Niewojskowy',
+    circlingCivilColumn: 'Cywilny',
     circlingClassNarrowbody: 'Pasażerski (wąskokadłubowy)',
     circlingClassWidebody: 'Pasażerski (szerokokadłubowy)',
     circlingClassBizjet: 'Biznesowy',

@@ -328,10 +328,6 @@ async function renderNotificationsTab(root, onUnlock) {
             <span id="mlpr-notif-overhead-radius-unit"></span>
           </label>
         </div>
-        <div class="mlpr-checkbox-row">
-          <label><input type="checkbox" id="mlpr-notif-circling"> ${t('circlingAlert')}</label>
-          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('circlingAlertHint')}</span></button>
-        </div>
       </fieldset>
 
       <!-- Directly under the "Watched aircraft" toggle it configures,
@@ -365,13 +361,19 @@ async function renderNotificationsTab(root, onUnlock) {
         <p id="mlpr-watch-error" class="mlpr-gate-error"></p>
       </fieldset>
 
-      <!-- Same shape as the watch list above: the rule's on/off stays with
-           the other toggles, its configuration gets its own section. One
+      <!-- Own section, like the watch list above, but with its master
+           on/off inside it rather than in the rule list. One
            row per aircraft class (circling-types.js, shared with the
            server's rule so both read the same rows), one checkbox per
            military/non-military column. -->
       <fieldset class="mlpr-settings-group">
         <legend>${t('circlingAlert')}</legend>
+        <!-- The rule's master switch lives here, with the table it governs,
+             rather than in the rule list above (moved on request). -->
+        <div class="mlpr-checkbox-row">
+          <label><input type="checkbox" id="mlpr-notif-circling"> ${t('circlingAlert')}</label>
+          <button type="button" class="mlpr-info-icon">i<span class="mlpr-tooltip">${t('circlingAlertHint')}</span></button>
+        </div>
         <p class="mlpr-circling-types-hint">${t('circlingTypesHint')}</p>
         <table class="mlpr-circling-types">
           <thead>
